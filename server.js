@@ -1,43 +1,34 @@
 // Basic WhatsApp Webhook Server for Mr. Car
-
-const express = require( "express" );
-const bodyParser = require( "body-parser" ); 
+const express = require("express");
+const bodyParser = require("body-parser");
 
 const app = express();
 app.use(bodyParser.json());
 
-// ✅ Replace with your chosen verify token
-const VERIFY_TOKEN = "MrCarVerify123";
+// ✅ Replace with your token (must match what you type in Meta Dashboard)
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "MrCarSecure2025";
 
-// ✅ Webhook verification (Meta will call this)
+// Webhook verification (Meta will call this)
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode && token === VERIFY_TOKEN) {
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
     console.log("✅ Webhook verified successfully");
-    res.status(200).send(challenge);
+    return res.status(200).send(challenge);
   } else {
-    res.sendStatus(403);
+    console.log("❌ Verification failed");
+    return res.sendStatus(403);
   }
 });
 
-
-// ✅ Message receiver
+// Handle webhook messages (POST)
 app.post("/webhook", (req, res) => {
-  const body = req.body;
-  console.log("Incoming message:", JSON.stringify(body, null, 2));
-
-  // Always respond 200 to Meta to confirm receipt
+  console.log("Incoming webhook:", JSON.stringify(req.body, null, 2));
   res.status(200).send("EVENT_RECEIVED");
 });
 
-// ✅ Run local server
+// Run server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log (` Mr. Car Webhook running on port ${PORT}`));
-
-
-
-
-
+app.listen(PORT, () => console.log(`🚗 Mr. Car Webhook running on port ${PORT}`));
