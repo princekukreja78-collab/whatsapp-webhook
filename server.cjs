@@ -1,66 +1,81 @@
-/*
-  server.cjs - CommonJS WhatsApp webhook (for Node with "type":"module" in package.json)
-  - Single CRM_URL declaration
-  - No top-level await
-  - Safe forwarding to CRM with axios
-*/
+// server.cjs — Final production-safe WhatsApp webhook relay
 
-const express = require('express');
-const axios = require('axios');
-require('dotenv').config();
+const express = require("express");
+const bodyParser = require("body-parser");
+const axios = require("axios");
+require("dotenv").config();
 
 const app = express();
-app.use(express.json());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// single CRM_URL (fallback)
-const CRM_URL = process.env.CRM_URL || 'http://localhost:4000';
+// === Configuration ===
+const PORT = process.env.PORT || 10000;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "MrCarSecure2025";
+const CRM_URL = process.env.CRM_URL || "http://localhost:4000"; // optional CRM forward target
 
-// verification endpoint (Meta webhook verification)
-app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'testtoken';
-
-  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('Webhook verified');
-    return res.status(200).send(challenge);
-  }
-  return res.sendStatus(403);
+// === 1. Basic health check ===
+app.get("/", (req, res) => {
+  res.status(200).send("✅ WhatsApp Webhook server running fine.");
 });
 
-// webhook receiver - forward to CRM
-app.post('/webhook', async (req, res) => {
-  try {
-    console.log('Incoming webhook payload:', JSON.stringify(req.body).slice(0, 1000));
-    // Forward the payload to CRM
-    await axios.post(CRM_URL.replace(/\/$/, '') + '/api/record', req.body, {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 10000,
-    });
-    // Respond 200 so Meta/WhatsApp considers it received
-    return res.status(200).send('EVENT_RECEIVED');
-  } catch (err) {
-    console.error('Error forwarding to CRM:', err?.response?.data || err?.message || err);
-    // Still reply 200 to avoid webhook retries if CRM is flaky, you can change to 500 if you want retries
-    return res.status(200).send('EVENT_RECEIVED');
+// === 2. Meta verification route ===
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  console.log("📥 Verification request:", { mode, token, challenge });
+  console.log("📌 VERIFY_TOKEN in server:", VERIFY_TOKEN);
+
+  if (mode && token) {
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+      console.log("✅ Webhook verified successfully!");
+      return res.status(200).send(challenge);
+    } else {
+      console.log("⛔ Token mismatch! Check Render env VERIFY_TOKEN.");
+      return res.status(403).send("Forbidden");
+    }
+  } else {
+    return res.status(400).send("Bad Request");
   }
 });
 
-// small test route
-app.get('/', (req, res) => res.send('WhatsApp webhook server (OK)'));
-
-// start server inside async wrapper (no top-level await)
-async function main() {
+// === 3. Handle incoming WhatsApp messages ===
+app.post("/webhook", async (req, res) => {
   try {
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => {
-      console.log(`🚀 Server listening on port ${PORT}`);
-    });
-  } catch (err) {
-    console.error('Startup error:', err);
-    process.exit(1);
-  }
-}
+    console.log("📨 Incoming payload:", JSON.stringify(req.body, null, 2));
 
-main();
+    const entry = req.body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const message = changes?.value?.messages?.[0];
+
+    if (message) {
+      const from = message.from;
+      const text = message.text?.body || "";
+      console.log(`💬 Message from ${from}: ${text}`);
+
+      // (Optional) Forward to your CRM
+      const recordUrl = `${CRM_URL.replace(/\/$/, "")}/api/record`;
+      await axios.post(recordUrl, { from, text }, { timeout: 10000 });
+    }
+
+    res.status(200).send("EVENT_RECEIVED");
+  } catch (err) {
+    console.error("❌ Error processing POST:", err.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+// === 4. Fallback route ===
+app.all("*", (req, res) => {
+  console.log("⚠️ Unknown route:", req.method, req.originalUrl);
+  res.status(404).send("Not Found");
+});
+
+// === 5. Start server ===
+app.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
+
+
