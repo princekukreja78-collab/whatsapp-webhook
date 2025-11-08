@@ -1,0 +1,191 @@
+// ===== Mr. Car x Signature Savings Webhook (FINAL – OpenAI only) =====
+require('dotenv').config({ path: './.env' });
+
+const express = require('express');
+const fs = require('fs');
+const crypto = require('crypto');
+const bodyParser = require('body-parser');
+
+const app = express();
+
+// Capture raw body for signature verification
+function rawBodySaver(req, res, buf, encoding) {
+  if (buf && buf.length) req.rawBody = buf.toString(encoding || 'utf8');
+}
+app.use(bodyParser.json({ verify: rawBodySaver }));
+
+// Env vars
+const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || process.env.VERIFY_TOKEN || '';
+const APP_SECRET   = process.env.META_APP_SECRET   || process.env.APP_SECRET   || '';
+const PHONE_ID     = process.env.WHATSAPP_PHONE_ID || process.env.PHONE_NUMBER_ID || process.env.PHONE_ID || '';
+const META_TOKEN   = process.env.META_TOKEN        || process.env.WA_TOKEN     || '';
+const CRM_URL      = process.env.CRM_URL || 'http://localhost:3000';
+const PORT         = process.env.PORT || 3000;
+const DB_FILE      = process.env.DB_FILE || './crm_db.json';
+const SKIP_SIGNATURE = process.env.SKIP_SIGNATURE === "1";
+
+// Verify Meta signature
+function verifySignature(req) {
+  if (!APP_SECRET) return true;
+  const sig = req.headers['x-hub-signature-256'];
+  if (!sig || !req.rawBody) return false;
+  const hmac = crypto.createHmac('sha256', APP_SECRET);
+  hmac.update(req.rawBody);
+  const digest = 'sha256=' + hmac.digest('hex');
+  try { return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(sig)); }
+  catch { return false; }
+}
+
+// Webhook verify
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('✅ Webhook verified');
+    return res.status(200).send(challenge);
+  }
+  res.status(403).send('Verification failed');
+});
+
+app.get('/', (_,res)=>res.send("OK"));
+app.get('/health', (_,res)=>res.json({ ok:true, time:new Date().toISOString() }));
+
+// Greeting logic
+function getGreeting(from, text) {
+  const greetings = ['hi','hello','hey','namaste','good morning','good evening','good afternoon'];
+  const isGreeting = greetings.some(g=>text.toLowerCase().includes(g));
+  let db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE,'utf8')) : {};
+  db.sessions = db.sessions || {};
+  const session = db.sessions[from];
+  const now = Date.now();
+  if (!session || now-session.lastActive>10*60*1000 || isGreeting) {
+    db.sessions[from] = { lastActive: now };
+    fs.writeFileSync(DB_FILE, JSON.stringify(db,null,2));
+    return "Namaste (🙏) Mr. Car welcomes you. We can assist you with pre-owned cars, the finest new car deals, automotive loans, and insurance services. For your enquiry, our team is ready to assist you instantly and ensure a seamless experience.";
+  }
+  db.sessions[from].lastActive = now;
+  fs.writeFileSync(DB_FILE, JSON.stringify(db,null,2));
+  return null;
+}
+
+// WhatsApp inbound
+app.post('/webhook', async (req,res)=>{
+  try {
+    if (!verifySignature(req)) return res.sendStatus(403);
+    const entry = req.body?.entry?.[0];
+    const msg = entry?.changes?.[0]?.value?.messages?.[0];
+    if (!msg) return res.sendStatus(200);
+
+    const from  = msg.from;
+    const text  = msg?.text?.body || '';
+
+    // Send greeting first, but DO NOT return — continue to AI
+    const greet = getGreeting(from, text);
+    if (greet) await sendText(from, greet);
+
+    // forward to local /prompt brain
+    let reply = "AI temporarily unavailable.";
+    try {
+      const r = await fetch(`${CRM_URL}/prompt`,{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({from,message:text})
+      });
+      if (r.ok) { const j = await r.json(); reply = j.reply || reply; }
+      else console.error('CRM /prompt not ok:', r.status);
+    } catch(e){ console.error('CRM error:', e.message); }
+
+    await sendText(from, reply);
+    res.sendStatus(200);
+  } catch (e) {
+    console.error('Webhook error:', e);
+    res.sendStatus(500);
+  }
+});
+
+// Send WA message
+async function sendText(to,msg){
+  if(!PHONE_ID||!META_TOKEN){console.warn("⚠️ Missing PHONE_ID or META_TOKEN");return}
+  const url=`https://graph.facebook.com/v17.0/${PHONE_ID}/messages`;
+  const body={ messaging_product:"whatsapp", to:String(to).replace(/\D/g,''), type:"text", text:{body:msg}};
+  try{
+    const resp = await fetch(url,{
+      method:"POST",
+      headers:{Authorization:`Bearer ${META_TOKEN}`,"Content-Type":"application/json"},
+      body:JSON.stringify(body)
+    });
+    const txt = await resp.text();
+    if(!resp.ok) console.error('Meta send error:', resp.status, txt);
+    else console.log('✅ Meta send success:', txt);
+  }catch(e){ console.error("WA Send Err:",e.message); }
+}
+
+// /prompt (OpenAI brain only)
+app.post('/prompt', async (req,res)=>{
+  try{
+    const {message}=req.body||{};
+    const OA_KEY=process.env.OPENAI_API_KEY;
+    if(!OA_KEY) return res.json({reply:"AI temporarily unavailable."});
+
+    const MODEL=process.env.OPENAI_MODEL||"gpt-4o-mini";
+    const sys="You are Signature Savings auto consultant. Be crisp, professional, and luxury tone. If user asks for prices, ask city and variant if missing.";
+
+    const r=await fetch("https://api.openai.com/v1/chat/completions",{
+      method:"POST",
+      headers:{Authorization:`Bearer ${OA_KEY}`,"Content-Type":"application/json"},
+      body:JSON.stringify({
+        model:MODEL,
+        messages:[{role:"system",content:sys},{role:"user",content:message||""}],
+        max_tokens:250
+      })
+    });
+
+    const j=await r.json();
+    console.log("DEBUG OpenAI status:", r.status, "body:", JSON.stringify(j).slice(0,300));
+    if(!r.ok) return res.json({reply:"AI temporarily unavailable."});
+
+    const text=j?.choices?.[0]?.message?.content?.trim();
+    return res.json({reply:text || "…"});
+
+  }catch(err){
+    console.error("/prompt fatal:",err);
+    return res.json({reply:"AI temporarily unavailable."});
+  }
+});
+
+app.listen(PORT,()=>console.log(`🚀 Running on ${PORT}`));
+
+// --- DEV-ONLY: webhook-test (no signature) ---
+app.post('/webhook-test', async (req, res) => {
+  try {
+    const entry = req.body?.entry?.[0];
+    const msg = entry?.changes?.[0]?.value?.messages?.[0];
+    if (!msg) return res.sendStatus(200);
+
+    const from  = msg.from;
+    const text  = msg?.text?.body || '';
+
+    // Send greeting first (no early return)
+    const greet = getGreeting(from, text);
+    if (greet) await sendText(from, greet);
+
+    // forward to local /prompt brain
+    let reply = "AI temporarily unavailable.";
+    try {
+      const r = await fetch(`${CRM_URL}/prompt`,{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({from,message:text})
+      });
+      if (r.ok) { const j = await r.json(); reply = j.reply || reply; }
+      else console.error('CRM /prompt not ok (test):', r.status);
+    } catch(e){ console.error('CRM error (test):', e.message); }
+
+    await sendText(from, reply);
+    res.sendStatus(200);
+  } catch (e) {
+    console.error('Webhook-test error:', e);
+    res.sendStatus(500);
+  }
+});

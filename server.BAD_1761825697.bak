@@ -1,0 +1,247 @@
+
+// ===== Mr. Car x Signature Savings Webhook (FINAL – OpenAI only) =====
+require('dotenv').config({ path: './.env' });
+
+const express = require('express');
+const fs = require('fs');
+const crypto = require('crypto');
+const fetch = require('node-fetch');
+const bodyParser = require('body-parser');
+
+const app = express();
+
+// Capture raw body for signature verification
+function rawBodySaver(req, res, buf, encoding) {
+  if (buf && buf.length) req.rawBody = buf.toString(encoding || 'utf8');
+}
+app.use(bodyParser.json({ verify: rawBodySaver }));
+
+// --- Environment variables ---
+const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || process.env.VERIFY_TOKEN || '';
+const APP_SECRET   = process.env.META_APP_SECRET   || process.env.APP_SECRET   || '';
+const PHONE_ID     = process.env.WHATSAPP_PHONE_ID || process.env.PHONE_NUMBER_ID || process.env.PHONE_ID || '';
+const META_TOKEN   = process.env.META_TOKEN        || process.env.WA_TOKEN     || '';
+const CRM_URL      = process.env.CRM_URL || 'http://localhost:3000';
+const PORT         = process.env.PORT || 3000;
+const DB_FILE      = process.env.DB_FILE || './crm_db.json';
+
+// --- Verify Meta Signature ---
+function verifySignature(req) {
+  if (!APP_SECRET) return true; // skip locally if not set
+  const sig = req.headers['x-hub-signature-256'];
+  if (!sig || !req.rawBody) return false;
+  const hmac = crypto.createHmac('sha256', APP_SECRET);
+  hmac.update(req.rawBody);
+  const digest = 'sha256=' + hmac.digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(sig));
+  } catch {
+    return false;
+  }
+}
+
+// --- Webhook Verification (GET) ---
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('✅ Webhook verified');
+    return res.status(200).send(challenge);
+  }
+  return res.status(403).send('Verification failed');
+});
+
+// --- Health endpoints ---
+app.get('/', (req, res) => res.send('OK'));
+app.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+
+// --- Incoming Message Handler (POST) ---
+app.post('/webhook', async (req, res) => {
+  try {
+    if (!verifySignature(req)) {
+      console.warn('❌ Signature verification failed');
+      return res.sendStatus(403);
+    }
+
+    const body = req.body;
+    console.log('Incoming webhook body:', JSON.stringify(body, null, 2));
+    const entry = (body.entry && body.entry[0]) || null;
+    const change = entry && entry.changes && entry.changes[0];
+    const value = change ? change.value : (body && body.object ? body : null);
+    const messages = value && value.messages;
+
+    if (!messages || messages.length === 0) return res.sendStatus(200);
+
+    const msg = messages[0];
+    const from = msg.from;
+    const text = (msg.text && msg.text.body) || '';
+
+    // --- Mr. Car Greeting Logic ---
+    function getGreetingIfNeeded(from, messageText) {
+      const greetings = ['hi', 'hello', 'hey', 'namaste', 'good morning', 'good evening', 'good afternoon'];
+      const isGreeting = greetings.some(g => messageText.toLowerCase().includes(g));
+      const dbPath = DB_FILE;
+      let db = {};
+      if (fs.existsSync(dbPath)) db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+      db.sessions = db.sessions || {};
+      const session = db.sessions[from];
+      const now = Date.now();
+
+      // greet if first time / 10+ min idle / explicit greeting
+      if (!session || now - session.lastActive > 10 * 60 * 1000 || isGreeting) {
+        db.sessions[from] = { lastActive: now };
+        fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+        return "Namaste (🙏) Mr. Car welcomes you. We can assist you with pre-owned cars, the finest new car deals, automotive loans, and insurance services. For your enquiry, our team is ready to assist you instantly and ensure a seamless experience.";
+      }
+
+      db.sessions[from].lastActive = now;
+      fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+      return null;
+    }
+
+    // --- Auto-send Greeting ---
+    const greetingText = getGreetingIfNeeded(from, text);
+    if (greetingText) {
+      await sendTextMessage(from, greetingText);
+      return res.sendStatus(200);
+    }
+
+    // --- Forward to CRM (Signature Savings GPT) ---
+    let crmJson = { reply: 'Sorry, no CRM response', type: 'text' };
+    try {
+      const crmResp = await fetch(`${CRM_URL}/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, message: text }),
+      });
+      if (crmResp.ok) crmJson = await crmResp.json();
+      else console.error('CRM /prompt not ok:', crmResp.status);
+    } catch (e) {
+      console.error('CRM error:', e.message);
+    }
+
+    const replyText = crmJson.reply || 'Temporary issue, please retry.';
+    await sendTextMessage(from, replyText);
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('Webhook handler error:', err);
+    res.sendStatus(500);
+  }
+});
+
+// --- Helper: Send message via WhatsApp Cloud API ---
+async function sendTextMessage(to, messageText) {
+  if (!PHONE_ID || !META_TOKEN) {
+    console.warn('⚠️ Missing PHONE_ID or META_TOKEN');
+    return;
+  }
+  const toClean = String(to).replace(/\D/g, '');
+  const url = `https://graph.facebook.com/v17.0/${PHONE_ID}/messages`;
+  const body = {
+    messaging_product: 'whatsapp',
+    to: toClean,
+    type: 'text',
+    text: { body: messageText },
+  };
+  console.log('➡️ Sending message:', JSON.stringify(body));
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${META_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const txt = await resp.text();
+  if (!resp.ok) console.error('Meta send error:', resp.status, txt);
+  else console.log('✅ Meta send success:', txt);
+}
+
+// --- CRM snapshot routes (optional) ---
+app.get('/crm', (req, res) => {
+  try {
+    const data = fs.existsSync(DB_FILE)
+      ? JSON.parse(fs.readFileSync(DB_FILE, 'utf8'))
+      : {};
+    res.json(data);
+  } catch {
+    res.json({});
+  }
+});
+
+app.post('/update', (req, res) => {
+  try {
+    const { system_prompt, pricing_data, tone, reply_signature } = req.body;
+    const newData = {
+      system_prompt,
+      pricing_data,
+      tone,
+      reply_signature,
+      last_updated: new Date().toISOString(),
+    };
+    fs.writeFileSync(DB_FILE, JSON.stringify(newData, null, 2));
+    console.log('✅ CRM updated:', newData);
+    res.status(200).send('CRM updated successfully');
+  } catch (e) {
+    console.error('CRM update error:', e);
+    res.status(500).send('CRM update failed');
+  }
+});
+
+// --- /prompt endpoint (OpenAI-only, with clear logging) ---
+app.post('/prompt', async (req, res) => {
+  try {
+    const { from, message } = req.body || {};
+    const db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) : {};
+    const systemPrompt = db.system_prompt || "You are Signature Savings assistant. Be professional, concise, and sound luxurious.";
+    const politeFallback = db.reply_signature || "Namaste (🙏) Mr. Car welcomes you. We can assist you with pre-owned cars, the finest new car deals, automotive loans, and insurance services. For your enquiry, our team is ready to assist you instantly and ensure a seamless experience.";
+
+    const OA_KEY = process.env.OPENAI_API_KEY || "";
+    if (!OA_KEY) {
+      console.error("OPENAI key missing at runtime");
+      return res.json({ reply: politeFallback, type: "text" });
+    }
+
+    // Choose model here (or via env OPENAI_MODEL)
+    const MODEL = process.env.OPENAI_MODEL || "gpt-3.5-turbo";
+    console.log("ENGINE_USED: OPENAI (" + MODEL + ")");
+
+    const oaResp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OA_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: message || "" },
+        ],
+        max_tokens: 250,
+      }),
+    });
+
+    const oaJson = await oaResp.json();
+    console.log("DEBUG OpenAI status:", oaResp.status, "body:", JSON.stringify(oaJson).slice(0,300));
+
+    if (!oaResp.ok) {
+      return res.json({ reply: politeFallback, type: "text" });
+    }
+
+    const text = oaJson?.choices?.[0]?.message?.content?.trim();
+    if (text) return res.json({ reply: text, type: "text" });
+
+    console.warn("OpenAI empty response");
+    return res.json({ reply: politeFallback, type: "text" });
+  } catch (err) {
+    console.error("/prompt fatal error:", err);
+    return res.json({ reply: "Namaste (🙏) Mr. Car welcomes you. We’ll assist you right away.", type: "text" });
+  }
+});
+
+app.listen(PORT, () =>
+  console.log(`🚀 Webhook server running on port ${PORT}`)
+);
+JS

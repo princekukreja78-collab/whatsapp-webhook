@@ -1,0 +1,125 @@
+// Clean working WhatsApp webhook server (CommonJS)
+
+const express = require("express");
+const bodyParser = require("body-parser");
+const axios = require("axios");
+require("dotenv").config();
+
+const app = express();
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+const PORT = process.env.PORT || 10000;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "MrCarSecure2025";
+const CRM_URL = process.env.CRM_URL || "http://localhost:4000";
+
+// ---- Health check ----
+app.get("/", (req, res) => res.status(200).send("✅ WhatsApp Webhook running fine."));
+
+// ---- Meta verification ----
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  console.log("📥 Verification request:", { mode, token, challenge });
+  console.log("📌 VERIFY_TOKEN in server:", VERIFY_TOKEN);
+
+  if (mode && token) {
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+      console.log("✅ Webhook verified successfully!");
+      return res.status(200).send(challenge);
+    } else {
+      console.log("⛔ Token mismatch! Check Render env VERIFY_TOKEN.");
+      return res.status(403).send("Forbidden");
+    }
+  } else {
+    return res.status(400).send("Bad Request");
+  }
+});
+
+// ---- Incoming messages ----
+app.post("/webhook", async (req, res) => {
+  try {
+    console.log("📨 Incoming payload:", JSON.stringify(req.body, null, 2));
+// Professional bold Mr.CAR welcome (WhatsApp plain-text friendly)
+const PROFESSIONAL_WELCOME = `Namaste 🙏
+𝗠𝗿. 𝗖𝗔𝗥 welcomes you.
+We specialize in pre-owned cars, new car procurement, auto financing, and insurance services.
+Please share your requirement in a professional manner so our team can assist you promptly.`;
+
+// send as text (uses your existing sendTextMessage function)
+try {
+  await sendTextMessage(from, PROFESSIONAL_WELCOME);
+} catch (err) {
+  console.warn("Failed to send welcome:", err && err.message ? err.message : err);
+}
+
+    const entry = req.body?.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const message = changes?.value?.messages?.[0];
+
+    if (message) {
+      const from = message.from;
+      const text = message.text?.body || "";
+      console.log(`💬 Message from ${from}: ${text}`);
+
+      // optional CRM forward (non-blocking)
+      if (CRM_URL) {
+        const recordUrl = `${CRM_URL.replace(/\/$/, "")}/prompt`;
+        try {
+          await axios.post(recordUrl, { from, text }, { timeout: 8000 });
+        } catch (err) {
+          console.warn("⚠️ CRM forward failed:", err.message);
+        }
+      }
+    }
+
+    // acknowledge Meta
+    return res.status(200).send("EVENT_RECEIVED");
+  } catch (err) {
+    console.error("❌ Error processing POST:", err.message);
+    return res.status(500).send("Internal Server Error");
+  }
+});
+
+// ---- Fallback ----
+app.post("/update", (req, res) => {
+  try {
+    const { system_prompt, pricing_data, tone } = req.body;
+    const newData = {
+      system_prompt,
+      pricing_data,
+      tone,
+      last_updated: new Date().toISOString()
+    };
+    fs.writeFileSync("crm_state.json", JSON.stringify(newData, null, 2));
+    console.log("✅ CRM updated:", newData);
+    res.status(200).send("CRM updated successfully");
+  } catch (err) {
+    console.error("❌ CRM update failed:", err);
+    res.status(500).send("Update failed");
+  }
+});
+app.all(/.*/, (req, res) => {
+  console.log("⚠️ Unknown route:", req.method, req.originalUrl);
+  res.status(404).send("Not Found");
+});
+
+// ====== CRM Live Sync (Signature Savings GPT Update) ======
+const fs = require("fs");
+
+
+// ====== Persistent Logging ======
+app.use((req, res, next) => {
+  const logEntry = `${new Date().toISOString()} ${req.method} ${req.originalUrl}\n`;
+  fs.appendFileSync("server.log", logEntry);
+  next();
+});
+// ---- Start server ----
+app.listen(PORT, () => {
+
+// --- ADDED MINIMAL /webhook HANDLER ---
+app.post(\"/webhook\", async (req,res)=>{ console.log(\"-- minimal webhook hit --\"); console.log(JSON.stringify(req.body||{},null,2)); res.status(200).send(\"EVENT_RECEIVED\"); });
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
