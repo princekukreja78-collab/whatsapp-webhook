@@ -1,381 +1,250 @@
-// ===== Mr. Car x Signature Savings Webhook (FINAL – OpenAI only) =====
-require('dotenv').config({ path: './.env' });
-const fetch = global.fetch || ((...args) => import(\node-fetch).then(({ default: f }) => f(...args)));
-
+/*
+  Minimal MR.CAR CRM webhook (CommonJS)
+  - healthz
+  - webhook POST handler (Meta shape)
+  - CSV loader + variant matching (deterministic)
+  - admin reload endpoint
+  - CRM prompt & lead post helpers
+*/
+require('dotenv').config();
 const express = require('express');
+const fetch = global.fetch || require('node-fetch');
+const { parse } = require('csv-parse/sync'); // we assume csv-parse is installed
 const fs = require('fs');
-const crypto = require('crypto');
-const bodyParser = require('body-parser');
 
 const app = express();
+app.use(express.json({ limit: '1mb' }));
 
-// Capture raw body for signature verification
-function rawBodySaver(req, res, buf, encoding) {
-  if (buf && buf.length) req.rawBody = buf.toString(encoding || 'utf8');
-}
-app.use(bodyParser.json({ verify: rawBodySaver }));
+const PORT = process.env.PORT || 10000;
+const DEBUG = process.env.DEBUG_VARIANT === 'true' || false;
 
-// Env vars
-const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || process.env.VERIFY_TOKEN || '';
-const APP_SECRET   = process.env.META_APP_SECRET   || process.env.APP_SECRET   || '';
-const PHONE_ID     = process.env.WHATSAPP_PHONE_ID || process.env.PHONE_NUMBER_ID || process.env.PHONE_ID || '';
-const META_TOKEN   = process.env.META_TOKEN        || process.env.WA_TOKEN     || '';
-const CRM_URL      = process.env.CRM_URL || 'http://localhost:3000';
-const PORT         = process.env.PORT || 3000;
-const DB_FILE      = process.env.DB_FILE || './crm_db.json';
-const SKIP_SIGNATURE = process.env.SKIP_SIGNATURE === "1";
+const CRM_URL = (process.env.CRM_URL || '').trim();
+const CRM_API_KEY = (process.env.CRM_API_KEY || '').trim();
+const META_TOKEN = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
+const PHONE_NUMBER_ID = (process.env.PHONE_NUMBER_ID || '').trim();
+const ADMIN_WA = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
 
-// Verify Meta signature
-function verifySignature(req) {
-  if (!APP_SECRET) return true;
-  const sig = req.headers['x-hub-signature-256'];
-  if (!sig || !req.rawBody) return false;
-  const hmac = crypto.createHmac('sha256', APP_SECRET);
-  hmac.update(req.rawBody);
-  const digest = 'sha256=' + hmac.digest('hex');
-  try { return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(sig)); }
-  catch { return false; }
-}
+const SHEET_TOYOTA_CSV_URL = (process.env.SHEET_TOYOTA_CSV_URL || '').trim();
+const PRICING_CACHE_MS = 3 * 60 * 1000;
+let PRICING_CACHE = { ts: 0, tables: {} };
 
-// Webhook verify
-app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('✅ Webhook verified');
-    return res.status(200).send(challenge);
-  }
-  res.status(403).send('Verification failed');
-});
+// ---------------- helpers ----------------
+function log(...args){ if (DEBUG) console.log('[DEBUG]', ...args); }
+function normForMatch(s=''){ return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim(); }
+function fmtMoney(n){ const x = Number(String(n).replace(/[,₹\s]/g,'')); if (!isFinite(x)) return '-'; return x.toLocaleString('en-IN'); }
 
-app.get('/', (_,res)=>res.send("OK"));
-app.get('/health', (_,res)=>res.json({ ok:true, time:new Date().toISOString() }));
-
-// Greeting logic
-function getGreeting(from, text) {
-  const greetings = ['hi','hello','hey','namaste','good morning','good evening','good afternoon'];
-  const isGreeting = greetings.some(g=>text.toLowerCase().includes(g));
-  let db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE,'utf8')) : {};
-  db.sessions = db.sessions || {};
-  const session = db.sessions[from];
-  const now = Date.now();
-  if (!session || now-session.lastActive>10*60*1000 || isGreeting) {
-    db.sessions[from] = { lastActive: now };
-    fs.writeFileSync(DB_FILE, JSON.stringify(db,null,2));
-    return "Namaste (🙏) Mr. Car welcomes you. We can assist you with pre-owned cars, the finest new car deals, automotive loans, and insurance services. For your enquiry, our team is ready to assist you instantly and ensure a seamless experience.";
-  }
-  db.sessions[from].lastActive = now;
-  fs.writeFileSync(DB_FILE, JSON.stringify(db,null,2));
-  return null;
-}
-
-// WhatsApp inbound
-app.post('/webhook', async (req,res)=>{
+async function waSendRaw(payload){
+  if (!META_TOKEN || !PHONE_NUMBER_ID) { log('wa skipped - token/phone missing'); return null; }
+  const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
   try {
-    if (!verifySignature(req)) return res.sendStatus(403);
-    const entry = req.body?.entry?.[0];
-    const msg = entry?.changes?.[0]?.value?.messages?.[0];
-    if (!msg) return res.sendStatus(200);
+    const r = await fetch(url, { method:'POST', headers:{ Authorization:`Bearer ${META_TOKEN}`, 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+    const j = await r.json().catch(()=>({}));
+    if (!r.ok) console.error('WA send error', r.status, j);
+    return j;
+  } catch(e){ console.error('waSendRaw fail', e); return null; }
+}
+async function waSendText(to, text){ return waSendRaw({ messaging_product:'whatsapp', to, type:'text', text:{ body: String(text) } }); }
 
-    const from  = msg.from;
-    const text  = msg?.text?.body || '';
-
-    // Send greeting first, but DO NOT return — continue to AI
-    const greet = getGreeting(from, text);
-    if (greet) await sendText(from, greet);
-
-    // forward to local /prompt brain
-    let reply = "AI temporarily unavailable.";
-    try {
-      const r = await fetch(`${CRM_URL}/brain`,{
-        method:"POST",
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({from,message:text})
-      });
-      if (r.ok) { const j = await r.json(); reply = j.reply || reply; }
-      else console.error('CRM /prompt not ok:', r.status);
-    } catch(e){ console.error('CRM error:', e.message); }
-
-    await sendText(from, reply);
-    res.sendStatus(200);
-  } catch (e) {
-    console.error('Webhook error:', e);
-    res.sendStatus(500);
-  }
-});
-
-// Send WA message
-async function sendText(to,msg){
-  if(!PHONE_ID||!META_TOKEN){console.warn("⚠️ Missing PHONE_ID or META_TOKEN");return}
-  const url=`https://graph.facebook.com/v17.0/${PHONE_ID}/messages`;
-  const body={ messaging_product:"whatsapp", to:String(to).replace(/\D/g,''), type:"text", text:{body:msg}};
-  try{
-    const resp = await fetch(url,{
-      method:"POST",
-      headers:{Authorization:`Bearer ${META_TOKEN}`,"Content-Type":"application/json"},
-      body:JSON.stringify(body)
+// ---------------- CSV & variant map ----------------
+function parseCsvText(txt){
+  // use csv-parse/sync if available (robust)
+  try {
+    const records = parse(txt, { columns: true, skip_empty_lines: true });
+    return records;
+  } catch(e){
+    // fallback naive parse: header line -> rows
+    const lines = txt.split(/\r?\n/).filter(Boolean);
+    const header = (lines.shift()||'').split(',');
+    return lines.map(l => {
+      const cols = l.split(',');
+      const obj = {};
+      header.forEach((h,i)=> obj[String(h||'').trim()] = cols[i]||'');
+      return obj;
     });
-    const txt = await resp.text();
-    if(!resp.ok) console.error('Meta send error:', resp.status, txt);
-    else console.log('✅ Meta send success:', txt);
-  }catch(e){ console.error("WA Send Err:",e.message); }
+  }
 }
 
-// /prompt (OpenAI brain only)
-app.post('/prompt', async (req,res)=>{
-  try{
-    const {message}=req.body||{};
-    const OA_KEY=process.env.OPENAI_API_KEY;
-    if(!OA_KEY) return res.json({reply:"AI temporarily unavailable."});
-
-    const MODEL=process.env.OPENAI_MODEL||"gpt-4o-mini";
-    const sys="You are Signature Savings auto consultant. Be crisp, professional, and luxury tone. If user asks for prices, ask city and variant if missing.";
-
-    const r=await fetch("https://api.openai.com/v1/chat/completions",{
-      method:"POST",
-      headers:{Authorization:`Bearer ${OA_KEY}`,"Content-Type":"application/json"},
-      body:JSON.stringify({
-        model:MODEL,
-        messages:[{role:"system",content:sys},{role:"user",content:message||""}],
-        max_tokens:250
-      })
-    });
-
-    const j=await r.json();
-    console.log("DEBUG OpenAI status:", r.status, "body:", JSON.stringify(j).slice(0,300));
-    if(!r.ok) return res.json({reply:"AI temporarily unavailable."});
-
-    const text=j?.choices?.[0]?.message?.content?.trim();
-    return res.json({reply:text || "…"});
-
-  }catch(err){
-    console.error("/prompt fatal:",err);
-    return res.json({reply:"AI temporarily unavailable."});
-  }
-});
-
-app.listen(PORT,()=>console.log(`🚀 Running on ${PORT}`));
-
-// --- DEV-ONLY: webhook-test (no signature) ---
-app.post('/webhook-test', async (req, res) => {
-  try {
-    const entry = req.body?.entry?.[0];
-    const msg = entry?.changes?.[0]?.value?.messages?.[0];
-    if (!msg) return res.sendStatus(200);
-
-    const from  = msg.from;
-    const text  = msg?.text?.body || '';
-
-    // Send greeting first (no early return)
-    const greet = getGreeting(from, text);
-    if (greet) await sendText(from, greet);
-
-    // forward to local /prompt brain
-    let reply = "AI temporarily unavailable.";
-    try {
-      const r = await fetch(`${CRM_URL}/brain`,{
-        method:"POST",
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({from,message:text})
-      });
-      if (r.ok) { const j = await r.json(); reply = j.reply || reply; }
-      else console.error('CRM /prompt not ok (test):', r.status);
-    } catch(e){ console.error('CRM error (test):', e.message); }
-
-    await sendText(from, reply);
-    res.sendStatus(200);
-  } catch (e) {
-    console.error('Webhook-test error:', e);
-    res.sendStatus(500);
-  }
-});
-
-// ===== live pricing loader (Google Sheet CSV or local JSON) =====
-const PRICING_CACHE = { data: null, ts: 0 };
-const PRICING_TTL_MS = 5 * 60 * 1000; // 5 min cache
-
-async function loadPricing() {
-  const SHEET_URL = process.env.PRICING_SHEET_URL || '';
-  const now = Date.now();
-  if (PRICING_CACHE.data && now - PRICING_CACHE.ts < PRICING_TTL_MS) return PRICING_CACHE.data;
-
-  let data = null;
-  try {
-    if (SHEET_URL) {
-      const r = await fetch(SHEET_URL);
-      const text = await r.text();
-      const [head, ...rows] = text.trim().split(/\r?\n/).map(l=>l.split(','));
-      const keys = head.map(k=>k.trim().toLowerCase().replace(/\s+/g,'_'));
-      data = rows.map(r => Object.fromEntries(r.map((v,i)=>[keys[i], (v||'').trim()])));
+function buildVariantMap(rows){
+  const map = [];
+  rows.forEach((r, idx) => {
+    const model = r['MODEL'] || r['Model'] || r['model'] || '';
+    const variant = r['VARIANT'] || r['Variant'] || r['variant'] || r['SUFFIX'] || r['Suffix'] || '';
+    const vk = r['VARIANT_KEYWORDS'] || r['Variant_Keywords'] || r['variant_keywords'] || '';
+    const kws = new Set();
+    if (model) kws.add(normForMatch(model));
+    if (variant) kws.add(normForMatch(variant));
+    if (vk) {
+      // allow comma, pipe, semicolon
+      vk.toString().split(/[\|,;]+/).map(s=>s.trim()).filter(Boolean).forEach(p=>kws.add(normForMatch(p)));
     }
-  } catch (e) { console.error('pricing sheet fetch failed:', e.message); }
-
-  if (!data) {
-    try {
-      const db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE,'utf8')) : {};
-      data = db.pricing_data || [];
-    } catch { data = []; }
-  }
-  PRICING_CACHE.data = data; PRICING_CACHE.ts = now;
-  return data;
-}
-
-app.get('/pricing', async (req,res)=>{
-  const data = await loadPricing();
-  res.json({ count: data.length, sample: data.slice(0,3) });
-});
-
-// ===== SECURE SYNC FROM GPT (Actions) =====
-const SYNC_KEY = process.env.SYNC_KEY || ""; // set in env (Render)
-
-app.post('/sync-knowledge', (req, res) => {
-  try {
-    if (!SYNC_KEY || req.headers['x-sync-key'] !== SYNC_KEY) {
-      return res.status(401).json({ ok:false, error:'unauthorized' });
-    }
-    const payload = req.body || {};
-    const db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE,'utf8')) : {};
-    if (payload.system_prompt) db.system_prompt = payload.system_prompt;
-    if (payload.reply_signature) db.reply_signature = payload.reply_signature;
-    if (Array.isArray(payload.pricing_data)) db.pricing_data = payload.pricing_data;
-    if (Array.isArray(payload.faq)) db.faq = payload.faq; // [{q,a}]
-    db.last_synced = new Date().toISOString();
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-    return res.json({ ok:true, stored:{
-      pricing: (db.pricing_data||[]).length,
-      faq: (db.faq||[]).length
-    }});
-  } catch (e) {
-    console.error('sync-knowledge error', e);
-    return res.status(500).json({ ok:false, error:'sync_failed' });
-  }
-});
-
-// Minimal OpenAPI schema so GPT Action can call /sync-knowledge
-app.get('/openapi.json', (req, res) => {
-  res.json({
-    openapi: "3.1.0",
-    info: { title: "Signature Savings Sync API", version: "1.0.0" },
-    paths: {
-      "/sync-knowledge": {
-        post: {
-          operationId: "syncKnowledge",
-          description: "Push latest pricing/knowledge into WhatsApp CRM store",
-          parameters: [
-            {
-              in: "header", name: "x-sync-key", required: true,
-              schema: { type:"string" }, description:"Shared secret"
-            }
-          ],
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    system_prompt: { type: "string" },
-                    reply_signature: { type: "string" },
-                    pricing_data: { type: "array", items: { type: "object" } },
-                    faq: { type: "array", items: {
-                      type: "object",
-                      properties: { q:{type:"string"}, a:{type:"string"} },
-                      required: ["q","a"]
-                    } }
-                  }
-                }
-              }
-            }
-          },
-          responses: { "200": { description: "OK" } }
-        }
+    // also add ngrams and tokens
+    const addTokens = txt => {
+      const n = normForMatch(txt);
+      if (!n) return;
+      kws.add(n);
+      const toks = n.split(' ');
+      for (let i=0;i<toks.length;i++){
+        kws.add(toks[i]);
+        if (i+1<toks.length) kws.add(toks[i]+' '+toks[i+1]);
       }
-    }
+    };
+    addTokens(model); addTokens(variant);
+    map.push({ idx, model, variant, row: r, keywords: Array.from(kws) });
   });
-});
-
-// ===== unified brain endpoint (uses synced pricing & faq) =====
-app.post('/brain', async (req,res)=>{
-  try{
-    const { from, message } = req.body || {};
-    const OA_KEY = process.env.OPENAI_API_KEY || "";
-    if(!OA_KEY) return res.json({ reply: "AI temporarily unavailable." });
-
-    const db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE,'utf8')) : {};
-    const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
-    const systemPrompt = db.system_prompt || "You are Signature Savings assistant. Luxury, concise, accurate. Confirm city & variant if missing. Use provided pricing_data & faq strictly.";
-    const replySignature = db.reply_signature || "";
-
-    const pricing = await loadPricingByType(message); // live or local
-    const faqs    = db.faq || [];
-
-    const contextBlock = [
-      `PRICING_ROWS: ${Array.isArray(pricing)?pricing.length:0}`,
-      Array.isArray(pricing)&&pricing.length ? `FIELDS: ${Object.keys(pricing[0]||{}).join(', ')}` : 'NO PRICING',
-      `FAQ_ROWS: ${Array.isArray(faqs)?faqs.length:0}`
-    ].join('\n');
-
-    const dataAttachment = JSON.stringify({ pricing, faqs }).slice(0, 35000); // keep safe
-
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method:"POST",
-      headers:{ Authorization:`Bearer ${OA_KEY}`, "Content-Type":"application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: systemPrompt + "\n\n" + contextBlock },
-          { role: "system", content: dataAttachment },
-          { role: "user", content: message || "" }
-        ],
-        max_tokens: 350
-      })
-    });
-
-    const j = await r.json();
-    console.log("DEBUG OpenAI status:", r.status, "body:", JSON.stringify(j).slice(0,300));
-    if (!r.ok) return res.json({ reply: replySignature || "AI temporarily unavailable." });
-
-    const text = j?.choices?.[0]?.message?.content?.trim();
-    const final = (text && replySignature) ? `${text}\n${replySignature}` : (text || replySignature || "...");
-    return res.json({ reply: final, type: "text" });
-  }catch(err){
-    console.error("/brain fatal:", err);
-    return res.json({ reply: "AI temporarily unavailable." });
-  }
-});
-
-// ===== smart loader: picks NEW vs USED sheet based on message/type =====
-// ===== smart loader: picks NEW vs USED sheet based on message/type =====
-async function loadPricingByType(messageOrType) {
-  try {
-    const t = String(messageOrType||'').toLowerCase();
-    // detect intent (keywords for used car)
-    const isUsed = [
-      'used','pre-owned','preowned','second hand','2nd hand',
-      'km','odometer','owner','model year','year',
-      '2020','2021','2022','2023','2024','2025'
-    ].some(k => t.includes(k))
-      || t === 'used' || t === 'preowned' || t === 'pre-owned';
-
-    const urlNew  = process.env.PRICING_SHEET_URL_NEW  || '';
-    const urlUsed = process.env.PRICING_SHEET_URL_USED || '';
-    const chosenUrl = isUsed ? (urlUsed || urlNew) : (urlNew || urlUsed);
-    if (!chosenUrl) return await loadPricing();
-
-    const r = await fetch(chosenUrl);
-    const text = await r.text();
-    const [head, ...rows] = text.trim().split(/\r?\n/).map(l => l.split(','));
-    const keys = head.map(k => k.trim().toLowerCase().replace(/\s+/g,'_'));
-    return rows.map(r => Object.fromEntries(r.map((v,i)=>[keys[i], (v||'').trim()])));
-  } catch (e) {
-    console.error('loadPricingByType error:', e.message);
-    return await loadPricing();
-  }
+  return map;
 }
 
-app.get('/pricing-by-type', async (req, res) => {
-  const t = req.query.type || 'auto';
-  const data = await loadPricingByType(t);
-  res.json({ type: t, count: (data||[]).length, sample: (data||[]).slice(0,3) });
+function matchVariantFromText(text, variantMap){
+  if (!text) return null;
+  const q = normForMatch(text);
+  // exact keyword contains
+  const exact = [];
+  variantMap.forEach(v => {
+    v.keywords.forEach(kw => { if (kw && q.includes(kw)) exact.push({ v, kw, len: kw.length }); });
+  });
+  if (exact.length){
+    exact.sort((a,b)=> b.len - a.len);
+    return exact[0].v;
+  }
+  // token overlap
+  const qT = q.split(' ').filter(Boolean);
+  let best = null, bestScore=0, second=0;
+  variantMap.forEach(v => {
+    const all = v.keywords.join(' ');
+    const vt = all.split(' ').filter(Boolean);
+    let score=0;
+    qT.forEach(t => {
+      vt.forEach(vtk => {
+        if (vtk === t) score += 6;
+        else if (vtk.includes(t) || t.includes(vtk)) score += 4;
+      });
+    });
+    if (score > bestScore){ second = bestScore; bestScore=score; best=v; }
+    else if (score > second) second = score;
+  });
+  if (!best) return null;
+  if (bestScore < 8) return null;
+  if (second > 0 && bestScore < second * 1.3 + 4) return null;
+  return best;
+}
+
+// ---------------- pricing loader ----------------
+async function fetchCsvUrl(url){
+  if (!url) throw new Error('csv url missing');
+  const r = await fetch(url, { cache:'no-store' });
+  if (!r.ok) throw new Error('csv fetch failed '+r.status);
+  const t = await r.text();
+  return parseCsvText(t);
+}
+
+async function loadPricing(){
+  const now = Date.now();
+  if (PRICING_CACHE.ts && (now - PRICING_CACHE.ts < PRICING_CACHE_MS)) return PRICING_CACHE.tables;
+  const tables = {};
+  if (SHEET_TOYOTA_CSV_URL){
+    try {
+      const rows = await fetchCsvUrl(SHEET_TOYOTA_CSV_URL);
+      tables.TOYOTA = { rows, variantMap: buildVariantMap(rows), headerKeys: Object.keys(rows[0]||{}) };
+      log('TOYOTA rows', rows.length, 'header sample', tables.TOYOTA.headerKeys.slice(0,10));
+    } catch(e){ console.error('loadPricing TOYOTA failed', e && e.message ? e.message : e); }
+  }
+  PRICING_CACHE = { ts: now, tables };
+  return tables;
+}
+
+// ---------------- CRM helpers ----------------
+async function crmPostLead(lead){
+  if (!CRM_URL) return null;
+  try {
+    const headers = { 'Content-Type':'application/json' };
+    if (CRM_API_KEY) headers['x-api-key'] = CRM_API_KEY;
+    const r = await fetch(`${CRM_URL.replace(/\/$/,'')}/leads`, { method:'POST', headers, body: JSON.stringify(lead) });
+    return await r.json().catch(()=>null);
+  } catch(e){ console.warn('crmPostLead failed', e && e.message); return null; }
+}
+async function crmFetchPrompt(payload){
+  if (!CRM_URL) return null;
+  try {
+    const headers = { 'Content-Type':'application/json' };
+    if (CRM_API_KEY) headers['x-api-key'] = CRM_API_KEY;
+    const r = await fetch(`${CRM_URL.replace(/\/$/,'')}/prompt`, { method:'POST', headers, body: JSON.stringify(payload) });
+    if (!r.ok) { console.warn('CRM /prompt non-ok', r.status); return null; }
+    return await r.json().catch(()=>null);
+  } catch(e){ console.warn('crmFetchPrompt failed', e && e.message); return null; }
+}
+
+// ---------------- main new-car quick quote ----------------
+async function tryQuickNewCarQuote(msgText, from){
+  if (!msgText) return false;
+  const city = (msgText.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp)\b/i)||[])[1] || 'delhi';
+  const profile = (msgText.match(/\b(individual|company|corporate|firm|personal)\b/i)||[])[1] || 'individual';
+  const tables = await loadPricing();
+  const tab = tables.TOYOTA;
+  if (!tab) return false;
+  const vm = tab.variantMap;
+  const match = matchVariantFromText(msgText, vm || []);
+  if (!match) return false;
+  const row = match.row;
+  // try to find on-road price
+  const rowVals = Object.values(row || {});
+  let onroad = 0;
+  for (const v of rowVals){ const n = Number(String(v||'').replace(/[,₹\s]/g,'')); if (n && n>10000){ onroad = n; break; } }
+  const exShow = onroad; // fallback
+  const emi = Math.round(exShow * 0.02); // dummy EMI calc for test
+  // record lead
+  const lead = { from, original_message: msgText, brand_guess: 'TOYOTA', model: match.model, variant: match.variant, city, profile, onroad, ex_showroom: exShow, timestamp: Date.now() };
+  crmPostLead(lead).catch(()=>null);
+  // ask CRM for final reply
+  const promptPayload = { from, message: msgText, quote: lead, timestamp: Date.now() };
+  const crmResp = await crmFetchPrompt(promptPayload);
+  const replyText = (crmResp && crmResp.text) ? crmResp.text : `Found ${match.model} ${match.variant} • On-Road ≈ ₹ ${fmtMoney(onroad)} • EMI ~ ₹ ${fmtMoney(emi)} (est)`;
+  await waSendText(from, replyText);
+  return true;
+}
+
+// ---------------- admin reload ----------------
+app.post('/admin/reload-csv', express.json(), async (req,res)=>{
+  const caller = req.body?.from || '';
+  if (ADMIN_WA && !String(caller).includes(ADMIN_WA)) return res.status(403).json({ ok:false, msg:'forbidden' });
+  try {
+    PRICING_CACHE = { ts:0, tables:{} };
+    await loadPricing();
+    return res.json({ ok:true, rows: Object.keys(PRICING_CACHE.tables).reduce((s,k)=> s + (PRICING_CACHE.tables[k].rows?.length||0),0) });
+  } catch(e){
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+// ---------------- webhook & health ----------------
+app.get('/healthz', (req,res) => res.json({ ok:true, t: Date.now(), debug: DEBUG }));
+
+app.post('/webhook', async (req,res) => {
+  res.sendStatus(200);
+  try {
+    const body = req.body || {};
+    const msg = body?.messages?.[0] || body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0] || null;
+    const contact = body?.contacts?.[0] || body?.entry?.[0]?.changes?.[0]?.value?.contacts?.[0] || {};
+    const from = msg?.from || (body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id) || 'unknown';
+    const name = contact?.profile?.name || 'Unknown';
+    const type = msg?.type || 'unknown';
+    const text = (type === 'text') ? (msg.text?.body || '') : (msg?.interactive?.list_reply?.title || msg?.interactive?.button_reply?.title || JSON.stringify(msg).slice(0,220));
+    console.log('INBOUND', { from, type, sample: String(text).slice(0,200) });
+    // admin alert (throttle omitted for brevity)
+    // greeting logic omitted for brevity
+    // try new car quick path
+    if (type === 'text' && text) {
+      const ok = await tryQuickNewCarQuote(text, from);
+      if (ok) return;
+    }
+    // fallback
+    await waSendText(from, "Please send *city + model + variant + profile (individual/company)* e.g., 'Delhi Hycross ZXO individual'");
+  } catch(e){
+    console.error('webhook error', e && e.stack ? e.stack : e);
+  }
+});
+
+// ---------------- start ----------------
+app.listen(PORT, ()=> {
+  console.log('✅ CRM running on', PORT);
+  console.log('ENV summary:', { SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL, PHONE_NUMBER_ID: !!PHONE_NUMBER_ID, META_TOKEN: !!META_TOKEN, ADMIN_WA: !!ADMIN_WA, CRM_URL: !!CRM_URL, DEBUG });
 });
