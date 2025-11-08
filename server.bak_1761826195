@@ -1,0 +1,136 @@
+cat > server.cjs <<'EOF'
+// ===== Mr. Car x Signature Savings Webhook (FINAL) =====
+require('dotenv').config({ path: './.env' });
+
+const express = require('express');
+const fs = require('fs');
+const crypto = require('crypto');
+const fetch = require('node-fetch');
+const bodyParser = require('body-parser');
+
+const app = express();
+
+// Raw body for signature verification
+function rawBodySaver(req, res, buf, encoding) {
+  if (buf && buf.length) req.rawBody = buf.toString(encoding || 'utf8');
+}
+app.use(bodyParser.json({ verify: rawBodySaver }));
+
+// Env vars
+const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || process.env.VERIFY_TOKEN || '';
+const APP_SECRET   = process.env.META_APP_SECRET   || process.env.APP_SECRET   || '';
+const PHONE_ID     = process.env.WHATSAPP_PHONE_ID || process.env.PHONE_NUMBER_ID || process.env.PHONE_ID || '';
+const META_TOKEN   = process.env.META_TOKEN        || process.env.WA_TOKEN     || '';
+const CRM_URL      = process.env.CRM_URL || 'http://localhost:3000';
+const PORT         = process.env.PORT || 3000;
+const DB_FILE      = process.env.DB_FILE || './crm_db.json';
+
+// Verify Meta signature
+function verifySignature(req) {
+  if (!APP_SECRET) return true;
+  const sig = req.headers['x-hub-signature-256'];
+  if (!sig || !req.rawBody) return false;
+  const hmac = crypto.createHmac('sha256', APP_SECRET);
+  hmac.update(req.rawBody);
+  const digest = 'sha256=' + hmac.digest('hex');
+  try { return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(sig)); }
+  catch { return false; }
+}
+
+// Webhook verify
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('✅ Webhook verified');
+    return res.status(200).send(challenge);
+  }
+  res.status(403).send('Verification failed');
+});
+
+app.get('/', (_,res)=>res.send("OK"));
+app.get('/health', (_,res)=>res.json({ ok:true }));
+
+// Greeting logic
+function getGreeting(from, text) {
+  const greetings = ['hi','hello','hey','namaste','good morning','good evening','good afternoon'];
+  const isGreeting = greetings.some(g=>text.toLowerCase().includes(g));
+  let db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE,'utf8')) : {};
+  db.sessions = db.sessions || {};
+  const session = db.sessions[from];
+  const now = Date.now();
+  if (!session || now-session.lastActive>10*60*1000 || isGreeting) {
+    db.sessions[from] = { lastActive: now };
+    fs.writeFileSync(DB_FILE, JSON.stringify(db,null,2));
+    return "Namaste (🙏) Mr. Car welcomes you. We can assist you with pre-owned cars, the finest new car deals, automotive loans, and insurance services. For your enquiry, our team is ready to assist you instantly and ensure a seamless experience.";
+  }
+  db.sessions[from].lastActive = now;
+  fs.writeFileSync(DB_FILE, JSON.stringify(db,null,2));
+  return null;
+}
+
+// WhatsApp inbound
+app.post('/webhook', async (req,res)=>{
+  if (!verifySignature(req)) return res.sendStatus(403);
+  const entry = req.body?.entry?.[0];
+  const msg = entry?.changes?.[0]?.value?.messages?.[0];
+  if (!msg) return res.sendStatus(200);
+  const from  = msg.from;
+  const text  = msg?.text?.body || '';
+
+  const greet = getGreeting(from, text);
+  if (greet) {
+    await sendText(from, greet);
+    return res.sendStatus(200);
+  }
+
+  // send to our local GPT brain
+  const r = await fetch(`${CRM_URL}/prompt`,{
+    method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({from,message:text})
+  }).catch(()=>null);
+
+  const j = r && r.ok ? await r.json() : {reply:"Sorry, something went wrong"};
+  await sendText(from, j.reply || "Retry");
+  res.sendStatus(200);
+});
+
+// Send WhatsApp message
+async function sendText(to,msg){
+  if(!PHONE_ID||!META_TOKEN){console.warn("No WA creds");return}
+  const url=`https://graph.facebook.com/v17.0/${PHONE_ID}/messages`;
+  const body={ messaging_product:"whatsapp", to:String(to).replace(/\D/g,''), type:"text", text:{body:msg}};
+  await fetch(url,{
+    method:"POST",
+    headers:{Authorization:`Bearer ${META_TOKEN}`,"Content-Type":"application/json"},
+    body:JSON.stringify(body)
+  }).catch(e=>console.log("WA Send Err:",e));
+}
+
+// /prompt (OpenAI brain)
+app.post('/prompt', async (req,res)=>{
+  const {message}=req.body||{};
+  const OA_KEY=process.env.OPENAI_API_KEY;
+  if(!OA_KEY) return res.json({reply:"AI temporarily unavailable."});
+
+  const MODEL=process.env.OPENAI_MODEL||"gpt-3.5-turbo";
+  const sys="You are Signature Savings auto consultant. Be crisp, professional, luxury tone.";
+
+  const r=await fetch("https://api.openai.com/v1/chat/completions",{
+    method:"POST",
+    headers:{Authorization:`Bearer ${OA_KEY}`,"Content-Type":"application/json"},
+    body:JSON.stringify({
+      model:MODEL,
+      messages:[{role:"system",content:sys},{role:"user",content:message}],
+      max_tokens:200
+    })
+  });
+
+  const j=await r.json();
+  if(!r.ok) return res.json({reply:"AI temporarily unavailable."});
+  res.json({reply:j?.choices?.[0]?.message?.content || "..."});
+});
+
+app.listen(PORT,()=>console.log(`🚀 Running on ${PORT}`));
+EOF
