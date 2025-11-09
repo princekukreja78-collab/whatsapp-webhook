@@ -320,7 +320,7 @@ app.post('/webhook', async (req,res) => {
     const text = (type === 'text') ? (msg.text?.body || '') : (msg?.interactive?.list_reply?.title || msg?.interactive?.button_reply?.title || JSON.stringify(msg).slice(0,220));
     console.log('INBOUND', { from, type, sample: String(text).slice(0,200) });
     // admin alert (throttle) - send a short admin summary
-    if (ADMIN_WA) sendAdminAlert(ADMIN_WA, );
+    if (ADMIN_WA) sendAdminAlert(ADMIN_WA, `INBOUND from: ${from} sample: ${String(text).slice(0,120)}`);
     // greeting logic omitted for brevity
     // try new car quick path
     if (type === 'text' && text) {
