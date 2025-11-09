@@ -260,32 +260,3 @@ app.listen(PORT, ()=> {
   console.log('✅ CRM running on', PORT);
   console.log('ENV summary:', { SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL, PHONE_NUMBER_ID: !!PHONE_NUMBER_ID, META_TOKEN: !!META_TOKEN, ADMIN_WA: !!ADMIN_WA, CRM_URL: !!CRM_URL, DEBUG });
 });
-cat >> server.cjs <<'EOF'
-
-/*
-  Convenience GET admin reload endpoint
-  Usage: GET /admin/reload-csv?from=919090404909
-*/
-app.get('/admin/reload-csv', async (req, res) => {
-  try {
-    const caller = String(req.query.from || '').trim();
-    // if ADMIN_WA is configured, require it to match (prevents abuse)
-    if (process.env.ADMIN_WA && !String(caller).includes((process.env.ADMIN_WA||'').replace(/\D/g,''))) {
-      return res.status(403).json({ ok:false, msg:'forbidden' });
-    }
-    // reset cache and reload
-    if (global && typeof PRICING_CACHE !== 'undefined') {
-      PRICING_CACHE = { ts: 0, tables: {} };
-    }
-    if (typeof loadPricing === 'function') {
-      await loadPricing();
-      const rows = Object.values(PRICING_CACHE.tables || {}).reduce((s,t)=> s + ((t.rows && t.rows.length) || 0), 0);
-      return res.json({ ok:true, rows });
-    } else {
-      return res.status(500).json({ ok:false, msg:'loadPricing not available in this build' });
-    }
-  } catch (e) {
-    console.error('admin reload error', e && e.stack ? e.stack : e);
-    return res.status(500).json({ ok:false, error: String(e) });
-  }
-});
