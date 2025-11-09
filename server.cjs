@@ -27,18 +27,12 @@ const fs = require('fs');
 
 const app = express();
 // --- admin alert + pair throttle helpers ---
-const ADMIN_ALERT_TTL_MS = Number(process.env.ADMIN_ALERT_TTL_MS || 10 * 60 * 1000); // 10min default
-const _lastAdminAlert = {};
 
 async function sendAdminAlert(adminNumber, text){
   if (!adminNumber) return;
   const now = Date.now();
-  const last = _lastAdminAlert[adminNumber] || 0;
-  if (now - last < ADMIN_ALERT_TTL_MS) {
-    log(`admin alert suppressed for ${adminNumber} (within ${ADMIN_ALERT_TTL_MS}ms)`);
     return { ok:false, skipped:true, reason:"admin-throttle" };
   }
-  _lastAdminAlert[adminNumber] = now;
   return await waSendRaw({ messaging_product:"whatsapp", to: adminNumber, type:"text", text:{ body:String(text) } });
 }
 
@@ -61,8 +55,6 @@ const PAIR_TTL_MS = Number(process.env.PAIR_TTL_MS || 60 * 1000); // default 60s
 const _lastPairSend = {}; // map: to -> timestamp (ms)
 
 // admin alert throttle (separate)
-const ADMIN_ALERT_TTL_MS = Number(process.env.ADMIN_ALERT_TTL_MS || 10 * 60 * 1000); // 10 min default
-const _lastAdminAlert = {};
 
 const _lastPairSend = {};
 
