@@ -256,6 +256,16 @@ app.post('/webhook', async (req,res) => {
 });
 
 // ---------------- start ----------------
+
+// version endpoint — returns short git sha so we can verify deployed commit
+app.get("/version", (req, res) => {
+  try {
+    const sha = require("child_process").execSync("git rev-parse --short HEAD").toString().trim();
+    return res.json({ ok:true, sha });
+  } catch (e) {
+    return res.json({ ok:true, sha: unknown });
+  }
+});
 app.listen(PORT, ()=> {
   console.log('✅ CRM running on', PORT);
   console.log('ENV summary:', { SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL, PHONE_NUMBER_ID: !!PHONE_NUMBER_ID, META_TOKEN: !!META_TOKEN, ADMIN_WA: !!ADMIN_WA, CRM_URL: !!CRM_URL, DEBUG });
