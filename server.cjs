@@ -1,3 +1,18 @@
+// --- safe csv-parse sync import (fallbacks if path differs) ---
+let parseSync;
+try {
+  parseSync = require("csv-parse/sync").parse;
+} catch (e1) {
+  try {
+    parseSync = require("csv-parse/lib/sync").parse;
+  } catch (e2) {
+    console.error("Failed to import csv-parse sync module", e1, e2);
+    throw e2 || e1;
+  }
+}
+// alias so existing code using `parse(...)` keeps working
+const parse = (text, opts) => parseSync(text, opts);
+
 /*
   Minimal MR.CAR CRM webhook (CommonJS)
   - healthz
