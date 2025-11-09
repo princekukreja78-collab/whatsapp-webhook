@@ -56,6 +56,14 @@ const ADMIN_WA = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
 const SHEET_TOYOTA_CSV_URL = (process.env.SHEET_TOYOTA_CSV_URL || '').trim();
 const PRICING_CACHE_MS = 3 * 60 * 1000;
 let PRICING_CACHE = { ts: 0, tables: {} };
+// PAIR/ADMIN THROTTLE defaults (inserted)
+const PAIR_TTL_MS = Number(process.env.PAIR_TTL_MS || 60 * 1000); // default 60s
+const _lastPairSend = {}; // map: to -> timestamp (ms)
+
+// admin alert throttle (separate)
+const ADMIN_ALERT_TTL_MS = Number(process.env.ADMIN_ALERT_TTL_MS || 10 * 60 * 1000); // 10 min default
+const _lastAdminAlert = {};
+
 const _lastPairSend = {};
 
 
