@@ -28,12 +28,28 @@ const fs = require('fs');
 const app = express();
 // --- admin alert + pair throttle helpers ---
 
-async function sendAdminAlert(adminNumber, text){
-  if (!adminNumber) return;
+async function sendAdminAlert(adminNumber, text) {
+  // throttled admin alert helper
+  if (!adminNumber) return { ok:false, reason: 'no-admin-number' };
   const now = Date.now();
+  const last = _lastAdminAlert[adminNumber] || 0;
+  if (now - last < ADMIN_ALERT_TTL_MS) {
+    console.log(`admin alert suppressed for ${adminNumber} (within ${ADMIN_ALERT_TTL_MS}ms)`);
     return { ok:false, skipped:true, reason:"admin-throttle" };
   }
-  return await waSendRaw({ messaging_product:"whatsapp", to: adminNumber, type:"text", text:{ body:String(text) } });
+  _lastAdminAlert[adminNumber] = now;
+  try {
+    const res = await waSendRaw({
+      messaging_product: "whatsapp",
+      to: adminNumber,
+      type: "text",
+      text: { body: String(text) }
+    });
+    return res;
+  } catch (e) {
+    console.error("Admin alert send failed", e);
+    return { ok:false, error: String(e) };
+  }
 }
 
 app.use(express.json({ limit: '1mb' }));
