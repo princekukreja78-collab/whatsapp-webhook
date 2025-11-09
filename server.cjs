@@ -1,7 +1,6 @@
 // --- safe csv-parse sync import (fallbacks if path differs) ---
 let parseSync;
 try {
-  parseSync = require("csv-parse/sync").parse;
 } catch (e1) {
   try {
     parseSync = require("csv-parse/lib/sync").parse;
@@ -24,7 +23,6 @@ const parse = (text, opts) => parseSync(text, opts);
 require('dotenv').config();
 const express = require('express');
 const fetch = global.fetch || require('node-fetch');
-const { parse } = require('csv-parse/sync'); // we assume csv-parse is installed
 const fs = require('fs');
 
 const app = express();
@@ -62,7 +60,6 @@ async function waSendText(to, text){ return waSendRaw({ messaging_product:'whats
 
 // ---------------- CSV & variant map ----------------
 function parseCsvText(txt){
-  // use csv-parse/sync if available (robust)
   try {
     const records = parse(txt, { columns: true, skip_empty_lines: true });
     return records;
