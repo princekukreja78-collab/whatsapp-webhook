@@ -49,13 +49,48 @@ function fmtMoney(n){ const x = Number(String(n).replace(/[,₹\s]/g,'')); if (!
 async function waSendRaw(payload){
   if (!META_TOKEN || !PHONE_NUMBER_ID) { log('wa skipped - token/phone missing'); return null; }
   const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
-  try {
-    const r = await fetch(url, { method:'POST', headers:{ Authorization:`Bearer ${META_TOKEN}`, 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
-    const j = await r.json().catch(()=>({}));
-    if (!r.ok) console.error('WA send error', r.status, j);
-    return j;
-  } catch(e){ console.error('waSendRaw fail', e); return null; }
+
+  const sendOnce = async () => {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${META_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) {
+        console.error('WA send error', r.status, j);
+        return { ok:false, status:r.status, body:j };
+      }
+      return { ok:true, body:j };
+    } catch(e){
+      console.error('waSendRaw fail', e);
+      return { ok:false, err:e };
+    }
+  };
+
+  // Exponential backoff for pair rate-limit (Meta code 131056)
+  const maxRetries = 3;
+  let attempt = 0, waitMs = 1000;
+  while (attempt <= maxRetries) {
+    const res = await sendOnce();
+    if (res.ok) return res.body;
+    const errCode = res.body && (res.body.error && res.body.error.code);
+    if (errCode === 131056 && attempt < maxRetries) {
+      log(`WA pair rate limit (131056) encountered, backoff attempt ${attempt+1}, sleeping ${waitMs}ms`);
+      await new Promise(r=>setTimeout(r, waitMs));
+      attempt++;
+      waitMs *= 2;
+      continue;
+    }
+    // not recoverable or retries exhausted
+    return res.body || { ok:false, err:res.err || 'unknown' };
+  }
 }
+
 async function waSendText(to, text){ return waSendRaw({ messaging_product:'whatsapp', to, type:'text', text:{ body: String(text) } }); }
 
 // ---------------- CSV & variant map ----------------
