@@ -47,9 +47,24 @@ function normForMatch(s=''){ return String(s||'').toLowerCase().replace(/[^a-z0-
 function fmtMoney(n){ const x = Number(String(n).replace(/[,₹\s]/g,'')); if (!isFinite(x)) return '-'; return x.toLocaleString('en-IN'); }
 
 async function waSendRaw(payload){
-  if (!META_TOKEN || !PHONE_NUMBER_ID) { log('wa skipped - token/phone missing'); return null; }
-  const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
+  if (!META_TOKEN || !PHONE_NUMBER_ID) { log('wa skipped - token/phone missing'); return { ok:false, skipped:true, reason:'no-token' }; }
+  // payload must include `to`
+  const to = String((payload && payload.to) || '').replace(/\D/g,'');
+  if (!to) {
+    log('waSendRaw: missing payload.to, skipping');
+    return { ok:false, skipped:true, reason:'no-to' };
+  }
 
+  // pair throttle: skip if we recently sent to same 'to'
+  const now = Date.now();
+  const last = _lastPairSend[to] || 0;
+  if (now - last < PAIR_TTL_MS) {
+    log(`pair-throttle: suppressed send to ${to} (within ${PAIR_TTL_MS}ms)`);
+    return { ok:false, skipped:true, reason:'pair-throttle' };
+  }
+
+  // function to actually POST once
+  const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
   const sendOnce = async () => {
     try {
       const r = await fetch(url, {
@@ -66,31 +81,41 @@ async function waSendRaw(payload){
         return { ok:false, status:r.status, body:j };
       }
       return { ok:true, body:j };
-    } catch(e){
+    } catch (e) {
       console.error('waSendRaw fail', e);
       return { ok:false, err:e };
     }
   };
 
-  // Exponential backoff for pair rate-limit (Meta code 131056)
-  const maxRetries = 3;
+  // perform retries on pair-rate-limit (131056)
+  const maxRetries = 2; // keep conservative
   let attempt = 0, waitMs = 1000;
   while (attempt <= maxRetries) {
     const res = await sendOnce();
-    if (res.ok) return res.body;
+    if (res.ok) {
+      // mark last send time for pair so we don't flood same recipient
+      _lastPairSend[to] = Date.now();
+      return res.body;
+    }
+
+    // detect Meta pair rate-limit
     const errCode = res.body && (res.body.error && res.body.error.code);
     if (errCode === 131056 && attempt < maxRetries) {
-      log(`WA pair rate limit (131056) encountered, backoff attempt ${attempt+1}, sleeping ${waitMs}ms`);
-      await new Promise(r=>setTimeout(r, waitMs));
+      log(`[DEBUG] WA pair rate limit (131056) encountered, backoff attempt ${attempt+1}, sleeping ${waitMs}ms`);
+      await new Promise(r => setTimeout(r, waitMs));
       attempt++;
       waitMs *= 2;
       continue;
     }
-    // not recoverable or retries exhausted
+
+    // other error or retries exhausted: return error object
     return res.body || { ok:false, err:res.err || 'unknown' };
   }
+
+  return { ok:false, err:'unhandled' };
 }
 
+      
 async function waSendText(to, text){ return waSendRaw({ messaging_product:'whatsapp', to, type:'text', text:{ body: String(text) } }); }
 
 // ---------------- CSV & variant map ----------------
