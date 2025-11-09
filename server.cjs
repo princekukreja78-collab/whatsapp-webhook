@@ -56,6 +56,8 @@ const ADMIN_WA = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
 const SHEET_TOYOTA_CSV_URL = (process.env.SHEET_TOYOTA_CSV_URL || '').trim();
 const PRICING_CACHE_MS = 3 * 60 * 1000;
 let PRICING_CACHE = { ts: 0, tables: {} };
+const _lastPairSend = {};
+
 
 // ---------------- helpers ----------------
 function log(...args){ if (DEBUG) console.log('[DEBUG]', ...args); }
