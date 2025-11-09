@@ -32,12 +32,8 @@ async function sendAdminAlert(adminNumber, text) {
   // throttled admin alert helper
   if (!adminNumber) return { ok:false, reason: 'no-admin-number' };
   const now = Date.now();
-  const last = _lastAdminAlert[adminNumber] || 0;
-  if (now - last < ADMIN_ALERT_TTL_MS) {
-    console.log(`admin alert suppressed for ${adminNumber} (within ${ADMIN_ALERT_TTL_MS}ms)`);
     return { ok:false, skipped:true, reason:"admin-throttle" };
   }
-  _lastAdminAlert[adminNumber] = now;
   try {
     const res = await waSendRaw({
       messaging_product: "whatsapp",
@@ -66,13 +62,15 @@ const ADMIN_WA = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
 const SHEET_TOYOTA_CSV_URL = (process.env.SHEET_TOYOTA_CSV_URL || '').trim();
 const PRICING_CACHE_MS = 3 * 60 * 1000;
 let PRICING_CACHE = { ts: 0, tables: {} };
-// PAIR/ADMIN THROTTLE defaults (inserted)
 const PAIR_TTL_MS = Number(process.env.PAIR_TTL_MS || 60 * 1000); // default 60s
-const _lastPairSend = {}; // map: to -> timestamp (ms)
+const _lastPairSend = {};
+const ADMIN_ALERT_TTL_MS = Number(process.env.ADMIN_ALERT_TTL_MS || 10 * 60 * 1000); // 10min default
+const _lastAdminAlert = {};
+
+// PAIR/ADMIN THROTTLE defaults (inserted)
 
 // admin alert throttle (separate)
 
-const _lastPairSend = {};
 
 
 // ---------------- helpers ----------------
@@ -91,9 +89,6 @@ async function waSendRaw(payload){
 
   // pair throttle: skip if we recently sent to same 'to'
   const now = Date.now();
-  const last = _lastPairSend[to] || 0;
-  if (now - last < PAIR_TTL_MS) {
-    log(`pair-throttle: suppressed send to ${to} (within ${PAIR_TTL_MS}ms)`);
     return { ok:false, skipped:true, reason:'pair-throttle' };
   }
 
@@ -128,7 +123,6 @@ async function waSendRaw(payload){
     const res = await sendOnce();
     if (res.ok) {
       // mark last send time for pair so we don't flood same recipient
-      _lastPairSend[to] = Date.now();
       return res.body;
     }
 
