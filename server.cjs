@@ -205,7 +205,9 @@ function findVariantMatch(text) {
 
 // --- Webhook receiver ---
 app.post('/webhook', async (req, res) => {
-  try {
+  
+  console.log("WEBHOOK_INBOUND_HANDLER => called", { ts: Date.now() });
+try {
     const entry = req.body.entry?.[0];
     const change = entry?.changes?.[0];
     const msg = change?.value?.messages?.[0];
