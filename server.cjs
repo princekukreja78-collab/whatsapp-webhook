@@ -1,4 +1,3 @@
-(async function MR_CRM_BOOTSTRAP(){
 let parseSync;
 try {
 } catch (e1) {
@@ -359,4 +358,4 @@ app.listen(PORT, ()=> {
   console.log('✅ CRM running on', PORT);
   console.log('ENV summary:', { SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL, PHONE_NUMBER_ID: !!PHONE_NUMBER_ID, META_TOKEN: !!META_TOKEN, ADMIN_WA: !!ADMIN_WA, CRM_URL: !!CRM_URL, DEBUG });
 });
-})();
+
