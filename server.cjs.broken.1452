@@ -1,4 +1,5 @@
-// server.cjs — MR.CAR webhook (restored full working version)
+// server.cjs — MR.CAR webhook (final drop-in — transmission synonyms + token-subset matching)
+// CommonJS — ready for Render. DEBUG_VARIANT active by default.
 
 require('dotenv').config();
 const express = require('express');
@@ -19,9 +20,9 @@ const SHEET_BMW_CSV_URL       = (process.env.SHEET_BMW_CSV_URL || '').trim();
 const SHEET_HOT_DEALS_CSV_URL = (process.env.SHEET_HOT_DEALS_CSV_URL || '').trim();
 const SHEET_USED_CSV_URL      = (process.env.SHEET_USED_CSV_URL || process.env.USED_CAR_CSV_URL || '').trim();
 
-const PORT = process.env.PORT || 3000; // default to 3000 to avoid colliding with CRM on 10000
-
-// ---- CRM integration ----
+const PORT = process.env.PORT || 10000;
+n// ---- CRM integration ----nconst CRM_URL = process.env.CRM_URL || "http://127.0.0.1:10000";nasync function postLeadToCRM(lead){n  try {n    await fetch(`${CRM_URL}/leads`, {n      method: "POST",n      headers: { "Content-Type": "application/json" },n      body: JSON.stringify(lead)n    });n  } catch (e) { console.warn("CRM postLead failed", e.message); }n}nnasync function fetchCRMReply({from,msgText}){n  try {n    const r = await fetch(`${CRM_URL}/prompt?text=${encodeURIComponent(msgText||"")}`);n    if(!r.ok) return null;n    const j = await r.json().catch(()=>({}));n    return j.reply || null;n  } catch(e){ console.warn("CRM fetch failed", e.message); return null; }n}n
+n// ---- CRM integration ----nconst CRM_URL = process.env.CRM_URL || "http://127.0.0.1:10000";nasync function postLeadToCRM(lead){try{await fetch(`${CRM_URL}/leads`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(lead)});}catch(e){console.warn("CRM postLead failed",e.message);}}nasync function fetchCRMReply({from,msgText}){try{const r=await fetch(`${CRM_URL}/prompt?text=${encodeURIComponent(msgText||"")}`);if(!r.ok)return null;const j=await r.json().catch(()=>({}));return j.reply||null;}catch(e){console.warn("CRM fetch failed",e.message);return null;}}n
 
 // ------------- defaults -------------
 const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
@@ -43,14 +44,41 @@ async function waSendRaw(payload) {
       body: JSON.stringify(payload)
     });
     const j = await r.json().catch(()=>({}));
-    console.log("WA send response status", r.status);
-    try { console.log("WA send response body:", JSON.stringify(j).slice(0,1000)); } catch(e){ console.log("WA send response body (raw):", String(j).slice(0,1000)); }
     if (!r.ok) console.error("WA send error", r.status, j);
     return j;
   } catch(e) { console.error("waSendRaw failed", e && e.stack ? e.stack : e); return null; }
 }
 async function waSendText(to, body){ return waSendRaw({ messaging_product:"whatsapp", to, type:"text", text:{ body } }); }
 async function waSendListMenu(to){
+
+// ---------------- CRM / Lead logging helpers (auto-inserted) ----------------
+async function postLeadToCRM({ from, name, text }) {
+  try {
+    const CRM_URL = (process.env.CRM_URL || "http://127.0.0.1:10000").replace(/\/$/, "");
+    const body = { from, name, text, ts: Date.now() };
+    fetch(`${CRM_URL}/leads`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(r => { if (!r.ok) console.warn("postLeadToCRM non-2xx", r.status); })
+      .catch(e => console.warn("postLeadToCRM failed", e && e.message));
+  } catch (e) { console.warn("postLeadToCRM error", e && e.message); }
+}
+
+async function fetchCRMReply({ from, msgText }) {
+  try {
+    const CRM_URL = (process.env.CRM_URL || "http://127.0.0.1:10000").replace(/\/$/, "");
+    const url = `${CRM_URL}/prompt?from=${encodeURIComponent(from)}&msg=${encodeURIComponent(msgText)}`;
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) { if (process.env.DEBUG_VARIANT === "true") console.log("fetchCRMReply non-2xx", r.status); return null; }
+    const j = await r.json().catch(()=>null);
+    if (!j) return null;
+    return j.text || j.reply || null;
+  } catch (e) { console.warn("fetchCRMReply failed", e && e.message); return null; }
+}
+
+// ---------------- end CRM helpers ----------------
+
   const payload = {
     messaging_product: "whatsapp", to, type: "interactive",
     interactive: {
@@ -138,6 +166,10 @@ function matchesWithSyns(value,target,synMap){ const v=norm(value), t=norm(targe
 
 // ------------- robust normalization for matching -------------
 function normForMatch(s){
+  // key normalizations:
+  // - treat / and * as 'x' (4/2 -> 4x2)
+  // - map automatic/auto -> at ; manual/man -> mt
+  // - compact whitespace and remove punctuation
   return (s||"").toString().toLowerCase()
     .replace(/(automatic|automatic transmission|\bauto\b)/g, " at ")
     .replace(/\bautomatic\b/g," at ")
@@ -175,12 +207,14 @@ function buildVariantMapForTable(table){
       const parts = cell.split(',').map(x=>x.trim()).filter(Boolean);
       for(const p of parts) keywords.add(normForMatch(p));
     }
+    // Expand n-grams of canonical and keywords to help partial matches (e.g., '4x2 at', '4x2')
     const addTokens = (txt)=>{
       const n = normForMatch(txt);
       if(!n) return;
       keywords.add(n);
       const toks = n.split(' ').filter(Boolean);
       for(let i=0;i<toks.length;i++){
+        // unigrams and bigrams
         keywords.add(toks[i]);
         if(i+1 < toks.length) keywords.add(`${toks[i]} ${toks[i+1]}`);
       }
@@ -197,11 +231,13 @@ function buildVariantMapForTable(table){
 function matchVariantFromMap(userText, variantMap){
   if(!userText||!variantMap||!variantMap.length) return null;
   const qRaw = normForMatch(userText);
+  // 1) exact or keyword hit
   for(const v of variantMap){
     if(!v) continue;
     if(v.canonical && normForMatch(v.canonical) === qRaw) return v;
     if(v.keywords && v.keywords.has(qRaw)) return v;
   }
+  // 2) cleaned (strip city/profile) exact
   const cleaned = qRaw.replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar|up|hp|himachal|individual|company|corporate|firm|personal)\b/g," ").replace(/\s+/g," ").trim();
   if(cleaned && cleaned !== qRaw){
     for(const v of variantMap){
@@ -209,14 +245,17 @@ function matchVariantFromMap(userText, variantMap){
       if(v.keywords.has(cleaned)) return v;
     }
   }
+  // 3) token-subset matching & overlap scoring
   const qTokens = (cleaned||qRaw).split(' ').filter(Boolean);
   let best=null, bestScore=0, second=0;
   for(const v of variantMap){
     const all = Array.from(v.keywords).join(' ');
     const vTokens = all.split(' ').filter(Boolean);
+    // quick subset checks
     const qInV = qTokens.every(t => vTokens.includes(t));
     const vInQ = vTokens.every(t => qTokens.includes(t));
-    if(qInV) { return v; }
+    if(qInV) { return v; } // user tokens fully match variant tokens -> high confidence
+    // scoring: exact token matches stronger; partial matches weaker
     let score=0;
     for(const t of qTokens){
       for(const vt of vTokens){
@@ -224,6 +263,7 @@ function matchVariantFromMap(userText, variantMap){
         else if(vt.includes(t) || t.includes(vt)) score += 4;
       }
     }
+    // special boosts
     if(/\b4x2\b/.test(cleaned||qRaw) && /\b4x2\b/.test(all)) score += 12;
     if(/\b4x4\b/.test(cleaned||qRaw) && /\b4x4\b/.test(all)) score += 12;
     if(/\bat\b/.test(cleaned||qRaw) && /\bat\b/.test(all)) score += 8;
@@ -446,7 +486,6 @@ app.get("/webhook", (req,res)=>{
 });
 
 app.post("/webhook", async (req,res)=>{
-  console.log("📩 Incoming webhook hit:", req.body);
   try{
     const entry = req.body?.entry?.[0]; const change = entry?.changes?.[0]; const value = change?.value || {};
     const msg = value?.messages?.[0]; const contact = value?.contacts?.[0];
@@ -454,14 +493,12 @@ app.post("/webhook", async (req,res)=>{
     const from = msg.from; const type = msg.type; const name = contact?.profile?.name || "Unknown";
     let msgText = ""; let selectedId = null;
     if(type==="text") msgText = msg.text?.body || "";
+    // log lead to CRM (non-blocking)
+    try { if(type === "text") postLeadToCRM({ from, name, text: msgText }); } catch(e){ console.warn("lead log failed", e && e.message); }
     else if(type==="interactive"){ selectedId = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id || null; msgText = msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || ""; }
     else msgText = JSON.stringify(msg);
     console.log("INBOUND", { from, type, sample: msgText.slice(0,200) });
     if(from !== ADMIN_WA) await sendAdminAlert({ from, name, text: msgText });
-
-    // non-blocking lead log to CRM
-    try { if (type === "text") postLeadToCRM({ from, name, text: msgText }); } catch (e) { console.warn("lead log failed", e && e.message); }
-
     if(selectedId){
       switch(selectedId){
         case "SRV_NEW_CAR":
@@ -488,26 +525,24 @@ app.post("/webhook", async (req,res)=>{
       }
       return res.sendStatus(200);
     }
-
     if(shouldGreetNow(from, msgText)){
       await waSendText(from, `🔴 *MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.`);
       await waSendListMenu(from); return res.sendStatus(200);
     }
-
     if(msgText && type==="text"){
       const served = await tryQuickNewCarQuote(msgText, from);
       if(served) return res.sendStatus(200);
-    }
-
-    const usedMatch = msgText.match(/used\s+(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i) || msgText.match(/(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i);
-    if(usedMatch && usedMatch.groups){ const { make, model, year } = usedMatch.groups; const q = await buildUsedCarQuote({ make, model, year }); await waSendText(from, q.text); await sendUsedCarButtons(from, !!q.picLink); if(q.picLink) await waSendText(from, `Photos: ${q.picLink}`); return res.sendStatus(200); }
-
-    // CRM fallback: ask CRM for a reply if no quick quote produced
+    // no quick quote generated — try CRM-driven prompt
     try {
       const crmReply = await fetchCRMReply({ from, msgText });
-      if (crmReply) { await waSendText(from, crmReply); return res.sendStatus(200); }
-    } catch (e) { console.warn("CRM reply failed", e && e.message); }
-
+      if (crmReply) {
+        await waSendText(from, crmReply);
+        return res.sendStatus(200);
+      }
+    } catch (e) { console.warn("CRM reply fetch failed", e && e.message); }
+    }
+    const usedMatch = msgText.match(/used\s+(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i) || msgText.match(/(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i);
+    if(usedMatch && usedMatch.groups){ const { make, model, year } = usedMatch.groups; const q = await buildUsedCarQuote({ make, model, year }); await waSendText(from, q.text); await sendUsedCarButtons(from, !!q.picLink); if(q.picLink) await waSendText(from, `Photos: ${q.picLink}`); return res.sendStatus(200); }
     await waSendText(from, "Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.");
     return res.sendStatus(200);
   } catch(e){ console.error("Webhook error:", e && e.stack ? e.stack : e); return res.sendStatus(200); }
@@ -519,64 +554,4 @@ app.listen(PORT, ()=> {
   console.log(`✅ CRM running on ${PORT}`);
   console.log("ENV summary:", { SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL, PHONE_NUMBER_ID: !!PHONE_NUMBER_ID, META_TOKEN: !!META_TOKEN, ADMIN_WA: !!ADMIN_WA, DEBUG_VARIANT: process.env.DEBUG_VARIANT });
 });
-// --- BEGIN WEBHOOK & CRM INTEGRATION (added on Nov 12) ---
-const bodyParser = require('body-parser');
 
-app.use(bodyParser.json({ limit: '1mb' }));
-
-// ✅ META VERIFY (GET)
-app.get('/webhook', (req, res) => {
-  const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'verify_token';
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  if (mode && token && mode === 'subscribe' && token === VERIFY_TOKEN)
-    return res.status(200).send(challenge);
-  return res.sendStatus(403);
-});
-
-// ✅ MAIN MESSAGE HANDLER (POST)
-app.post('/webhook', async (req, res) => {
-  console.log("📩 Incoming webhook hit:", req.body);
-  try {
-    const body = req.body || {};
-    const msgEntry = body.entry?.[0]?.changes?.[0]?.value || {};
-    const msg = msgEntry.messages?.[0];
-    const contact = msgEntry.contacts?.[0];
-    if (!msg) return res.sendStatus(200);
-
-    const from = msg.from;
-    const text = msg.text?.body || '';
-    const name = contact?.profile?.name || '';
-
-    // 1️⃣ Save lead to CRM
-    postLeadToCRM({ from, name, text }).catch(() => {});
-
-    // 2️⃣ Fetch dynamic CRM GPT reply
-    const reply = await fetchCRMReply({ from, msgText: text });
-    const finalReply = reply || "Thanks, we’ll get back to you shortly.";
-
-    // 3️⃣ Send WhatsApp message via Meta Graph API
-    const token = process.env.META_TOKEN;
-    const phoneId = process.env.PHONE_NUMBER_ID;
-    const url = `https://graph.facebook.com/v18.0/${phoneId}/messages`;
-    await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: from,
-        text: { body: finalReply },
-      }),
-    });
-
-    res.sendStatus(200);
-  } catch (err) {
-    console.error('Webhook error:', err);
-    res.sendStatus(500);
-  }
-});
-// --- END WEBHOOK & CRM INTEGRATION ---

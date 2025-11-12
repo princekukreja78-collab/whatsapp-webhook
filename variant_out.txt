@@ -1,0 +1,125 @@
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+Fetching CSV from https://docs.google.com/spreadsheets/d/e/2PACX-1vT1fxuSfv5DKtzjm2icH03KsOlHtFuv0cUxTPTkEBc5bpPWpZgW8LcxzMafFcDcmEvGfrn3U_RyrDDg/pub?gid=0&single=true&output=csv
+Rows: 131
+\nQuery: Delhi Hycross ZXO individual
+  score= 2  — sample fields: {
+  MODEL: 'HYCROSS',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'HYCROSS',
+    COLOUR: 'OTHER THAN PEARL WHITE',
+    VARIANT: 'ZX (O)',
+    VARIANT_KEYWORDS: 'ZX(O),ZX OPTIONAL ,ZXO HYBRID,ZX(0) HYBRID,ZX OPTIONAL 7 SEATER ',
+    SUFFIX: 'INNYA'
+  }
+}
+  score= 2  — sample fields: {
+  MODEL: 'HYCROSS',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'HYCROSS',
+    COLOUR: 'PEARL WHITE',
+    VARIANT: 'ZXO/ZX (O) (Pearl White)',
+    VARIANT_KEYWORDS: 'ZX(O),ZX OPTIONAL ,ZXO HYBRID,ZX(0) HYBRID,ZX OPTIONAL 7 SEATER ',
+    SUFFIX: 'INNYA'
+  }
+}
+  score= 2  — sample fields: {
+  MODEL: 'HYCROSS',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'HYCROSS',
+    COLOUR: 'OTHER THAN PEARL WHITE',
+    VARIANT: 'ZX (O) LE',
+    VARIANT_KEYWORDS: 'ZX(O) LE,ZX OPTIONAL LE,ZXO HYBRID LE,ZX(0) HYBRID LIMITED EDDITION,ZX OPTIONAL 7 SEATER LIMITED EDDITION',
+    SUFFIX: 'INNHZ'
+  }
+}
+  score= 2  — sample fields: {
+  MODEL: 'HYCROSS',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'HYCROSS',
+    COLOUR: 'PEARL WHITE',
+    VARIANT: 'ZX (O) LE (Pearl White)',
+    VARIANT_KEYWORDS: 'ZX(O) LE,ZX OPTIONAL LE,ZXO HYBRID LE,ZX(0) HYBRID LIMITED EDDITION,ZX OPTIONAL 7 SEATER LIMITED EDDITION',
+    SUFFIX: 'INNHZ'
+  }
+}
+  score= 1  — sample fields: {
+  MODEL: 'HYCROSS',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'HYCROSS',
+    COLOUR: 'OTHER THAN PEARL WHITE',
+    VARIANT: 'G SLF 7S',
+    VARIANT_KEYWORDS: 'G SLF 7S',
+    SUFFIX: 'INND3'
+  }
+}
+\nQuery: HR Fortuner 4x2 AT individual
+  score= 3  — sample fields: {
+  MODEL: 'FORTUNER',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'FORTUNER',
+    COLOUR: 'OTHER THAN PEARL WHITE',
+    VARIANT: 'Diesel 4X2 AT',
+    VARIANT_KEYWORDS: 'DIESEL 4/2 AT,DIESEL 4x2 AT,DIESEL 4*2 AUTOMATIC,DIESEL 4X2 AUTOMATIC TRANSMISSION',
+    SUFFIX: 'FRNBK/FRNCK'
+  }
+}
+  score= 3  — sample fields: {
+  MODEL: 'FORTUNER',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'FORTUNER',
+    COLOUR: 'PEARL WHITE',
+    VARIANT: 'Diesel 4X2 AT (Pearl White)',
+    VARIANT_KEYWORDS: 'DIESEL 4/2 AT,DIESEL 4x2 AT,DIESEL 4*2 AUTOMATIC,DIESEL 4X2 AUTOMATIC TRANSMISSION',
+    SUFFIX: 'FRNBK/FRNCK'
+  }
+}
+  score= 3  — sample fields: {
+  MODEL: 'FORTUNER',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'FORTUNER',
+    COLOUR: 'OTHER THAN PEARL WHITE',
+    VARIANT: 'Petrol 4X2 AT',
+    VARIANT_KEYWORDS: 'PETROL 4/2 AT,PETROL 4x2 AT,PETROL 4*2 AUTOMATIC,PETROL 4X2 AUTOMATIC TRANSMISSION',
+    SUFFIX: 'FRNP6'
+  }
+}
+  score= 3  — sample fields: {
+  MODEL: 'FORTUNER',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'FORTUNER',
+    COLOUR: 'PEARL WHITE',
+    VARIANT: 'Petrol 4X2 AT (Pearl White)',
+    VARIANT_KEYWORDS: 'PETROL 4/2 AT,PETROL 4x2 AT,PETROL 4*2 AUTOMATIC,PETROL 4X2 AUTOMATIC TRANSMISSION',
+    SUFFIX: 'FRNP6'
+  }
+}
+  score= 3  — sample fields: {
+  MODEL: 'FORTUNER',
+  PRICE: '',
+  ROW_SAMPLE: {
+    MAKE: 'TOYOTA',
+    MODEL: 'FORTUNER',
+    COLOUR: 'OTHER THAN PEARL WHITE',
+    VARIANT: 'Leader Edition 4X2 AT',
+    VARIANT_KEYWORDS: 'LEADER DIESEL 4/2 AT,LEADER DIESEL 4x2 AT,LEADER DIESEL 4*2 AUTO,LEADER DIESEL 4X2 AUTOMATIC TRANSMISSION',
+    SUFFIX: 'FRNB4'
+  }
+}
