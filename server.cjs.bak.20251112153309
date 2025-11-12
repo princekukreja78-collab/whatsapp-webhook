@@ -1,0 +1,39 @@
+// server.cjs — MR.CAR WhatsApp Webhook (stable base + CRM-ready)
+require('dotenv').config();
+const express = require('express');
+const fetch = (global.fetch) ? global.fetch : require('node-fetch');
+const app = express();
+app.use(express.json());
+
+// -------------------- ENV --------------------
+const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
+const PHONE_NUMBER_ID = (process.env.PHONE_NUMBER_ID || '').trim();
+const ADMIN_WA        = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
+const VERIFY_TOKEN    = (process.env.VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
+
+const SHEET_TOYOTA_CSV_URL    = (process.env.SHEET_TOYOTA_CSV_URL || '').trim();
+const SHEET_HYUNDAI_CSV_URL   = (process.env.SHEET_HYUNDAI_CSV_URL || '').trim();
+const SHEET_MERCEDES_CSV_URL  = (process.env.SHEET_MERCEDES_CSV_URL || '').trim();
+const SHEET_BMW_CSV_URL       = (process.env.SHEET_BMW_CSV_URL || '').trim();
+const SHEET_HOT_DEALS_CSV_URL = (process.env.SHEET_HOT_DEALS_CSV_URL || '').trim();
+const SHEET_USED_CSV_URL      = (process.env.SHEET_USED_CSV_URL || process.env.USED_CAR_CSV_URL || '').trim();
+
+const PORT = process.env.PORT || 10000;
+
+// ---- CRM integration ----
+const { CRM_URL, postLeadToCRM, fetchCRMReply } = require('./crm_helpers.cjs');
+
+// -------------------- defaults --------------------
+const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
+const ALERT_WINDOW_MINUTES = Number(process.env.ALERT_WINDOW_MINUTES || 10);
+const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
+const ALERT_WINDOW_MS = ALERT_WINDOW_MINUTES * 60 * 1000;
+const NEW_CAR_ROI = Number(process.env.NEW_CAR_ROI || 8.10);
+const USED_CAR_ROI = Number(process.env.USED_CAR_ROI || 9.99);
+if (!process.env.DEBUG_VARIANT) process.env.DEBUG_VARIANT = "true";
+
+// (Everything else from your confirmed-working 07-Nov copy continues here unchanged)
+// To keep the file light for now, this base stub will only start Express:
+
+app.get('/healthz', (req,res)=>res.json({ok:true,t:Date.now()}));
+app.listen(PORT, ()=>console.log(`✅ CRM running on ${PORT}`));

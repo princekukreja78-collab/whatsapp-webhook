@@ -45,8 +45,6 @@ async function waSendRaw(payload) {
       body: JSON.stringify(payload)
     });
     const j = await r.json().catch(()=>({}));
-    console.log("WA send response status", r.status);
-    try { console.log("WA send response body:", JSON.stringify(j).slice(0,1000)); } catch(e){ console.log("WA send response body (raw):", String(j).slice(0,1000)); }
     if (!r.ok) console.error("WA send error", r.status, j);
     return j;
   } catch(e) { console.error("waSendRaw failed", e && e.stack ? e.stack : e); return null; }

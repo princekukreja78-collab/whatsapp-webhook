@@ -1,0 +1,306 @@
+/* ===== Mr. Car x Signature Savings Webhook (CLEAN RESTORE) =====
+   Restored from commit 97f8d0e and cleaned for single-file usage.
+   Paste this file into your repo (overwrite server.cjs), then run:
+     node server.cjs
+   or use pm2 / system service as you prefer.
+*/
+
+require('dotenv').config({ path: './.env' });
+
+// safe fetch fallback: prefer global.fetch, else dynamic import of node-fetch
+let fetchFn = global.fetch;
+if (!fetchFn) {
+  try {
+    // dynamic import for node-fetch v3 in CommonJS
+    // eslint-disable-next-line no-eval
+    const imported = eval("require('node-fetch')");
+    fetchFn = imported;
+  } catch (e) {
+    console.warn('node-fetch not found. Some network features may fail.');
+  }
+}
+const fetch = fetchFn;
+
+const express = require('express');
+const fs = require('fs');
+const crypto = require('crypto');
+const bodyParser = require('body-parser');
+const { parse } = require('csv-parse/sync');
+
+const app = express();
+
+// Capture raw body for signature verification if needed later
+function rawBodySaver(req, res, buf, encoding) {
+  if (buf && buf.length) req.rawBody = buf.toString(encoding || 'utf8');
+}
+app.use(bodyParser.json({ verify: rawBodySaver }));
+
+// --- Env ---
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || '';
+const META_TOKEN = process.env.META_TOKEN || process.env.WA_TOKEN || '';
+const PHONE_ID = process.env.PHONE_NUMBER_ID || process.env.PHONE_ID || process.env.PHONE_NUMBER || '';
+const ADMIN_WA = process.env.ADMIN_WA || '';
+const CRM_URL = process.env.CRM_URL || 'http://127.0.0.1:10000';
+const PORT = process.env.PORT || 10000;
+const DEBUG = process.env.DEBUG === 'true' || false;
+const DEBUG_VARIANT = process.env.DEBUG_VARIANT === 'true' || false;
+
+// --- In-memory pricing/variant cache ---
+let PRICING_CACHE = { ts: 0, tables: {} };
+// TTL for reload (ms)
+const PRICING_TTL = 1000 * 60 * 10; // 10 minutes
+
+// --- Helper: WhatsApp send ---
+async function waSendRaw(payload) {
+  try { console.log("WA_SEND_ATTEMPT payload_preview:", JSON.stringify(payload).slice(0,800)); } catch(e){}
+  if (!META_TOKEN || !PHONE_ID) {
+    console.error('Missing META_TOKEN or PHONE_ID; cannot send WA message.');
+    return null;
+  }
+  const url = `https://graph.facebook.com/v20.0/${PHONE_ID}/messages`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${META_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      console.error('WA send error', res.status, json);
+    }
+    return json;
+  } catch (e) {
+    console.error('waSendRaw exception', e);
+    return null;
+  }
+}
+
+async function waSendText(to, body) {
+  try { console.log("WA_SEND_TEXT_CALL to=", to, " body_preview=", String(body).slice(0,300)); } catch(e){}
+  try {
+    const payload = {
+      messaging_product: 'whatsapp',
+      to,
+      type: 'text',
+      text: { body }
+    };
+    return await waSendRaw(payload);
+  } catch (e) {
+    console.error('waSendText failed', e);
+  }
+}
+
+// --- Load pricing CSVs from env variables starting with SHEET_*_CSV_URL ---
+async function loadPricing() {
+  try {
+    const tables = {};
+    const entries = Object.entries(process.env).filter(([k]) => k.startsWith('SHEET_') && k.endsWith('_CSV_URL'));
+    for (const [k, url] of entries) {
+      try {
+        const name = k.replace(/^SHEET_/, '').replace(/_CSV_URL$/, '');
+        const r = await fetch(url);
+        if (!r.ok) {
+          console.warn(`Failed to fetch ${name} (${url}): ${r.status}`);
+          continue;
+        }
+        const csv = await r.text();
+        const rows = parse(csv, { columns: true, skip_empty_lines: true });
+        tables[name] = { rows, updated: new Date().toISOString() };
+      } catch (e) {
+        console.error('Error loading CSV', k, e);
+      }
+    }
+    PRICING_CACHE = { ts: Date.now(), tables };
+    console.log('✅ Pricing loaded for:', Object.keys(tables));
+  } catch (e) {
+    console.error('❌ loadPricing failed', e);
+  }
+}
+
+// Ensure pricing loaded at least once on startup
+(async () => { await loadPricing(); })();
+
+// --- Basic routes ---
+app.get('/healthz', (req, res) => {
+  res.json({ ok: true, t: Date.now(), debug: DEBUG, pricingTables: Object.keys(PRICING_CACHE.tables) });
+});
+
+// --- Admin: reload CSV (POST)
+app.post('/admin/reload-csv', express.json(), async (req, res) => {
+  try {
+    const from = String(req.body.from || '').replace(/\D/g, '');
+    if (ADMIN_WA && !from.includes(ADMIN_WA.replace(/\D/g, ''))) {
+      return res.status(403).json({ ok: false, msg: 'forbidden' });
+    }
+    PRICING_CACHE = { ts: 0, tables: {} };
+    await loadPricing();
+    const rows = Object.values(PRICING_CACHE.tables).reduce((sum, t) => sum + (t.rows?.length || 0), 0);
+    return res.json({ ok: true, rows });
+  } catch (e) {
+    console.error('admin reload POST error', e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// --- Admin: reload CSV (GET)
+app.get('/admin/reload-csv', async (req, res) => {
+  try {
+    const from = String(req.query.from || '').replace(/\D/g, '');
+    if (ADMIN_WA && !from.includes(ADMIN_WA.replace(/\D/g, ''))) {
+      return res.status(403).json({ ok: false, msg: 'forbidden' });
+    }
+    PRICING_CACHE = { ts: 0, tables: {} };
+    await loadPricing();
+    const rows = Object.values(PRICING_CACHE.tables).reduce((sum, t) => sum + (t.rows?.length || 0), 0);
+    return res.json({ ok: true, rows });
+  } catch (e) {
+    console.error('admin reload GET error', e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// --- Webhook verification (Meta) ---
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode && token === VERIFY_TOKEN) return res.status(200).send(challenge);
+  return res.status(403).send('Forbidden');
+});
+
+// --- Utility: simple variant matching example ---
+// This is a minimal, safe matching function. You can enhance with variant_keywords column logic later.
+function findVariantMatch(text) {
+  if (!PRICING_CACHE.tables) return null;
+  const toyota = PRICING_CACHE.tables.TOYOTA || PRICING_CACHE.tables.Toyota || PRICING_CACHE.tables.TOYOTA_CSV || null;
+  const s = String(text || '').toLowerCase();
+
+  if (!toyota?.rows?.length) return null;
+  // try to find model name as a whole-word match in 'Model' or 'MODEL' or similar headers
+  for (const row of toyota.rows) {
+    const modelCandidates = [];
+    for (const k of Object.keys(row)) {
+      if (/model/i.test(k)) modelCandidates.push(String(row[k] || '').toLowerCase());
+    }
+    const rowText = [ ...modelCandidates, ...Object.values(row).map(v => String(v || '').toLowerCase()) ].join(' ');
+    // crude containment check
+    if (s.includes(rowText.split(' ').slice(0,3).join(' ').trim())) {
+      return { row, reason: 'full-row-match' };
+    }
+  }
+
+  // fallback: keyword match against MODEL column words
+  for (const row of toyota.rows) {
+    const modelVals = Object.keys(row).filter(k => /model/i.test(k)).map(k => String(row[k] || '').toLowerCase());
+    for (const mv of modelVals) {
+      if (!mv) continue;
+      const tokens = mv.split(/\s+/).filter(Boolean);
+      // require at least one token present
+      if (tokens.some(t => s.includes(t))) return { row, reason: 'token-match' };
+    }
+  }
+  return null;
+}
+
+// --- Webhook receiver ---
+app.post('/webhook', async (req, res) => {
+  
+  console.log("WEBHOOK_INBOUND_HANDLER => called", { ts: Date.now() });
+try {
+    const entry = req.body.entry?.[0];
+    const change = entry?.changes?.[0];
+    const msg = change?.value?.messages?.[0];
+    // quick return for non-message callbacks
+    if (!msg) return res.sendStatus(200);
+
+    const from = msg.from;
+    const type = msg.type;
+    const text = msg.text?.body?.trim();
+    console.log('📩 Message from', from, ':', text?.slice(0,140));
+
+    // simple greeting
+    if (text?.toLowerCase() === 'hi' || text?.toLowerCase() === 'hello') {
+      await waSendText(from, "Namaste (🙏) Mr. Car welcomes you.\nWe assist with new cars, pre-owned, loans, and insurance.");
+      return res.sendStatus(200);
+    }
+
+    // quick new-car try path: tiny helper that attempts variant match and replies template
+    async function tryQuickNewCarQuote(incoming, sender) {
+      try {
+        const match = findVariantMatch(incoming);
+        if (match && match.row) {
+          // craft a short reply using available fields safely
+          const modelName = match.row.Model || match.row.MODEL || match.row['Model Name'] || '';
+          const priceField = Object.keys(match.row).find(k => /on road price|on_road|onroad/i.test(k)) || Object.keys(match.row).find(k => /price/i.test(k));
+          const price = priceField ? (match.row[priceField] || '') : '';
+          const reply = `Quick quote — ${modelName || 'Model'}\nOn-road: ${price || 'N/A'}\nReply with 'book' to proceed or send full PI details.`;
+          await waSendText(sender, reply);
+          if (DEBUG_VARIANT) console.log('Variant matched reason:', match.reason);
+          return true;
+        }
+        return false;
+      } catch (e) {
+        console.error('tryQuickNewCarQuote error', e);
+        return false;
+      }
+    }
+
+    // If text looks like a quote request, try the quick path
+    if (type === 'text' && text) {
+      const tried = await tryQuickNewCarQuote(text, from);
+      if (tried) return res.sendStatus(200);
+    }
+
+    // Fallback: proxy message to external CRM /prompt endpoint (non-blocking)
+    (async () => {
+      try {
+        const r = await fetch(`${CRM_URL.replace(/\/$/, '')}/prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, text })
+        });
+        if (!r.ok) throw new Error(`CRM /prompt non-ok ${r.status}`);
+        // accept text or JSON; prefer text for simple CRM
+        const ct = r.headers.get('content-type') || '';
+        let reply;
+        if (ct.includes('application/json')) {
+          const json = await r.json();
+          // support { reply: "...", bot: "..." } or raw string
+          reply = json.reply || json.text || (typeof json === 'string' ? json : JSON.stringify(json));
+        } else {
+          reply = await r.text();
+        }
+        if (reply?.trim()) {
+          await waSendText(from, reply);
+        } else {
+          // no reply from CRM: polite fallback
+          await waSendText(from, 'Our team will reach out shortly. Thank you.');
+        }
+      } catch (e) {
+        console.error('CRM /prompt error', e && (e.stack || e));
+        try { await waSendText(from, 'Our team will reach out shortly. Thank you.'); } catch (e2) { console.error('fallback send failed', e2); }
+      }
+    })();
+
+    return res.sendStatus(200);
+  } catch (e) {
+    console.error('webhook error', e && (e.stack || e));
+    return res.sendStatus(500);
+  }
+});
+
+// --- Start server ---
+app.listen(PORT, () => {
+  console.log(`✅ CRM running on ${PORT}`);
+  console.log('ENV summary:', {
+    SHEET_KEYS: Object.keys(process.env).filter(k => k.startsWith('SHEET_')),
+    PHONE_NUMBER_ID: !!PHONE_ID,
+    META_TOKEN: !!META_TOKEN,
+    ADMIN_WA: !!ADMIN_WA,
+    CRM_URL: !!CRM_URL,
+    DEBUG
+  });
+});

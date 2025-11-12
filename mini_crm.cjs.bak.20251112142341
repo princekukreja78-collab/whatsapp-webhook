@@ -1,0 +1,33 @@
+// mini_crm.cjs — local lightweight CRM
+const express = require('express');
+const app = express();
+app.use(express.json());
+
+const leads = []; // store leads in memory
+
+// POST /leads — webhook posts new WhatsApp leads here
+app.post('/leads', (req, res) => {
+  const { from, name, text, ts } = req.body || {};
+  if (!from) return res.status(400).send('Missing from');
+  const lead = { from, name, text, ts: ts || Date.now() };
+  leads.unshift(lead);
+  console.log('CRM: new lead', from, '-', text);
+  res.send('OK');
+});
+
+// GET /leads — view all logged leads (as JSON)
+app.get('/leads', (req, res) => res.json(leads));
+
+// GET /prompt — return a simple text (simulating Signature Savings GPT)
+app.get('/prompt', (req, res) => {
+  const msg = (req.query.msg || '').toLowerCase();
+  let reply = 'Thanks! We received your message.';
+  if (msg.includes('hycross')) reply = 'Got your Hycross request — would you like finance options or to book a test drive?';
+  else if (msg.includes('used')) reply = 'We can assist with pre-owned cars. Please share make, model, and year.';
+  res.json({ text: reply });
+});
+
+// health check
+app.get('/healthz', (req, res) => res.json({ ok: true, t: Date.now() }));
+
+app.listen(10000, () => console.log('mini CRM running on :10000'));
