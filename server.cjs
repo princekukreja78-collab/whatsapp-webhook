@@ -1,5 +1,5 @@
-// server.cjs — MR.CAR webhook (final drop-in — transmission synonyms + token-subset matching)
-// CommonJS — ready for Render. DEBUG_VARIANT active by default.
+// server.cjs — MR.CAR webhook (restored full working version)
+// Uses crm_helpers.cjs for CRM integration (postLeadToCRM, fetchCRMReply)
 
 require('dotenv').config();
 const express = require('express');
@@ -20,7 +20,10 @@ const SHEET_BMW_CSV_URL       = (process.env.SHEET_BMW_CSV_URL || '').trim();
 const SHEET_HOT_DEALS_CSV_URL = (process.env.SHEET_HOT_DEALS_CSV_URL || '').trim();
 const SHEET_USED_CSV_URL      = (process.env.SHEET_USED_CSV_URL || process.env.USED_CAR_CSV_URL || '').trim();
 
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000; // default to 3000 to avoid colliding with CRM on 10000
+
+// ---- CRM integration ----
+const { CRM_URL, postLeadToCRM, fetchCRMReply } = require('./crm_helpers.cjs');
 
 // ------------- defaults -------------
 const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
@@ -135,10 +138,6 @@ function matchesWithSyns(value,target,synMap){ const v=norm(value), t=norm(targe
 
 // ------------- robust normalization for matching -------------
 function normForMatch(s){
-  // key normalizations:
-  // - treat / and * as 'x' (4/2 -> 4x2)
-  // - map automatic/auto -> at ; manual/man -> mt
-  // - compact whitespace and remove punctuation
   return (s||"").toString().toLowerCase()
     .replace(/(automatic|automatic transmission|\bauto\b)/g, " at ")
     .replace(/\bautomatic\b/g," at ")
@@ -176,14 +175,12 @@ function buildVariantMapForTable(table){
       const parts = cell.split(',').map(x=>x.trim()).filter(Boolean);
       for(const p of parts) keywords.add(normForMatch(p));
     }
-    // Expand n-grams of canonical and keywords to help partial matches (e.g., '4x2 at', '4x2')
     const addTokens = (txt)=>{
       const n = normForMatch(txt);
       if(!n) return;
       keywords.add(n);
       const toks = n.split(' ').filter(Boolean);
       for(let i=0;i<toks.length;i++){
-        // unigrams and bigrams
         keywords.add(toks[i]);
         if(i+1 < toks.length) keywords.add(`${toks[i]} ${toks[i+1]}`);
       }
@@ -200,13 +197,11 @@ function buildVariantMapForTable(table){
 function matchVariantFromMap(userText, variantMap){
   if(!userText||!variantMap||!variantMap.length) return null;
   const qRaw = normForMatch(userText);
-  // 1) exact or keyword hit
   for(const v of variantMap){
     if(!v) continue;
     if(v.canonical && normForMatch(v.canonical) === qRaw) return v;
     if(v.keywords && v.keywords.has(qRaw)) return v;
   }
-  // 2) cleaned (strip city/profile) exact
   const cleaned = qRaw.replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar|up|hp|himachal|individual|company|corporate|firm|personal)\b/g," ").replace(/\s+/g," ").trim();
   if(cleaned && cleaned !== qRaw){
     for(const v of variantMap){
@@ -214,17 +209,14 @@ function matchVariantFromMap(userText, variantMap){
       if(v.keywords.has(cleaned)) return v;
     }
   }
-  // 3) token-subset matching & overlap scoring
   const qTokens = (cleaned||qRaw).split(' ').filter(Boolean);
   let best=null, bestScore=0, second=0;
   for(const v of variantMap){
     const all = Array.from(v.keywords).join(' ');
     const vTokens = all.split(' ').filter(Boolean);
-    // quick subset checks
     const qInV = qTokens.every(t => vTokens.includes(t));
     const vInQ = vTokens.every(t => qTokens.includes(t));
-    if(qInV) { return v; } // user tokens fully match variant tokens -> high confidence
-    // scoring: exact token matches stronger; partial matches weaker
+    if(qInV) { return v; }
     let score=0;
     for(const t of qTokens){
       for(const vt of vTokens){
@@ -232,7 +224,6 @@ function matchVariantFromMap(userText, variantMap){
         else if(vt.includes(t) || t.includes(vt)) score += 4;
       }
     }
-    // special boosts
     if(/\b4x2\b/.test(cleaned||qRaw) && /\b4x2\b/.test(all)) score += 12;
     if(/\b4x4\b/.test(cleaned||qRaw) && /\b4x4\b/.test(all)) score += 12;
     if(/\bat\b/.test(cleaned||qRaw) && /\bat\b/.test(all)) score += 8;
@@ -466,6 +457,10 @@ app.post("/webhook", async (req,res)=>{
     else msgText = JSON.stringify(msg);
     console.log("INBOUND", { from, type, sample: msgText.slice(0,200) });
     if(from !== ADMIN_WA) await sendAdminAlert({ from, name, text: msgText });
+
+    // non-blocking lead log to CRM
+    try { if (type === "text") postLeadToCRM({ from, name, text: msgText }); } catch (e) { console.warn("lead log failed", e && e.message); }
+
     if(selectedId){
       switch(selectedId){
         case "SRV_NEW_CAR":
@@ -492,16 +487,26 @@ app.post("/webhook", async (req,res)=>{
       }
       return res.sendStatus(200);
     }
+
     if(shouldGreetNow(from, msgText)){
       await waSendText(from, `🔴 *MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.`);
       await waSendListMenu(from); return res.sendStatus(200);
     }
+
     if(msgText && type==="text"){
       const served = await tryQuickNewCarQuote(msgText, from);
       if(served) return res.sendStatus(200);
     }
+
     const usedMatch = msgText.match(/used\s+(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i) || msgText.match(/(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i);
     if(usedMatch && usedMatch.groups){ const { make, model, year } = usedMatch.groups; const q = await buildUsedCarQuote({ make, model, year }); await waSendText(from, q.text); await sendUsedCarButtons(from, !!q.picLink); if(q.picLink) await waSendText(from, `Photos: ${q.picLink}`); return res.sendStatus(200); }
+
+    // CRM fallback: ask CRM for a reply if no quick quote produced
+    try {
+      const crmReply = await fetchCRMReply({ from, msgText });
+      if (crmReply) { await waSendText(from, crmReply); return res.sendStatus(200); }
+    } catch (e) { console.warn("CRM reply failed", e && e.message); }
+
     await waSendText(from, "Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.");
     return res.sendStatus(200);
   } catch(e){ console.error("Webhook error:", e && e.stack ? e.stack : e); return res.sendStatus(200); }
@@ -513,4 +518,3 @@ app.listen(PORT, ()=> {
   console.log(`✅ CRM running on ${PORT}`);
   console.log("ENV summary:", { SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL, PHONE_NUMBER_ID: !!PHONE_NUMBER_ID, META_TOKEN: !!META_TOKEN, ADMIN_WA: !!ADMIN_WA, DEBUG_VARIANT: process.env.DEBUG_VARIANT });
 });
-
