@@ -1,0 +1,11 @@
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+✅ CRM running on 3000
+ENV summary: {
+  SHEET_KEYS: [ 'SHEET_TOYOTA_CSV_URL' ],
+  PHONE_NUMBER_ID: true,
+  META_TOKEN: true,
+  ADMIN_WA: true,
+  CRM_URL: true,
+  DEBUG: true
+}
+✅ Pricing loaded for: [ 'TOYOTA' ]
