@@ -1,0 +1,19 @@
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔑 add access controls to secrets: https://dotenvx.com/ops
+✅ CRM running on 3000
+ENV summary: {
+  SHEET_KEYS: [ 'SHEET_TOYOTA_CSV_URL' ],
+  PHONE_NUMBER_ID: true,
+  META_TOKEN: true,
+  ADMIN_WA: true,
+  CRM_URL: true,
+  DEBUG: true
+}
+✅ Pricing loaded for: [ 'TOYOTA' ]
+WEBHOOK_INBOUND_HANDLER => called { ts: 1762803009022 }
+📩 Message from 919900112233 : Delhi Hycross ZXO individual
+Variant matched reason: full-row-match
+WEBHOOK_INBOUND_HANDLER => called { ts: 1762803023474 }
+📩 Message from 919900112233 : HR Fortuner 4x2 AT individual
+Variant matched reason: full-row-match
+WEBHOOK_INBOUND_HANDLER => called { ts: 1762803085852 }
+📩 Message from 919900112233 : Hi

@@ -1,0 +1,339 @@
+/* ===== Mr. Car x Signature Savings Webhook (RESTORED + IMPROVED) =====
+   Restores CRM prompt proxy + robust Toyota variant matching and quick-quote.
+   - variant matching: prefer VARIANT / VARIANT_KEYWORDS, fallback scoring
+   - fuzzy header detection for ex-showroom/on-road price
+   - EMI calc at 8.10% by default (loan = 100% ex-showroom)
+   - Safe WA sending: requires META_TOKEN & PHONE_NUMBER_ID
+   Usage:
+     1) backup old file
+     2) paste this by heredoc
+     3) start with: node -r dotenv/config server.cjs
+*/
+
+require('dotenv').config({ path: './.env' });
+
+// fetch fallback
+let fetchFn = global.fetch;
+if (!fetchFn) {
+  try { fetchFn = require('node-fetch'); } catch (e) { console.warn('node-fetch missing; network fetch may fail'); }
+}
+const fetch = fetchFn;
+
+const express = require('express');
+const bodyParser = require('body-parser');
+const { parse } = require('csv-parse/sync');
+const crypto = require('crypto');
+
+const app = express();
+function rawBodySaver(req, res, buf, encoding) { if (buf && buf.length) req.rawBody = buf.toString(encoding || 'utf8'); }
+app.use(bodyParser.json({ verify: rawBodySaver }));
+
+// --- ENV ---
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || '';
+const META_TOKEN = process.env.META_TOKEN || process.env.OPEN_META_TOKEN || '';
+const PHONE_ID = process.env.PHONE_NUMBER_ID || process.env.PHONE_ID || '';
+const ADMIN_WA = (process.env.ADMIN_WA || '').replace(/\D/g,'') || '';
+const CRM_URL = process.env.CRM_URL || process.env.CRMWEB || 'http://127.0.0.1:10000';
+const PORT = parseInt(process.env.PORT || process.env.SERVER_PORT || '3000',10);
+const DEBUG = (process.env.DEBUG === 'true') || false;
+const DEBUG_VARIANT = (process.env.DEBUG_VARIANT === 'true') || false;
+const PRICING_TTL = 1000 * 60 * 10; // 10min cache TTL
+
+// --- in-memory pricing cache
+let PRICING_CACHE = { ts: 0, tables: {} };
+
+// --- utilities
+function normalizeText(s='') {
+  return String(s||'').toLowerCase().replace(/[\u2018\u2019\u201c\u201d]/g,'').replace(/[^a-z0-9\s]/gi,' ').replace(/\s+/g,' ').trim();
+}
+function splitTokens(s='') {
+  return normalizeText(s).split(/\s+/).filter(Boolean);
+}
+
+// fuzzy header lookup: find a key matching keywords list
+function findKeyContains(row, patterns=[]) {
+  for (const k of Object.keys(row)) {
+    const kn = k.toLowerCase();
+    for (const p of patterns) if (kn.includes(p)) return k;
+  }
+  return null;
+}
+
+// --- fetch & load CSVs
+async function loadPricing() {
+  try {
+    const tables = {};
+    const entries = Object.entries(process.env).filter(([k]) => k.startsWith('SHEET_') && k.endsWith('_CSV_URL'));
+    for (const [k, url] of entries) {
+      try {
+        const name = k.replace(/^SHEET_/, '').replace(/_CSV_URL$/, '');
+        if (!url) continue;
+        const r = await fetch(url);
+        if (!r.ok) { console.warn('Failed to fetch', name, url, r.status); continue; }
+        const csv = await r.text();
+        const rows = parse(csv, { columns: true, skip_empty_lines: true });
+        tables[name] = { rows, updated: new Date().toISOString(), rawUrl: url };
+      } catch (e) {
+        console.error('Load CSV error', k, e && e.stack ? e.stack : e);
+      }
+    }
+    PRICING_CACHE = { ts: Date.now(), tables };
+    console.log('✅ Pricing loaded', Object.keys(tables));
+  } catch (e) {
+    console.error('❌ loadPricing failed', e && e.stack ? e.stack : e);
+  }
+}
+
+// init loader
+(async()=>{ await loadPricing(); })();
+
+// --- WhatsApp send helpers (safe: only sends if META_TOKEN & PHONE_ID set)
+async function waSendRaw(payload) {
+  if (!META_TOKEN || !PHONE_ID) {
+    if (DEBUG) console.log('WA send skipped (META_TOKEN or PHONE_ID missing). Payload:', JSON.stringify(payload).slice(0,400));
+    return null;
+  }
+  const url = `https://graph.facebook.com/v20.0/${PHONE_ID}/messages`;
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${META_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const j = await res.json();
+    if (!res.ok) console.error('WA send error', res.status, j);
+    return j;
+  } catch (e) {
+    console.error('waSendRaw exception', e && e.stack ? e.stack : e);
+    return null;
+  }
+}
+async function waSendText(to, body) {
+  try { return await waSendRaw({ messaging_product:'whatsapp', to, type:'text', text:{ body } }); } catch(e){ console.error('waSendText failed', e); }
+}
+
+// --- Helper: price field detection
+function getPriceFromRow(row) {
+  // fuzzy detect ex-showroom or on-road price
+  const exKeys = ['ex showroom','ex_showroom','ex-showroom','ex showroom price','ex_showroom_price','ex showroom price'];
+  const onroadKeys = ['on road','on_road','on-road','onroad','on road price','on_road_price'];
+  let exKey = findKeyContains(row, exKeys);
+  let onKey = findKeyContains(row, onroadKeys) || findKeyContains(row, ['onroadprice','onroad price']);
+  // fallback to any numeric-looking price column
+  if (!exKey) exKey = findKeyContains(row, ['ex-showroom','ex showroom','ex_showroom']);
+  if (!onKey) onKey = findKeyContains(row, ['on road','onroad','price']);
+  const exVal = exKey ? String(row[exKey]||'').trim() : '';
+  const onVal = onKey ? String(row[onKey]||'').trim() : '';
+  return { exKey, onKey, exVal, onVal };
+}
+
+// EMI calc (simple EMI monthly)
+// rateAnnual percent (e.g., 8.10), months default 60
+function calcEMI(principal, rateAnnual=8.10, months=60) {
+  const P = Number(String(principal||'').replace(/[^0-9.]/g,'')) || 0;
+  if (!P) return null;
+  const r = (rateAnnual/100)/12;
+  const n = months;
+  const emi = (P * r * Math.pow(1+r,n)) / (Math.pow(1+r,n)-1);
+  return Math.round(emi);
+}
+
+// --- Variant matching: build variant map from a pricing table row set
+function buildVariantMap(rows) {
+  // returns { variantKey -> [rows...] } and also column hints
+  const variantMap = {};
+  for (const row of rows) {
+    // collect candidate variant strings from columns: VARIANT, VARIANT_KEYWORDS, SUFFIX, MODEL, MODEL NAME
+    const candidates = [];
+    for (const ck of Object.keys(row)) {
+      if (/variant|variant_keywords|keyword|suffix|model/i.test(ck)) {
+        const v = String(row[ck]||'').trim();
+        if (v) candidates.push({col:ck, val:v});
+      }
+    }
+    // also push tokens from combined descriptive fields
+    const desc = Object.values(row).slice(0,6).join(' ');
+    if (desc) candidates.push({col:'_desc', val:desc});
+    // normalize candidates -> keys
+    const keySet = new Set();
+    for (const c of candidates) {
+      const toks = splitTokens(c.val);
+      if (toks.length===0) continue;
+      // create several keys: full phrase, token substrings (2-grams)
+      const full = toks.join(' ');
+      keySet.add(full);
+      for (const t of toks) keySet.add(t);
+      for (let i=0;i<toks.length-1;i++) keySet.add(`${toks[i]} ${toks[i+1]}`);
+    }
+    for (const k of keySet) {
+      if (!variantMap[k]) variantMap[k] = [];
+      variantMap[k].push(row);
+    }
+  }
+  return variantMap;
+}
+
+// core match function
+function findVariantMatchInTable(query, tableRows) {
+  if (!tableRows || tableRows.length===0) return null;
+  const q = normalizeText(query);
+  const qTokens = splitTokens(q);
+  const variantMap = buildVariantMap(tableRows);
+
+  // 1) exact phrase / longest substring match preference: try decreasing length token sequences
+  for (let len = Math.min(qTokens.length, 5); len>=1; len--) {
+    for (let i=0;i+len<=qTokens.length;i++) {
+      const frag = qTokens.slice(i,i+len).join(' ');
+      if (variantMap[frag]) {
+        if (DEBUG_VARIANT) console.log('match: variantMap exact fragment', frag);
+        return { row: variantMap[frag][0], reason: `variant-frag:${frag}`, candidates: variantMap[frag] };
+      }
+    }
+  }
+
+  // 2) token intersection scoring across rows (fallback)
+  const scored = [];
+  for (const row of tableRows) {
+    const values = normalizeText(Object.values(row).join(' '));
+    let score = 0;
+    for (const t of qTokens) if (values.includes(t)) score++;
+    if (score>0) scored.push({row,score});
+  }
+  scored.sort((a,b)=>b.score-a.score);
+  if (scored.length>0 && scored[0].score>0) {
+    if (DEBUG_VARIANT) console.log('match: token-scorer', scored[0].score);
+    return { row: scored[0].row, reason: `scorer:${scored[0].score}`, candidates: scored.slice(0,3).map(s=>s.row) };
+  }
+
+  // 3) no match
+  return null;
+}
+
+// wrapper for Toyota specifically
+function findToyotaVariantMatch(query) {
+  const tables = PRICING_CACHE.tables;
+  const toy = tables.TOYOTA || tables.Toyota || tables.TOYOTA_CSV || null;
+  if (!toy || !toy.rows || toy.rows.length===0) return null;
+  return findVariantMatchInTable(query, toy.rows);
+}
+
+// --- Basic routes
+app.get('/healthz', (req,res)=> {
+  res.json({ ok:true, t:Date.now(), pricingTables: Object.keys(PRICING_CACHE.tables), debug: DEBUG, debug_variant: DEBUG_VARIANT });
+});
+
+// admin reload csv
+app.post('/admin/reload-csv', express.json(), async (req,res) => {
+  try {
+    const from = String(req.body.from || '').replace(/\D/g, '');
+    if (ADMIN_WA && !from.includes(ADMIN_WA)) return res.status(403).json({ ok:false, msg:'forbidden' });
+    PRICING_CACHE = { ts: 0, tables: {} };
+    await loadPricing();
+    const rows = Object.values(PRICING_CACHE.tables).reduce((s,t) => s + (t.rows?.length || 0), 0);
+    return res.json({ ok:true, rows });
+  } catch (e) { console.error('admin reload', e); return res.status(500).json({ ok:false, error:String(e) }); }
+});
+
+app.get('/admin/reload-csv', async (req,res) => {
+  try {
+    const from = String(req.query.from || '').replace(/\D/g, '');
+    if (ADMIN_WA && !from.includes(ADMIN_WA)) return res.status(403).json({ ok:false, msg:'forbidden' });
+    PRICING_CACHE = { ts: 0, tables: {} };
+    await loadPricing();
+    const rows = Object.values(PRICING_CACHE.tables).reduce((s,t) => s + (t.rows?.length || 0), 0);
+    return res.json({ ok:true, rows });
+  } catch (e) { console.error('admin reload GET', e); return res.status(500).json({ ok:false, error:String(e) }); }
+});
+
+// webhook verification
+app.get('/webhook', (req,res)=>{
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode && token === VERIFY_TOKEN) return res.status(200).send(challenge);
+  return res.status(403).send('Forbidden');
+});
+
+// webhook receiver
+app.post('/webhook', async (req,res) => {
+  try {
+    const entry = req.body.entry?.[0];
+    const change = entry?.changes?.[0];
+    const msg = change?.value?.messages?.[0];
+    if (!msg) return res.sendStatus(200);
+
+    const from = msg.from;
+    const type = msg.type;
+    const text = msg.text?.body?.trim() || '';
+    if (DEBUG) console.log('📩 incoming', from, text?.slice(0,200));
+
+    // greeting quick path
+    if (/^\s*(hi|hello|hey|namaste|namaskar)\b/i.test(text)) {
+      await waSendText(from, "Namaste (🙏) Mr. Car welcomes you.\nWe assist with new cars, pre-owned, loans, and insurance.");
+      return res.sendStatus(200);
+    }
+
+    // attempt quick new-car match if text seems like quote request
+    async function tryQuickNewCarQuote(incoming, sender) {
+      try {
+        const match = findToyotaVariantMatch(incoming);
+        if (!match || !match.row) return false;
+        const { row } = match;
+        const modelName = row.Model || row.MODEL || row['Model Name'] || row['MODEL NAME'] || '';
+        const { exKey, onKey, exVal, onVal } = getPriceFromRow(row);
+        const price = onVal || exVal || '';
+        const exNumeric = Number(String(exVal || '').replace(/[^0-9.]/g,''));
+        const emi = exNumeric ? calcEMI(exNumeric, 8.10, 60) : null;
+        let reply = `Quick quote — ${modelName || 'Model'}\nPrice: ${price || 'N/A'}`;
+        if (emi) reply += `\nEst. EMI (60m @ 8.10%): ₹${emi}`;
+        reply += `\nReply 'book' to proceed or send PI details.`;
+        await waSendText(sender, reply);
+        if (DEBUG_VARIANT) console.log('Variant match reason:', match.reason);
+        return true;
+      } catch (e) {
+        console.error('tryQuickNewCarQuote error', e);
+        return false;
+      }
+    }
+
+    if (type === 'text' && text) {
+      const tried = await tryQuickNewCarQuote(text, from);
+      if (tried) return res.sendStatus(200);
+    }
+
+    // fallback: proxy to CRM prompt endpoint (non-blocking)
+    (async () => {
+      try {
+        const r = await fetch(`${CRM_URL.replace(/\/$/,'')}/prompt`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ from, text }) });
+        if (!r.ok) throw new Error('CRM /prompt non-ok ' + r.status);
+        const ct = r.headers.get('content-type') || '';
+        let reply;
+        if (ct.includes('application/json')) { const j = await r.json(); reply = j.reply || j.text || (typeof j === 'string' ? j : JSON.stringify(j)); }
+        else reply = await r.text();
+        if (reply && reply.trim()) await waSendText(from, reply);
+        else await waSendText(from, 'Our team will reach out shortly. Thank you.');
+      } catch (e) {
+        console.error('CRM proxy error', e && e.stack ? e.stack : e);
+        try { await waSendText(from, 'Our team will reach out shortly. Thank you.'); } catch(e2){ console.error('fallback send failed', e2); }
+      }
+    })();
+
+    return res.sendStatus(200);
+  } catch (e) {
+    console.error('webhook processing error', e && e.stack ? e.stack : e);
+    return res.sendStatus(500);
+  }
+});
+
+// startup
+app.listen(PORT, async () => {
+  console.log(`✅ CRM running on ${PORT}`);
+  console.log('ENV summary:', {
+    SHEET_KEYS: Object.keys(process.env).filter(k=>k.startsWith('SHEET_')),
+    PHONE_NUMBER_ID: !!PHONE_ID,
+    META_TOKEN: !!META_TOKEN,
+    ADMIN_WA: !!ADMIN_WA,
+    CRM_URL: !!CRM_URL,
+    DEBUG, DEBUG_VARIANT
+  });
+  // if pricing empty then reload
+  if (!PRICING_CACHE || !Object.keys(PRICING_CACHE.tables).length) {
+    try { await loadPricing(); } catch(e){ console.error('startup loadPricing failed', e); }
+  }
+});
