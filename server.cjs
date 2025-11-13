@@ -1,15 +1,16 @@
-// server.cjs — MR.CAR webhook (merged, production-ready features)
-// Features: dynamic brand menu, tagline Option C, per-number quote limit (quote_limit.json) with IST reset,
-// EMI + Bullet EMI flows, enhanced used/sell flows, CRM helpers fallback, safer logging.
+// server.cjs — MR.CAR webhook (merged final)
+// Merged by assistant: combines latest stable logic, enriched interactive menus/buttons,
+// greeting helpers, quote limits, used-car bullet EMI, admin endpoints.
 
-// Load env
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const fetch = (global.fetch) ? global.fetch : require('node-fetch');
 const app = express();
 app.use(express.json());
+
+// fetch polyfill fallback
+const fetch = (global.fetch) ? global.fetch : require('node-fetch');
 
 // ---------------- ENV ----------------
 const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
@@ -25,796 +26,324 @@ const SHEET_HOT_DEALS_CSV_URL = (process.env.SHEET_HOT_DEALS_CSV_URL || '').trim
 const SHEET_USED_CSV_URL      = (process.env.SHEET_USED_CSV_URL || process.env.USED_CAR_CSV_URL || '').trim();
 
 const LOCAL_USED_CSV_PATH = path.resolve(__dirname, "PRE OWNED CAR PRICING - USED CAR.csv");
+const PORT = process.env.PORT || 10000;
 
-const PORT = process.env.PORT || 3000;
-
-// ---------------- Defaults ----------------
-const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
-const ALERT_WINDOW_MINUTES = Number(process.env.ALERT_WINDOW_MINUTES || 10);
-const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
-const ALERT_WINDOW_MS = ALERT_WINDOW_MINUTES * 60 * 1000;
-
+// defaults
+const MAX_QUOTE_PER_DAY = Number(process.env.MAX_QUOTE_PER_DAY || 10);
+const QUOTE_LIMIT_FILE = path.resolve(__dirname, "quote_limit.json");
+const LEADS_FILE = path.resolve(__dirname, "crm_leads.json");
 const NEW_CAR_ROI = Number(process.env.NEW_CAR_ROI || 8.10);
-const USED_CAR_ROI_VISIBLE = Number(process.env.USED_CAR_ROI || 9.99);
-const USED_CAR_ROI_INTERNAL = Number(process.env.USED_CAR_ROI_INTERNAL || 10.00);
+const USED_CAR_ROI_VISIBLE = 9.99;
+const USED_CAR_ROI_INTERNAL = 10.00;
+const DEBUG = (process.env.DEBUG_VARIANT === "true") || true;
 
-if (!process.env.DEBUG_VARIANT) process.env.DEBUG_VARIANT = "true";
+// ensure lastGreeting exists globally to avoid TDZ issues
+if (typeof global.lastGreeting === "undefined") global.lastGreeting = new Map();
+const lastGreeting = global.lastGreeting;
 
-// ---------------- CRM helpers (safe load) ----------------
+// ---------------- Helpers: file safe read/write ----------------
+function safeJsonRead(filename){
+  try { if (!fs.existsSync(filename)) return {}; const txt = fs.readFileSync(filename,'utf8')||''; return txt?JSON.parse(txt):{}; } catch(e){ console.warn('safeJsonRead failed', e && e.message); return {}; }
+}
+function safeJsonWrite(filename,obj){ try{ fs.writeFileSync(filename, JSON.stringify(obj,null,2),'utf8'); return true;}catch(e){ console.error('safeJsonWrite failed', e && e.message); return false; }}
+
+// ---------------- CRM helpers (external file optional) ----------------
 let postLeadToCRM = async ()=>{};
 let fetchCRMReply = async ()=>{ return null; };
 try {
-  const crm = require(path.resolve(__dirname, 'crm_helpers.cjs'));
-  postLeadToCRM = crm.postLeadToCRM || postLeadToCRM;
-  fetchCRMReply = crm.fetchCRMReply || fetchCRMReply;
-  console.log("crm_helpers.cjs loaded");
-} catch(e){
-  console.log("crm_helpers.cjs not found — using local fallback.");
-}
+  const crmHelpers = require('./crm_helpers.cjs');
+  postLeadToCRM = crmHelpers.postLeadToCRM || postLeadToCRM;
+  fetchCRMReply = crmHelpers.fetchCRMReply || fetchCRMReply;
+  if (DEBUG) console.log('crm_helpers.cjs loaded');
+} catch(e){ if(DEBUG) console.log('crm_helpers.cjs not loaded (ok for dev).'); }
 
-// ---------------- small safe JSON helpers ----------------
-function safeJsonRead(filename){
-  try {
-    if(!fs.existsSync(filename)) return {};
-    const txt = fs.readFileSync(filename, 'utf8') || '';
-    return txt ? JSON.parse(txt) : {};
-  } catch(e){ console.warn("safeJsonRead failed", e && e.message ? e.message : e); return {}; }
+// ---------------- persistence: leads ----------------
+function saveLead(lead){
+  try{
+    let arr = [];
+    if (fs.existsSync(LEADS_FILE)){
+      const raw = fs.readFileSync(LEADS_FILE,'utf8')||'[]';
+      arr = JSON.parse(raw || '[]');
+      if(!Array.isArray(arr)) arr = (arr.leads||[]);
+    }
+    arr.unshift({ ...lead, ts: Date.now() });
+    arr = arr.slice(0,2000);
+    fs.writeFileSync(LEADS_FILE, JSON.stringify(arr,null,2),'utf8');
+    if (DEBUG) console.log('✅ Lead saved:', lead.from, (lead.text||'').slice(0,120));
+    return true;
+  } catch(e){ console.error('❌ Failed to save lead', e && e.message); return false; }
 }
-function safeJsonWrite(filename, obj){
-  try { fs.writeFileSync(filename, JSON.stringify(obj, null, 2), 'utf8'); return true; } catch(e){ console.warn("safeJsonWrite failed", e && e.message ? e.message : e); return false; }
-}
+app.get('/leads',(req,res)=>{ try{ if(fs.existsSync(LEADS_FILE)){ const raw=fs.readFileSync(LEADS_FILE,'utf8')||'[]'; return res.json(JSON.parse(raw)); } return res.json([]); }catch(e){ console.warn('GET /leads read error',e); return res.json([]);} });
 
 // ---------------- Quote limits (competitor protection) ----------------
-const MAX_QUOTE_PER_DAY = Number(process.env.MAX_QUOTE_PER_DAY || 10);
-const QUOTE_LIMIT_FILE = path.resolve(__dirname, "quote_limit.json");
-
 function loadQuoteLimits(){ return safeJsonRead(QUOTE_LIMIT_FILE) || {}; }
-function saveQuoteLimits(obj){ safeJsonWrite(QUOTE_LIMIT_FILE, obj); }
-
-function canSendQuickQuote(from){
-  try{
-    if(!from) return true;
-    const q = loadQuoteLimits();
-    const today = new Date().toISOString().slice(0,10);
-    const rec = q[from] || { date: today, count: 0 };
-    if(rec.date !== today){ rec.date = today; rec.count = 0; }
-    return Number(rec.count || 0) < Number(MAX_QUOTE_PER_DAY);
-  } catch(e){ return true; }
-}
-function incrementQuickQuoteUsage(from){
-  try{
-    if(!from) return;
-    const q = loadQuoteLimits();
-    const today = new Date().toISOString().slice(0,10);
-    const rec = q[from] || { date: today, count: 0 };
-    if(rec.date !== today){ rec.date = today; rec.count = 0; }
-    rec.count = Number(rec.count || 0) + 1;
-    q[from] = rec;
-    saveQuoteLimits(q);
-    if (process.env.DEBUG_VARIANT === "true") console.log("Quote usage", from, rec);
-  } catch(e){}
-}
-
-// Reset quote limits at IST midnight (minute-based check)
-(function scheduleDailyQuoteReset(){
-  try{
-    let lastDay = new Date().toLocaleDateString("en-GB",{ timeZone: "Asia/Kolkata" });
-    setInterval(()=>{
-      try{
-        const today = new Date().toLocaleDateString("en-GB",{ timeZone: "Asia/Kolkata" });
-        if(today !== lastDay){
-          lastDay = today;
-          const q = loadQuoteLimits();
-          const keys = Object.keys(q||{});
-          for(const k of keys){ q[k] = { date: new Date().toISOString().slice(0,10), count: 0 } }
-          saveQuoteLimits(q);
-          console.log("Daily quote limits reset (IST midnight).");
-        }
-      }catch(e){}
-    }, 60*1000);
-  } catch(e){}
-})();
+function saveQuoteLimits(obj){ return safeJsonWrite(QUOTE_LIMIT_FILE,obj); }
+function canSendQuote(from){ try{ const q=loadQuoteLimits(); const today=new Date().toISOString().slice(0,10); const rec=q[from]||{date:today,count:0}; if(rec.date!==today){ rec.date=today; rec.count=0; } return rec.count < MAX_QUOTE_PER_DAY; }catch(e){ return true; }}
+function incrementQuoteUsage(from){ try{ const q=loadQuoteLimits(); const today=new Date().toISOString().slice(0,10); const rec=q[from]||{date:today,count:0}; if(rec.date!==today){ rec.date=today; rec.count=0; } rec.count = Number(rec.count||0)+1; q[from]=rec; saveQuoteLimits(q); if(DEBUG) console.log('Quote usage', from, rec); }catch(e){ console.warn('incrementQuoteUsage failed', e && e.message); }}
 
 // ---------------- WA helpers ----------------
 async function waSendRaw(payload){
-  if(!META_TOKEN || !PHONE_NUMBER_ID){ console.warn("WA skipped - META_TOKEN or PHONE_NUMBER_ID missing"); return null; }
-  try {
-    console.log("WA OUTGOING PAYLOAD:", { to: payload && payload.to, type: payload && payload.type, sample: payload && payload.text && payload.text.body ? String(payload.text.body).slice(0,120) : (payload && payload.interactive) ? "interactive" : null });
-  } catch(e){}
+  if(!META_TOKEN || !PHONE_NUMBER_ID){ console.warn('WA skipped - META_TOKEN or PHONE_NUMBER_ID missing'); return null; }
   const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
-  try {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${META_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+  try{
+    if (DEBUG) console.log('WA OUTGOING PAYLOAD:', payload);
+    const r = await fetch(url, { method:'POST', headers:{ Authorization:`Bearer ${META_TOKEN}`, 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
     const j = await r.json().catch(()=>({}));
-    console.log("WA send response status", r.status, j && typeof j === "object" ? JSON.stringify(j).slice(0,800) : String(j).slice(0,800));
-    if(!r.ok) console.error("WA send error", r.status, j);
+    if (DEBUG) console.log('WA send response status', r.status, JSON.stringify(j).slice(0,800));
+    if(!r.ok) console.error('WA send error', r.status, j);
     return j;
-  } catch(e){ console.error("waSendRaw failed", e && e.stack ? e.stack : e); return null; }
+  }catch(e){ console.error('waSendRaw failed', e && e.stack); return null; }
 }
-async function waSendText(to, body){ return waSendRaw({ messaging_product:"whatsapp", to, type:"text", text:{ body } }); }
+async function waSendText(to, body){ return waSendRaw({ messaging_product:'whatsapp', to, type:'text', text:{ body } }); }
 
-// Dynamic list menu with Option C tagline and dynamic brand rows
+// New improved List Menu (4 main actions + dynamic brands)
 async function waSendListMenu(to){
-  const brands = [];
-  if (SHEET_TOYOTA_CSV_URL) brands.push({ id: "BRAND_TOYOTA", title: "Toyota" });
-  if (SHEET_HYUNDAI_CSV_URL) brands.push({ id: "BRAND_HYUNDAI", title: "Hyundai" });
-  if (SHEET_MERCEDES_CSV_URL) brands.push({ id: "BRAND_MERCEDES", title: "Mercedes" });
-  if (SHEET_BMW_CSV_URL) brands.push({ id: "BRAND_BMW", title: "BMW" });
-  const rows = brands.length ? brands : [
-    { id:"SRV_NEW_CAR", title:"New Car Deals", description:"On-road prices & offers" },
-    { id:"SRV_USED_CAR", title:"Pre-Owned Cars", description:"Certified used inventory" },
-    { id:"SRV_SELL_CAR", title:"Sell My Car", description:"Best selling quote" },
-    { id:"SRV_LOAN", title:"Loan / Finance", description:"Fast approvals & low ROI" }
-  ];
-  const interactive = {
-    type: "list",
-    header:{ type:"text", text:"MR. CAR SERVICES" },
-    body:{ text:"Please choose one option 👇" },
-    footer:{ text:"Premium Deals • Trusted Service • Mr. Car" },
-    action:{ button:"Select Service", sections:[ { title:"Available", rows } ] }
-  };
-  return waSendRaw({ messaging_product:"whatsapp", to, type:"interactive", interactive });
+  try{
+    const mainRows = [
+      { id:'SRV_NEW_CAR', title:'New Car Deals', description:'On-road prices & offers' },
+      { id:'SRV_USED_CAR', title:'Pre-Owned Cars', description:'Certified used inventory' },
+      { id:'SRV_SELL_CAR', title:'Sell My Car', description:'Best selling quote' },
+      { id:'SRV_LOAN', title:'Loan / Finance', description:'Fast approvals & low ROI' }
+    ];
+    const brandRows = [];
+    if (SHEET_TOYOTA_CSV_URL) brandRows.push({ id:'BRAND_TOYOTA', title:'Toyota', description:'Explore Toyota models' });
+    if (SHEET_HYUNDAI_CSV_URL) brandRows.push({ id:'BRAND_HYUNDAI', title:'Hyundai', description:'Explore Hyundai models' });
+    if (SHEET_MERCEDES_CSV_URL) brandRows.push({ id:'BRAND_MERCEDES', title:'Mercedes', description:'Explore Mercedes models' });
+    if (SHEET_BMW_CSV_URL) brandRows.push({ id:'BRAND_BMW', title:'BMW', description:'Explore BMW models' });
+    if (brandRows.length===0){ brandRows.push({ id:'BRAND_ALL', title:'All Brands', description:'Request price for any brand' }); brandRows.push({ id:'BRAND_REQUEST', title:'Request a Brand', description:'Tell us which brand you want' }); }
+    const sections = [ { title:'Quick Actions', rows: mainRows }, { title:'Brands', rows: brandRows } ];
+    const interactive = { type:'list', header:{ type:'text', text:'MR. CAR SERVICES' }, body:{ text:'Please choose one option 👇' }, footer:{ text:'Premium Deals • Trusted Service • Mr. Car' }, action:{ button:'Select Service', sections: sections.map(s=>({ title: s.title, rows: s.rows })) } };
+    return waSendRaw({ messaging_product:'whatsapp', to, type:'interactive', interactive });
+  }catch(e){ console.error('waSendListMenu failed', e && e.stack); return waSendText(to, 'Choose: New Car / Pre-Owned / Sell / Loan. Or type brand name.'); }
 }
 
+// Improved button payloads
 async function sendNewCarButtons(to){
-  const payload = { messaging_product:"whatsapp", to, type:"interactive", interactive:{
-    type:"button", body:{ text:"You can continue with these quick actions:" }, action:{ buttons:[
-      { type:"reply", reply:{ id:"BTN_NEW_LOAN", title:"Loan Options" } },
-      { type:"reply", reply:{ id:"BTN_NEW_QUOTE", title:"Another Quote" } }
-    ]}}};
+  const payload = { messaging_product:'whatsapp', to, type:'interactive', interactive:{ type:'button', body:{ text:'You can continue with these quick actions:' }, action:{ buttons:[ { type:'reply', reply:{ id:'BTN_NEW_QUOTE', title:'Another Quote' } }, { type:'reply', reply:{ id:'BTN_NEW_LOAN', title:'Loan / EMI Calculator' } }, { type:'reply', reply:{ id:'BTN_NEW_EMI', title:'EMI Calculator' } }, { type:'reply', reply:{ id:'BTN_CONTACT_SALES', title:'Contact Sales' } } ] } } };
   return waSendRaw(payload);
 }
-
 async function sendUsedCarButtons(to, hasPhotoLink){
-  const buttons = [
-    { type:"reply", reply:{ id:"BTN_USED_MORE_SIMILAR", title:"More Similar Cars" } },
-    { type:"reply", reply:{ id:"BTN_VIEW_PHOTOS", title:"View Photos 📸" } },
-    { type:"reply", reply:{ id:"BTN_USED_TESTDRIVE", title:"Book Test Drive" } },
-    { type:"reply", reply:{ id:"BTN_USED_LOAN", title:"Loan Options" } },
-    { type:"reply", reply:{ id:"BTN_BULLET_CALC", title:"Bullet EMI Calculation" } }
-  ];
-  if(hasPhotoLink) buttons.unshift({ type:"reply", reply:{ id:"BTN_USED_PHOTOS", title:"Send Photos" } });
-  return waSendRaw({ messaging_product:"whatsapp", to, type:"interactive", interactive:{ type:"button", body:{ text:"Quick actions:" }, action:{ buttons } }});
+  const buttons = [ { type:'reply', reply:{ id:'BTN_USED_LOAN', title:'Loan Options' } }, { type:'reply', reply:{ id:'BTN_USED_MORE', title:'More Options' } }, { type:'reply', reply:{ id:'BTN_USED_PHOTOS', title:'Send Photos' } }, { type:'reply', reply:{ id:'BTN_USED_TESTDRIVE', title:'Book Test Drive' } }, { type:'reply', reply:{ id:'BTN_BULLET_CALC', title:'Bullet EMI Calculation' } } ];
+  if (hasPhotoLink) buttons.unshift({ type:'reply', reply:{ id:'BTN_USED_VIEWPHOTOS', title:'View Photos 📸' } });
+  return waSendRaw({ messaging_product:'whatsapp', to, type:'interactive', interactive:{ type:'button', body:{ text:'Quick actions:' }, action:{ buttons } } });
 }
 
-// ---------------- Admin alerts (throttled) ----------------
+// ---------------- admin alerts & throttling ----------------
 const lastAlert = new Map();
 async function sendAdminAlert({ from, name, text }){
   if(!META_TOKEN || !PHONE_NUMBER_ID || !ADMIN_WA) return;
   const now = Date.now(); const prev = lastAlert.get(from) || 0;
-  if(now - prev < ALERT_WINDOW_MS) { if(process.env.DEBUG_VARIANT==="true") console.log("throttled admin alert for", from); return; }
+  const ALERT_WINDOW_MS = (Number(process.env.ALERT_WINDOW_MINUTES || 10))*60*1000;
+  if(now - prev < ALERT_WINDOW_MS){ if(DEBUG) console.log('throttled admin alert for', from); return; }
   lastAlert.set(from, now);
-  await waSendRaw({ messaging_product:"whatsapp", to: ADMIN_WA, type:"text", text:{ body:`🔔 NEW WA LEAD\nFrom: ${from}\nName: ${name||'-'}\nMsg: ${String(text||'').slice(0,1000)}` }});
-  if(process.env.DEBUG_VARIANT==="true") console.log("admin alert sent");
+  await waSendRaw({ messaging_product:'whatsapp', to: ADMIN_WA, type:'text', text:{ body:`🔔 NEW WA LEAD\nFrom: ${from}\nName: ${name||'-'}\nMsg: ${String(text||'').slice(0,1000)}` } });
+  if(DEBUG) console.log('admin alert sent');
 }
 
-// ---------------- Utilities: CSV parsing, matching, EMI ----------------
-function parseCsv(text){
-  const rows=[]; let cur="", row=[], inQ=false;
-  for(let i=0;i<text.length;i++){
-    const ch=text[i];
-    if(inQ){
-      if(ch==='"'){ if(text[i+1]==='"'){ cur+='"'; i++; } else inQ=false; }
-      else cur+=ch;
-    } else {
-      if(ch==='"') inQ=true;
-      else if(ch===','){ row.push(cur); cur=""; }
-      else if(ch==='\n'){ row.push(cur); rows.push(row); row=[]; cur=""; }
-      else if(ch!=='\r') cur+=ch;
-    }
-  }
-  if(cur.length||row.length){ row.push(cur); rows.push(row); }
-  return rows;
-}
-async function fetchCsv(url){
-  if(!url) throw new Error("CSV URL missing");
-  const r = await fetch(url, { cache: "no-store" });
-  if(!r.ok) throw new Error(`CSV fetch failed ${r.status}`);
-  const txt = await r.text();
-  return parseCsv(txt);
-}
-function toHeaderIndexMap(headerRow){
-  const map = {};
-  headerRow.forEach((h,i) => { map[String((h||"").trim()).toUpperCase()] = i; });
-  return map;
-}
+// ---------------- CSV utils & pricing loader ----------------
+function parseCsv(text){ const rows=[]; let cur='', row=[], inQ=false; for(let i=0;i<text.length;i++){ const ch=text[i]; if(inQ){ if(ch==='"'){ if(text[i+1]==='"'){ cur+='"'; i++; } else inQ=false; } else cur+=ch; } else { if(ch==='"') inQ=true; else if(ch===','){ row.push(cur); cur=''; } else if(ch==='\n'){ row.push(cur); rows.push(row); row=[]; cur=''; } else if(ch!=='\r') cur+=ch; } } if(cur.length||row.length){ row.push(cur); rows.push(row); } return rows; }
+async function fetchCsv(url){ if(!url) throw new Error('CSV URL missing'); const r = await fetch(url, { cache:'no-store' }); if(!r.ok) throw new Error('CSV fetch failed '+r.status); const txt = await r.text(); return parseCsv(txt); }
+function toHeaderIndexMap(headerRow){ const map={}; headerRow.forEach((h,i)=>{ map[String(h||'').trim().toUpperCase()] = i; }); return map; }
 
-function fmtMoney(n){ const x=Number(n||0); if(!isFinite(x)) return "-"; return x.toLocaleString("en-IN",{maximumFractionDigits:0}); }
-function calcEmi(p, annualRatePct, months=60){
-  const P = Number(p); const r = Number(annualRatePct)/12/100;
-  if(!P || !isFinite(r) || months <= 0) return 0;
-  const pow = Math.pow(1+r, months);
-  const emi = Math.round(P * r * pow / (pow - 1));
-  return emi;
-}
-
-// Bullet EMI simulator (monthly amort + periodic bullets)
-function simulateBulletPlan({ loanAmount, months, internalRatePct, bulletPct=0.25 }){
-  const L = Number(loanAmount || 0);
-  const N = Number(months || 0);
-  const r = Number(internalRatePct || USED_CAR_ROI_INTERNAL) / 12 / 100;
-  if (!L || !N || !isFinite(r)) return null;
-  const bullet_total = Math.round(L * Number(bulletPct || 0.25));
-  const num_bullets = Math.max(1, Math.floor(N / 12));
-  const bullet_each = Math.round(bullet_total / num_bullets);
-  const principal_for_emi = L - bullet_total;
-  const monthly_emi = calcEmi(principal_for_emi, internalRatePct, N);
-  let principal = principal_for_emi;
-  let total_interest = 0;
-  let total_emi_paid = 0;
-  let total_bullets_paid = 0;
-  const schedule = [];
-  for (let m = 1; m <= N; m++){
-    const interest = Math.round(principal * r);
-    let principal_paid_by_emi = monthly_emi - interest;
-    if (principal_paid_by_emi < 0) principal_paid_by_emi = 0;
-    principal = Math.max(0, principal - principal_paid_by_emi);
-    total_interest += interest;
-    total_emi_paid += monthly_emi;
-    let bullet_paid = 0;
-    if (m % 12 === 0) {
-      if (m === num_bullets * 12) {
-        bullet_paid = Math.max(0, bullet_total - total_bullets_paid);
-      } else {
-        bullet_paid = Math.min(bullet_each, Math.max(0, bullet_total - total_bullets_paid));
-      }
-      total_bullets_paid += bullet_paid;
-      principal = Math.max(0, principal - bullet_paid);
-    }
-    schedule.push({ month: m, interest, emi: monthly_emi, principal_remaining: principal, bullet_paid });
-  }
-  const total_payable = total_emi_paid + total_bullets_paid;
-  return {
-    loan: L, months: N, internalRatePct: internalRatePct,
-    monthly_emi, bullet_total, num_bullets, bullet_each,
-    total_interest, total_emi_paid, total_bullets_paid, total_payable, schedule
-  };
-}
-
-// ---------------- Pricing loader + variant matching (improved) ----------------
-const SHEET_URLS = {
-  HOT: SHEET_HOT_DEALS_CSV_URL || "",
-  TOYOTA: SHEET_TOYOTA_CSV_URL || "",
-  HYUNDAI: SHEET_HYUNDAI_CSV_URL || "",
-  MERCEDES: SHEET_MERCEDES_CSV_URL || "",
-  BMW: SHEET_BMW_CSV_URL || ""
-};
+// Pricing cache & loader (basic)
+const SHEET_URLS = { HOT: SHEET_HOT_DEALS_CSV_URL||'', TOYOTA: SHEET_TOYOTA_CSV_URL||'', HYUNDAI: SHEET_HYUNDAI_CSV_URL||'', MERCEDES: SHEET_MERCEDES_CSV_URL||'', BMW: SHEET_BMW_CSV_URL||'' };
 const PRICING_CACHE = { tables: null, ts: 0 };
 const PRICING_CACHE_MS = 3*60*1000;
+async function loadPricingFromSheets(){ const now=Date.now(); if(PRICING_CACHE.tables && now - PRICING_CACHE.ts < PRICING_CACHE_MS) return PRICING_CACHE.tables; const tables={}; for(const [brand,url] of Object.entries(SHEET_URLS)){ if(!url) continue; try{ const rows = await fetchCsv(url); if(!rows||!rows.length) continue; const header = rows[0].map(h=>String(h||'').trim()); const idxMap = toHeaderIndexMap(header); const data = rows.slice(1); tables[brand] = { header, idxMap, data }; }catch(e){ console.warn('CSV load failed for', brand, e && e.message); } } PRICING_CACHE.tables = tables; PRICING_CACHE.ts = Date.now(); return tables; }
 
-function normForMatch(s){
-  return (s||"").toString().toLowerCase()
-    .replace(/(automatic|automatic transmission|\bauto\b)/g, " at ")
-    .replace(/\bmanual\b/g," mt ")
-    .replace(/[\*\/\\]/g, "x")
-    .replace(/\s*x\s*/g, "x")
-    .replace(/[^a-z0-9\s]/g," ")
-    .replace(/\s+/g," ")
-    .trim();
-}
+// ---------------- Normalization helpers ----------------
+function normForMatch(s){ return (s||'').toString().toLowerCase().replace(/(automatic|automatic transmission|\bauto\b)/g,' at ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim(); }
+function fmtMoney(n){ const x=Number(n||0); if(!isFinite(x)) return '-'; return x.toLocaleString('en-IN',{maximumFractionDigits:0}); }
+function calcEmiSimple(p, annualRatePct, months){ const P=Number(p); const r=Number(annualRatePct)/12/100; if(!P || !isFinite(r) || months<=0) return 0; const pow = Math.pow(1+r, months); const emi = Math.round(P * r * pow / (pow - 1)); return emi; }
 
-function buildVariantMapForTable(table){
-  if(!table||!table.idxMap) return null;
-  const im = table.idxMap;
-  const data = table.data||[];
-  const vIdx = im["VARIANT"] ?? im["SUFFIX"] ?? -1;
-  const kwIdx = im["VARIANT_KEYWORDS"] ?? -1;
-  const mIdx = im["MODEL"] ?? -1;
-  const map = [];
-  for(let r=0;r<data.length;r++){
-    const row = data[r];
-    const variantRaw = vIdx>=0 ? (row[vIdx]||"") : "";
-    const modelRaw = mIdx>=0 ? (row[mIdx]||"") : "";
-    const canonical = String(variantRaw||"").trim();
-    const keywords = new Set();
-    if(canonical) keywords.add(normForMatch(canonical));
-    if(modelRaw) keywords.add(normForMatch(modelRaw));
-    if(canonical && modelRaw) keywords.add(normForMatch(`${modelRaw} ${canonical}`));
-    if(kwIdx>=0){
-      const cell = String(row[kwIdx]||"");
-      const parts = cell.split(',').map(x=>x.trim()).filter(Boolean);
-      for(const p of parts) keywords.add(normForMatch(p));
-    }
-    const addTokens = (txt)=>{
-      const n = normForMatch(txt);
-      if(!n) return;
-      keywords.add(n);
-      const toks = n.split(' ').filter(Boolean);
-      for(let i=0;i<toks.length;i++){
-        keywords.add(toks[i]);
-        if(i+1 < toks.length) keywords.add(`${toks[i]} ${toks[i+1]}`);
-      }
-    };
-    addTokens(canonical);
-    addTokens(modelRaw);
-    if(kwIdx>=0) addTokens(String(row[kwIdx]||""));
-    map.push({ canonical, model: normForMatch(modelRaw), keywords, rowIndex: r, rawRow: row });
-  }
-  return map;
-}
-
-function matchVariantFromMap(userText, variantMap){
-  if(!userText||!variantMap||!variantMap.length) return null;
-  const qRaw = normForMatch(userText);
-  for(const v of variantMap){
-    if(!v) continue;
-    if(v.canonical && normForMatch(v.canonical) === qRaw) return v;
-    if(v.keywords && v.keywords.has(qRaw)) return v;
-  }
-  const cleaned = qRaw.replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar|up|hp|himachal|individual|company|corporate|firm|personal)\b/g," ").replace(/\s+/g," ").trim();
-  if(cleaned && cleaned !== qRaw){
-    for(const v of variantMap) if(v.keywords.has(cleaned)) return v;
-  }
-  const qTokens = (cleaned||qRaw).split(' ').filter(Boolean);
-  let best=null, bestScore=0, second=0;
-  for(const v of variantMap){
-    const all = Array.from(v.keywords).join(' ');
-    const vTokens = all.split(' ').filter(Boolean);
-    const qInV = qTokens.every(t => vTokens.includes(t));
-    if(qInV) { return v; }
-    let score=0;
-    for(const t of qTokens){
-      for(const vt of vTokens){
-        if(vt===t) score += 6;
-        else if(vt.includes(t) || t.includes(vt)) score += 4;
-      }
-    }
-    if(/\b4x2\b/.test(cleaned||qRaw) && /\b4x2\b/.test(all)) score += 12;
-    if(/\bat\b/.test(cleaned||qRaw) && /\bat\b/.test(all)) score += 8;
-    if(score > bestScore){ second = bestScore; bestScore = score; best = v; }
-    else if(score > second) second = score;
-  }
-  if(!best) return null;
-  if(bestScore < 12) return null;
-  if(second > 0 && bestScore < second * 1.4 + 5) return null;
-  return best;
-}
-
-async function loadPricingFromSheets(){
-  const now = Date.now();
-  if(PRICING_CACHE.tables && now - PRICING_CACHE.ts < PRICING_CACHE_MS) return PRICING_CACHE.tables;
-  const tables = {};
-  for(const [brand, url] of Object.entries(SHEET_URLS)){
-    if(!url) continue;
-    try{
-      const rows = await fetchCsv(url); if(!rows || !rows.length) continue;
-      const header = rows[0].map(h => String(h||"").trim());
-      const idxMap = toHeaderIndexMap(header);
-      const data = rows.slice(1);
-      const tab = { header, idxMap, data };
-      try { tab.variantMap = buildVariantMapForTable(tab); } catch(e){ tab.variantMap = null; console.error("variantMap build failed", e && e.message ? e.message : e); }
-      tables[brand] = tab;
-    } catch(e){ console.error("CSV load failed for", brand, e && e.message ? e.message : e); }
-  }
-  PRICING_CACHE.tables = tables; PRICING_CACHE.ts = Date.now(); return tables;
-}
-
-// ---------------- helpers for bestRowMatch and ex-show detect ----------------
-function matchesWithSyns(value,target,synMap){ const v=String(value||"").toLowerCase(), t=String(target||"").toLowerCase(); if(!t) return true; if(v===t) return true; const syns = synMap[t]||[]; return syns.some(s => v===String(s).toLowerCase() || v.includes(String(s).toLowerCase())); }
-
-const MODEL_SYNS = { "hycross":["innova hycross","innova hc","hy cross","hycross"], "fortuner":["fortuner","ftnr"] };
-const SUFFIX_SYNS = { "zx":["zx","zx(o)","zxo","zx o"], "vx":["vx"], "g":["g"] };
-const COLOR_SYNS = { "attitude black":["attitude black","black"], "white":["white","pearl white"] };
-
-function bestRowMatch(table, wantModel, wantSuffix, wantColor){
-  if(!table||!table.idxMap) return null;
-  const { idxMap, data } = table;
-  const idxModel = idxMap["MODEL"] ?? -1;
-  const idxVariant = idxMap["VARIANT"] ?? -1;
-  const idxSuffix = idxMap["SUFFIX"] ?? -1;
-  const idxColor = idxMap["COLOUR"] ?? idxMap["COLOR"] ?? -1;
-  let best=null, bestScore=-1;
-  for(let i=0;i<data.length;i++){
-    const row = data[i];
-    const model = (idxModel>=0 ? (row[idxModel]||"") : "").toString();
-    const variant = (idxVariant>=0 ? (row[idxVariant]||"") : "").toString();
-    const suffix = (idxSuffix>=0 ? (row[idxSuffix]||"") : "").toString();
-    const color = (idxColor>=0 ? (row[idxColor]||"") : "").toString();
-    if(wantModel && !matchesWithSyns(model, wantModel, MODEL_SYNS)) continue;
-    let score=0;
-    if(wantSuffix && variant && matchesWithSyns(variant, wantSuffix, SUFFIX_SYNS)) score+=5;
-    if(wantSuffix && suffix && matchesWithSyns(suffix, wantSuffix, SUFFIX_SYNS)) score+=4;
-    if(wantModel && matchesWithSyns(model, wantModel, MODEL_SYNS)) score+=3;
-    if(wantColor && color && matchesWithSyns(color, wantColor, COLOR_SYNS)) score+=1;
-    if(variant) score+=0.1;
-    if(score>bestScore){ bestScore=score; best=row; }
-  }
-  return best;
-}
-
-function detectExShowIdx(idxMap){
-  let exIdx = idxMap["EX SHOWROOM PRICE"] ?? idxMap["EX-SHOWROOM PRICE"] ?? idxMap["EX SHOWROOM"] ?? idxMap["EX SHOWROOM PRICE (₹)"] ?? idxMap["EX SHOWROOM PRICE (INR)"] ?? -1;
-  if(exIdx<0){ const headerKeys=Object.keys(idxMap); const fuzzyKey = headerKeys.find(h=>/EX[\s\-_\/A-Z0-9]*SHOWROOM/.test(String(h))); if(fuzzyKey) exIdx = idxMap[fuzzyKey]; }
-  if(exIdx<0){ const headerKeysLower = Object.keys(idxMap).map(k=>String(k).toLowerCase()); const pick = headerKeysLower.find(k => k.includes("ex") && k.includes("showroom")); if(pick){ const orig = Object.keys(idxMap).find(k => String(k).toLowerCase()===pick); if(orig) exIdx = idxMap[orig]; } }
-  return exIdx;
+// ---------------- Bullet EMI simulation ----------------
+function simulateBulletPlan({ loanAmount, months, internalRatePct, bulletPct=0.25 }){
+  const L = Number(loanAmount||0); const N = Number(months||0); const r = Number(internalRatePct||USED_CAR_ROI_INTERNAL)/12/100; if(!L||!N||!isFinite(r)) return null; const bullet_total=Math.round(L*Number(bulletPct||0.25)); const num_bullets=Math.max(1,Math.floor(N/12)); const bullet_each=Math.round(bullet_total/num_bullets); const principal_for_emi = L - bullet_total; const monthly_emi = calcEmiSimple(principal_for_emi, internalRatePct, N); let principal = principal_for_emi; let total_interest=0; let total_emi_paid=0; let total_bullets_paid=0; const schedule=[]; for(let m=1;m<=N;m++){ const interest = Math.round(principal * r); let principal_paid_by_emi = monthly_emi - interest; if(principal_paid_by_emi<0) principal_paid_by_emi=0; principal = Math.max(0, principal - principal_paid_by_emi); total_interest += interest; total_emi_paid += monthly_emi; let bullet_paid = 0; if(m%12===0){ bullet_paid = Math.min(bullet_each, Math.max(0, (L - (principal + total_bullets_paid)))); if(m === (num_bullets*12)){ const already = total_bullets_paid; bullet_paid = Math.max(0, bullet_total - already); } total_bullets_paid += bullet_paid; principal = Math.max(0, principal - bullet_paid); } schedule.push({ month:m, interest, emi: monthly_emi, principal_remaining: principal, bullet_paid }); }
+  const total_payable = total_emi_paid + total_bullets_paid; return { loan:L, months:N, internalRatePct: internalRatePct, monthly_emi, bullet_total, num_bullets, bullet_each, total_interest, total_emi_paid, total_bullets_paid, total_payable, schedule };
 }
 
 // ---------------- Build used car quote ----------------
 async function loadUsedSheet(){
-  if (SHEET_USED_CSV_URL){
-    try { const rows = await fetchCsv(SHEET_USED_CSV_URL); if(rows && rows.length) return rows; } catch(e){ if(process.env.DEBUG_VARIANT==="true") console.warn("remote used csv fetch failed", e && e.message ? e.message : e); }
-  }
-  try { if(fs.existsSync(LOCAL_USED_CSV_PATH)){ const txt = fs.readFileSync(LOCAL_USED_CSV_PATH,'utf8'); const rows = parseCsv(txt); if(rows && rows.length) return rows; } } catch(e){ if(process.env.DEBUG_VARIANT==="true") console.warn("local used csv read failed", e && e.message ? e.message : e); }
+  if (SHEET_USED_CSV_URL){ try{ const rows = await fetchCsv(SHEET_USED_CSV_URL); if(rows && rows.length) return rows; }catch(e){ if(DEBUG) console.warn('remote used csv fetch failed', e && e.message); } }
+  try{ if(fs.existsSync(LOCAL_USED_CSV_PATH)){ const txt=fs.readFileSync(LOCAL_USED_CSV_PATH,'utf8'); const rows = parseCsv(txt); if(rows && rows.length) return rows; } }catch(e){ if(DEBUG) console.warn('local used csv read failed', e && e.message); }
   return [];
 }
 async function buildUsedCarQuote({ make, model, year }){
-  try {
-    const rows = await loadUsedSheet();
-    if(!rows || rows.length<=1) return { text: "Used car pricing not configured." };
-    const header = rows[0].map(h=>String(h||"").trim().toUpperCase());
-    const data = rows.slice(1);
-    const makeIdx = header.findIndex(h => h.includes("MAKE"));
-    const modelIdx = header.findIndex(h => h.includes("MODEL"));
-    let findRow = null;
-    for(const r of data){
-      const a = String(r[makeIdx]||"").toLowerCase();
-      const b = String(r[modelIdx]||"").toLowerCase();
-      if(a.includes((make||"").toLowerCase()) && b.includes((model||"").toLowerCase())) { findRow = r; break; }
+  try{
+    const rows = await loadUsedSheet(); if(!rows||!rows.length) return { text: 'Used car pricing not configured.' };
+    const header = rows[0].map(h=>String(h||'').toUpperCase()); const data = rows.slice(1);
+    const makeIdx = header.findIndex(h=>h.includes('MAKE')); const modelIdx = header.findIndex(h=>h.includes('MODEL'));
+    let findRow = data.find(r=> String(r[makeIdx]||'').toLowerCase().includes((make||'').toLowerCase()) && String(r[modelIdx]||'').toLowerCase().includes((model||'').toLowerCase()));
+    if(!findRow){ // try fuzzy
+      for(const r of data){ if(String(r[makeIdx]||'').toLowerCase().includes((make||'').toLowerCase()) || String(r[modelIdx]||'').toLowerCase().includes((model||'').toLowerCase())){ findRow=r; break; } }
     }
-    if(!findRow){
-      for(const r of data){
-        const a = String(r[makeIdx]||"").toLowerCase();
-        const b = String(r[modelIdx]||"").toLowerCase();
-        if(a.includes((make||"").toLowerCase()) || b.includes((model||"").toLowerCase())) { findRow = r; break; }
-      }
+    if(!findRow) return { text: `Sorry, I couldn’t find the used car *${make} ${model}* right now.` };
+    const expectedIdx = header.findIndex(h=>h.includes('EXPECTED')||h.includes('EXPECTED_PRICE')||h.includes('EXPECTED PRICE'));
+    const expected = expectedIdx>=0 ? String(findRow[expectedIdx]||'') : '';
+    const price = Number(String(expected||'').replace(/[,₹\s]/g,'')) || 0;
+    let finalPrice = price;
+    if(!finalPrice){ // try numeric cell
+      for(let i=0;i<findRow.length;i++){ const v=String(findRow[i]||'').replace(/[,₹\s]/g,''); if(/^[0-9]+$/.test(v)){ finalPrice = Number(v); break; } }
     }
-    if(!findRow) return { text: `Sorry, I couldn’t find the used car *${make} ${model}* at the moment.` };
-    const expectedIdx = header.findIndex(h => h.includes("EXPECTED")||h.includes("EXPECTED_PRICE")||h.includes("EXPECTED PRICE"));
-    const expectedStr = expectedIdx>=0 ? String(findRow[expectedIdx]||"") : "";
-    const price = Number(String(expectedStr||'').replace(/[,₹\s]/g,'')) || 0;
-    let priceDetected = price;
-    if(!priceDetected){
-      for(let i=0;i<findRow.length;i++){
-        const v = String(findRow[i]||"").replace(/[,₹\s]/g,"");
-        if(/^\d+$/.test(v)) { priceDetected = Number(v); break; }
-      }
-    }
-    const finalPrice = priceDetected || 0;
-    const maxLoan = Math.round(finalPrice * 0.95);
-    const emi = calcEmi(maxLoan, USED_CAR_ROI_VISIBLE, 60);
-    const lines = [
-      `*PRE-OWNED CAR QUOTE*`,
-      `Make/Model: *${String(findRow[makeIdx]||'').toUpperCase()} ${String(findRow[modelIdx]||'').toUpperCase()}*`,
-      finalPrice ? `Expected Price: ₹ *${fmtMoney(finalPrice)}*` : null,
-      `Loan up to *95%*: ₹ ${fmtMoney(maxLoan)} @ *${USED_CAR_ROI_VISIBLE}%* (60m) → EMI ≈ ₹ *${fmtMoney(emi)}*`,
-      ``,
-      `📌 Options: Reply 'photos' to request images, 'more' for similar cars, or 'testdrive' to book a test drive.`,
-      `\n*Terms & Conditions Apply ✅*`
-    ].filter(Boolean);
-    return { text: lines.join("\n"), picLink: null };
-  } catch(e){ console.error("buildUsedCarQuote error", e && e.stack ? e.stack : e); return { text: "Used car pricing failed." }; }
+    if(!finalPrice) return { text: 'Price for this car not available.' };
+    const tenureDefault = 60; const normalEMI_display = calcEmiSimple(finalPrice, USED_CAR_ROI_INTERNAL, tenureDefault);
+    const bulletSim = simulateBulletPlan({ loanAmount: finalPrice, months: tenureDefault, internalRatePct: USED_CAR_ROI_INTERNAL, bulletPct:0.25 });
+    const lines = [];
+    lines.push('*PRE-OWNED CAR QUOTE*');
+    lines.push(`Make/Model: *${String(findRow[makeIdx]||'').toUpperCase()} ${String(findRow[modelIdx]||'').toUpperCase()}*`);
+    lines.push(finalPrice ? `Expected Price: ₹ *${fmtMoney(finalPrice)}*` : null);
+    lines.push(`ROI (Used Car): *${USED_CAR_ROI_VISIBLE}%* (visible)`);
+    lines.push(`Tenure (example): *${tenureDefault} months*`);
+    lines.push('');
+    lines.push('📌 *Normal EMI*');
+    lines.push(`• EMI (${tenureDefault} months): ₹ *${fmtMoney(normalEMI_display)}*`);
+    lines.push('');
+    if(bulletSim){ lines.push('📌 *Bullet EMI Plan (25% across tenure)*'); lines.push(`• Monthly EMI: ₹ *${fmtMoney(bulletSim.monthly_emi)}*`); lines.push(`• Bullet total (25%): ₹ *${fmtMoney(bulletSim.bullet_total)}*`); lines.push(`  → ₹ *${fmtMoney(bulletSim.bullet_each)}* on months: ${Array.from({length:bulletSim.num_bullets},(_,i)=>12*(i+1)).join(' • ')}`); lines.push(''); lines.push(`📊 *Total payable (EMIs + bullets):* ₹ *${fmtMoney(bulletSim.total_payable)}*`); lines.push(`💰 *Interest (approx):* ₹ *${fmtMoney(bulletSim.total_interest)}*`); lines.push(''); lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*'); }
+    lines.push(''); lines.push('\n*Terms & Conditions Apply ✅*');
+    return { text: lines.filter(Boolean).join('\n'), picLink: null };
+  }catch(e){ console.error('buildUsedCarQuote error', e && e.stack); return { text:'Used car pricing failed.' }; }
 }
 
-// ---------------- Try quick new car quote (enforces quote limits) ----------------
+// ---------------- Quick new car quote (simplified) ----------------
 async function tryQuickNewCarQuote(msgText, to){
   try{
     if(!msgText||!msgText.trim()) return false;
-    // enforce per-number quick-quote limit
-    try{ if(!canSendQuickQuote(to)){ await waSendText(to, "You’ve reached today’s assistance limit for quotes. Please try again tomorrow."); return true; } } catch(e){}
-    const tables = await loadPricingFromSheets();
-    if(!tables || Object.keys(tables).length===0) return false;
-    const t = String(msgText || "").toLowerCase();
-    // city detection
-    let cityMatch = (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar\s*pradesh|up|himachal|hp)\b/)||[])[1] || null;
-    if(cityMatch){ if(cityMatch==="dilli") cityMatch="delhi"; if(cityMatch==="hr") cityMatch="haryana"; if(cityMatch==="chd") cityMatch="chandigarh"; if(cityMatch==="up") cityMatch="uttar pradesh"; if(cityMatch==="hp") cityMatch="himachal pradesh"; }
-    else { /* try fuzzy (simple) */ cityMatch = "delhi"; }
-    const city = cityMatch;
-    const profile = (t.match(/\b(individual|company|corporate|firm|personal)\b/)||[])[1] || "individual";
-    // model guess
-    let raw = t.replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar\s*pradesh|up|himachal|hp)\b/g," ")
-      .replace(/\b(individual|company|corporate|firm|personal)\b/g," ")
-      .replace(/[^\w\s]/g," ").replace(/\s+/g," ").trim();
-    const modelGuess = raw.split(' ').slice(0,2).join(' ');
-    const order = ["HOT","TOYOTA","HYUNDAI","MERCEDES","BMW"];
-    for(const b of order){
-      const tab = tables[b]; if(!tab || !tab.data) continue;
-      // variant map match
-      const vm = tab.variantMap;
-      if(vm){
-        const vmatch = matchVariantFromMap(msgText, vm);
-        if(vmatch){
-          const hit = tab.data[vmatch.rowIndex];
-          const idxMap = tab.idxMap;
-          const exIdx = detectExShowIdx(idxMap);
-          let priceIdx = -1;
-          // try city column
-          const cityToken = city.split(' ')[0].toUpperCase();
-          const keys = Object.keys(idxMap);
-          for(const k of keys) if(k.includes("ON ROAD") && k.includes(cityToken)) { priceIdx = idxMap[k]; break; }
-          if(priceIdx < 0){
-            for(const [k,i] of Object.entries(idxMap)){
-              const v = String(hit[i]||"").replace(/[,₹\s]/g,"");
-              if(v && /^\d+$/.test(v)){ priceIdx = i; break; }
-            }
-          }
-          const onroad = priceIdx>=0 ? Number(String(hit[priceIdx]||"").replace(/[,₹\s]/g,"")) || 0 : 0;
-          const exShow = (exIdx>=0) ? Number(String(hit[exIdx]||"").replace(/[,₹\s]/g,"")) || 0 : 0;
-          const loanAmt = exShow || onroad || 0;
-          const emi60 = loanAmt ? calcEmi(loanAmt, NEW_CAR_ROI, 60) : 0;
-          const make = hit[idxMap["MAKE"]] || ""; const modl = hit[idxMap["MODEL"]] || ""; const varnt = hit[idxMap["VARIANT"]] || hit[idxMap["SUFFIX"]] || "";
-          const lines = [
-            `*${b}* ${String(modl||'').toUpperCase()} ${varnt ? `(${varnt})` : ""}`,
-            `*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`,
-            exShow ? `*Ex-Showroom:* ₹ ${fmtMoney(exShow)}` : null,
-            onroad ? `*On-Road:* ₹ ${fmtMoney(onroad)}` : null,
-            loanAmt ? `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*` : `*Loan:* up to 100% of Ex-Showroom`,
-            `\n*Terms & Conditions Apply ✅*`
-          ].filter(Boolean).join("\n");
-          await waSendText(to, lines);
-          await sendNewCarButtons(to);
-          try{ incrementQuickQuoteUsage(to); }catch(e){}
-          return true;
-        }
-      }
-      // bestRowMatch fallback
-      const row = bestRowMatch(tab, modelGuess, null, null);
-      if(row){
-        const idxMap = tab.idxMap;
-        const exIdx = detectExShowIdx(idxMap);
-        let priceIdx = -1;
-        const keys = Object.keys(idxMap);
-        for(const k of keys) if(k.includes("ON ROAD") && k.includes(city.split(' ')[0].toUpperCase())) { priceIdx = idxMap[k]; break; }
-        if(priceIdx < 0){
-          for(const [k,i] of Object.entries(idxMap)){
-            const v = String(row[i]||"").replace(/[,₹\s]/g,"");
-            if(v && /^\d+$/.test(v)){ priceIdx = i; break; }
-          }
-        }
-        const onroad = priceIdx>=0 ? Number(String(row[priceIdx]||"").replace(/[,₹\s]/g,"")) || 0 : 0;
-        const exShow = (exIdx>=0) ? Number(String(row[exIdx]||"").replace(/[,₹\s]/g,"")) || 0 : 0;
-        const loanAmt = exShow || onroad || 0;
-        const emi60 = loanAmt ? calcEmi(loanAmt, NEW_CAR_ROI, 60) : 0;
-        const make = row[idxMap["MAKE"]] || ""; const modl = row[idxMap["MODEL"]] || ""; const varnt = row[idxMap["VARIANT"]] || row[idxMap["SUFFIX"]] || "";
-        const lines = [
-          `*${b}* ${String(modl||'').toUpperCase()} ${varnt ? `(${varnt})` : ""}`,
-          `*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`,
-          exShow ? `*Ex-Showroom:* ₹ ${fmtMoney(exShow)}` : null,
-          onroad ? `*On-Road:* ₹ ${fmtMoney(onroad)}` : null,
-          loanAmt ? `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*` : `*Loan:* up to 100% of Ex-Showroom`,
-          `\n*Terms & Conditions Apply ✅*`
-        ].filter(Boolean).join("\n");
-        await waSendText(to, lines);
-        await sendNewCarButtons(to);
-        try{ incrementQuickQuoteUsage(to); }catch(e){}
-        return true;
-      }
+    if(!canSendQuote(to)){ await waSendText(to, "You’ve reached today’s assistance limit for quotes. Please try again tomorrow or provide your details for a personalised quote."); return true; }
+    const tables = await loadPricingFromSheets(); if(!tables || Object.keys(tables).length===0) return false;
+    const t = String(msgText||'').toLowerCase(); let city = (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp)\b/)||[])[1] || 'delhi'; if(city==='dilli') city='delhi'; if(city==='hr') city='haryana';
+    const profile = (t.match(/\b(individual|company|corporate|firm|personal)\b/)||[])[1] || 'individual';
+    // take first two tokens as guess
+    const raw = t.replace(/[^\w\s]/g,' ').replace(/\s+/g,' ').trim(); const modelGuess = raw.split(' ').slice(0,2).join(' ');
+    for(const [brand,tab] of Object.entries(tables)){
+      if(!tab||!tab.data) continue; const header = tab.header.map(h=>String(h||'').toUpperCase()); const idxModel = header.findIndex(h=>h.includes('MODEL')||h.includes('VEHICLE')); const idxVariant = header.findIndex(h=>h.includes('VARIANT')||h.includes('SUFFIX'));
+      for(const row of tab.data){ const modelCell = idxModel>=0?String(row[idxModel]||'').toLowerCase():''; const variantCell = idxVariant>=0?String(row[idxVariant]||'').toLowerCase():''; if((modelCell && modelCell.includes(modelGuess)) || (variantCell && variantCell.includes(modelGuess))){ // found
+          // find price
+          const idxMap = tab.idxMap || toHeaderIndexMap(tab.header);
+          let priceIdx=-1; for(const k of Object.keys(idxMap)){ if(k.includes('ON ROAD') && k.includes(city.toUpperCase().split(' ')[0])){ priceIdx=idxMap[k]; break; } }
+          if(priceIdx<0){ for(let i=0;i<row.length;i++){ const v=String(row[i]||'').replace(/[,₹\s]/g,''); if(/^[0-9]+$/.test(v)){ priceIdx=i; break; } } }
+          const onroad = priceIdx>=0? Number(String(row[priceIdx]||'').replace(/[,₹\s]/g,'')) : 0; if(!onroad) continue; const exIdx = detectExShowIdx(idxMap); const exShow = exIdx>=0? Number(String(row[exIdx]||'').replace(/[,₹\s]/g,''))||0:0; const loanAmt = exShow || onroad || 0; const emi60 = loanAmt ? calcEmiSimple(loanAmt, NEW_CAR_ROI, 60) : 0;
+          const lines = [ `*${brand}* ${String(row[idxModel]||'').toUpperCase()} ${String(row[idxVariant]||'').toUpperCase()}`, `*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`, exShow?`*Ex-Showroom:* ₹ ${fmtMoney(exShow)}`:null, onroad?`*On-Road:* ₹ ${fmtMoney(onroad)}`:null, loanAmt?`*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`:null, '\n*Terms & Conditions Apply ✅*' ].filter(Boolean).join('\n');
+          await waSendText(to, lines); await sendNewCarButtons(to); incrementQuoteUsage(to); return true;
+      } }
     }
     return false;
-  } catch(e){ console.error("tryQuickNewCarQuote error", e && e.stack ? e.stack : e); return false; }
+  }catch(e){ console.error('tryQuickNewCarQuote error', e && e.stack); return false; }
+}
+
+function detectExShowIdx(idxMap){ try{ const keys=Object.keys(idxMap); for(const k of keys){ if(/EX[\s\-_\/A-Z0-9]*SHOWROOM/.test(String(k))) return idxMap[k]; } const lower = keys.map(k=>String(k).toLowerCase()); const i = lower.findIndex(k=>k.includes('ex') && k.includes('showroom')); if(i>=0) return idxMap[Object.keys(idxMap)[i]]; }catch(e){} return -1; }
+
+// ---------------- greeting helper (safe) ----------------
+if (typeof shouldGreetNow === 'undefined'){
+  function shouldGreetNow(from, msgText){
+    try{
+      if (ADMIN_WA && from === ADMIN_WA) return false;
+      const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
+      const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
+      const now = Date.now(); const prev = (lastGreeting && lastGreeting.get(from)) || 0;
+      const text = (msgText||'').toString().trim().toLowerCase();
+      const looksLikeGreeting = /^(hi|hello|hey|namaste|enquiry|inquiry|help|start)\b/.test(text) || prev === 0;
+      if(!looksLikeGreeting) return false;
+      if(now - prev < GREETING_WINDOW_MS) return false;
+      try{ if(lastGreeting && typeof lastGreeting.set === 'function') lastGreeting.set(from, now); }catch(e){}
+      return true;
+    }catch(e){ console.warn('shouldGreetNow failed', e); return false; }
+  }
 }
 
 // ---------------- Webhook & routing ----------------
-app.get("/healthz", (req,res) => res.json({ ok: true, t: Date.now(), debug: process.env.DEBUG_VARIANT === "true" }));
+app.get('/healthz', (req,res)=> res.json({ ok:true, t:Date.now(), debug: DEBUG }));
 
-// META verify (GET)
-app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'], token = req.query['hub.verify_token'], challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === VERIFY_TOKEN && challenge) {
-    console.log("Webhook verified ✅");
-    return res.status(200).type("text/plain").send(String(challenge));
-  }
-  return res.sendStatus(403);
-});
+app.get('/webhook', (req,res)=>{ const mode=req.query['hub.mode']; const token=req.query['hub.verify_token']; const challenge=req.query['hub.challenge']; if(mode==='subscribe' && token===VERIFY_TOKEN && challenge){ console.log('Webhook verified ✅'); return res.status(200).type('text/plain').send(String(challenge)); } return res.sendStatus(403); });
 
-// MAIN handler (POST)
-app.post('/webhook', async (req, res) => {
-  try {
-    try { console.log("📩 Incoming webhook hit:", JSON.stringify(req.body).slice(0,1200)); } catch(e){ console.log("📩 Incoming webhook"); }
-    const entry = req.body?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value || {};
-    const msg = value?.messages?.[0];
-    const contact = value?.contacts?.[0];
-    if (!msg) return res.sendStatus(200);
+// admin utility endpoints
+app.post('/admin/reset_greetings', (req,res)=>{ try{ if(typeof lastGreeting !== 'undefined' && lastGreeting && typeof lastGreeting.clear === 'function'){ lastGreeting.clear(); console.log('/admin/reset_greetings -> cleared lastGreeting'); } else console.log('/admin/reset_greetings -> lastGreeting not present'); return res.json({ ok:true, msg:'greetings cleared' }); }catch(e){ console.error('reset_greetings failed', e && e.stack); return res.status(500).json({ ok:false, err: String(e && e.message ? e.message : e) }); } });
 
-    const from = msg.from;
-    const type = msg.type;
-    const name = contact?.profile?.name || "Unknown";
-    let msgText = "";
+app.post('/admin/set_greeting_window', (req,res)=>{ try{ const mins = Number(req.query.minutes || (req.body && req.body.minutes)); if(!isFinite(mins) || mins < 0) return res.status(400).json({ ok:false, err:'invalid minutes' }); process.env.GREETING_WINDOW_MINUTES = String(mins); console.log('/admin/set_greeting_window ->', mins, 'minutes'); return res.json({ ok:true, minutes: mins }); }catch(e){ return res.status(500).json({ ok:false, err: String(e && e.message ? e.message : e) }); } });
+
+// MAIN handler
+app.post('/webhook', async (req,res)=>{
+  console.log('📩 Incoming webhook hit:', typeof req.body === 'object' ? JSON.stringify(req.body).slice(0,800) : String(req.body).slice(0,800));
+  try{
+    const entry = req.body?.entry?.[0]; const change = entry?.changes?.[0]; const value = change?.value || {};
+    const msg = value?.messages?.[0]; const contact = value?.contacts?.[0];
+    if(!msg) return res.sendStatus(200);
+    const from = msg.from; const type = msg.type; const name = contact?.profile?.name || 'Unknown';
+    let msgText = '';
     let selectedId = null;
-    if (type === "text") msgText = msg.text?.body || "";
-    else if (type === "interactive") { selectedId = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id || null; msgText = msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || ""; }
+    if(type === 'text') msgText = msg.text?.body || '';
+    else if(type === 'interactive'){ selectedId = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id || null; msgText = msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || ''; }
     else msgText = JSON.stringify(msg);
+    if(DEBUG) console.log('INBOUND', { from, type, sample: (msgText||'').slice(0,300) });
 
-    if (process.env.DEBUG_VARIANT === "true") console.log("INBOUND", { from, type, sample: (msgText||'').slice(0,300) });
+    if(from !== ADMIN_WA) await sendAdminAlert({ from, name, text: msgText });
 
-    // admin alert
-    if (from !== ADMIN_WA) await sendAdminAlert({ from, name, text: msgText });
+    // log lead locally & to CRM
+    try{ const lead={ from, name, text: msgText }; postLeadToCRM({ from, name, text: msgText }).catch(()=>{}); saveLead(lead); }catch(e){ console.warn('lead log failed', e && e.message); }
 
-    // non-blocking lead log to CRM
-    try{ postLeadToCRM({ from, name, text: msgText }).catch(()=>{}); } catch(e){ console.warn("postLeadToCRM failed", e && e.message ? e.message : e); }
-
-    // handle interactive choices
-    if (selectedId) {
+    // handle interactive selections
+    if(selectedId){
       switch(selectedId){
-        case "SRV_NEW_CAR":
-        case "BTN_NEW_QUOTE":
-          await waSendText(from, "Please share your *city, model, variant/suffix & profile (individual/company)*.");
-          break;
-        case "SRV_USED_CAR":
-        case "BTN_USED_MORE":
-          await waSendText(from, "Share *make, model, year* (optional colour/budget) and I’ll suggest options.");
-          break;
-        case "SRV_SELL_CAR":
-          await waSendText(from, "Please share *car make/model, year, km, city* and a few photos. We’ll get you the best quote.");
-          break;
-        case "SRV_LOAN":
-        case "BTN_NEW_LOAN":
-        case "BTN_USED_LOAN":
-          await waSendText(from, `For loan assistance, share *city + car model + budget*. New car ROI from *${NEW_CAR_ROI}%*, Used car *${USED_CAR_ROI_VISIBLE}%*.`);
-          break;
-        case "BTN_BULLET_CALC":
-          await waSendText(from, "To calculate bullet EMI (used car), reply: `bullet <loan amount> <rate%> <tenure months>` e.g., `bullet 750000 10.5 60`.");
-          break;
-        case "BTN_USED_MORE_SIMILAR":
-          await waSendText(from, "Looking for more similar cars — please tell us a budget or send preferences (e.g., 'budget 1500000' or 'budget 15 lacs').");
-          break;
-        case "BTN_VIEW_PHOTOS":
-        case "BTN_USED_PHOTOS":
-          await waSendText(from, "Please open the quote link to view photos or reply with 'photos please' and we will re-send the drive link.");
-          break;
-        case "BTN_USED_TESTDRIVE":
-          await waSendText(from, "To book a test drive share your preferred city, date and time. Example: Delhi, 24 Nov, 4pm.");
-          break;
+        case 'SRV_NEW_CAR': case 'BTN_NEW_QUOTE':
+          await waSendText(from, 'Please share your *city, model, variant/suffix & profile (individual/company)*.'); break;
+        case 'SRV_USED_CAR': case 'BTN_USED_MORE':
+          await waSendText(from, 'Share *make, model, year* (optional colour/budget) and I’ll suggest options.'); break;
+        case 'SRV_SELL_CAR':
+          await waSendText(from, 'Please share *car make/model, year, km, city* and a few photos. We’ll get you the best quote.'); break;
+        case 'SRV_LOAN': case 'BTN_NEW_LOAN': case 'BTN_USED_LOAN':
+          await waSendText(from, `For loan assistance, share *city + car model + budget*. New car ROI from *${NEW_CAR_ROI}%*, Used car *${USED_CAR_ROI_VISIBLE}%*.`); break;
+        case 'BTN_USED_PHOTOS': case 'BTN_USED_VIEWPHOTOS':
+          await waSendText(from, 'Please tap the Google Drive link in the quote to view photos. If missing, reply “photos please”.'); break;
+        case 'BTN_BULLET_CALC':
+          await waSendText(from, 'To calculate bullet EMI (used car), reply: `bullet <loan amount> <tenure months>` e.g., `bullet 750000 60`'); break;
+        case 'BRAND_TOYOTA':
+          await waSendText(from, 'Share model & variant for Toyota (e.g., Delhi Hycross ZXO individual)'); break;
         default:
-          await waSendText(from, "Thanks! You can type your request anytime.");
+          await waSendText(from, 'Thanks! You can type your request anytime.');
       }
       return res.sendStatus(200);
     }
 
     // Greeting logic
-    if (shouldGreetNow(from, msgText)) {
+    if (shouldGreetNow(from, msgText)){
       await waSendText(from, `🔴 *MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.`);
       await waSendListMenu(from);
       return res.sendStatus(200);
     }
 
-    // text handling - quick new car quote
-    if (msgText && type === "text") {
+    // quick new car quote
+    if(msgText && type === 'text'){
       const servedNew = await tryQuickNewCarQuote(msgText, from);
-      if (servedNew) return res.sendStatus(200);
-    }
-
-    // sell flow quick detection
-    if (/^\s*sell\b/i.test(msgText) || /\bsell my car\b/i.test(msgText)) {
-      await waSendText(from, "To sell your car, please share: Make & Model, Year, KM driven, City, Ownership (first/second), expected price and attach photos/RC. Example: `Sell Toyota Fortuner 2016 65000 Delhi second 20L`");
-      try{ postLeadToCRM({ from, name, text: "SELL_FLOW: " + (msgText||"") }); }catch(e){}
-      return res.sendStatus(200);
+      if(servedNew) return res.sendStatus(200);
     }
 
     // used car detection
-    const usedMatch = (msgText || "").match(/used\s+(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i)
-                    || (msgText || "").match(/(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i);
-    if (usedMatch && usedMatch.groups) {
-      const { make, model, year } = usedMatch.groups;
-      const q = await buildUsedCarQuote({ make, model, year });
-      if (q && q.text) {
-        await waSendText(from, q.text);
-        await sendUsedCarButtons(from, !!q.picLink);
-        if (q.picLink) await waSendText(from, `Photos: ${q.picLink}`);
-        return res.sendStatus(200);
-      }
-    }
+    const usedMatch = (msgText || '').match(/used\s+(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i) || (msgText || '').match(/(?<make>[a-z0-9]+)\s+(?<model>[a-z0-9]+)\s*(?<year>\d{4})?/i);
+    if(usedMatch && usedMatch.groups){ const { make, model, year } = usedMatch.groups; const q = await buildUsedCarQuote({ make, model, year }); if(q && q.text){ await waSendText(from, q.text); await sendUsedCarButtons(from, !!q.picLink); return res.sendStatus(200); } }
 
-    // emi calculator: "emi 1500000 9.5 60"
-    const emiCmd = (msgText||"").trim().match(/^emi\s+([\d,]+)(?:\s+([\d\.]+)%?)?\s*(\d+)?/i);
-    if (emiCmd) {
-      const loanRaw = String(emiCmd[1]||"").replace(/[,₹\s]/g,"");
-      let rate = Number(emiCmd[2] || NEW_CAR_ROI);
-      const months = Number(emiCmd[3] || 60);
-      const loanAmt = Number(loanRaw);
-      if (!loanAmt || !months) {
-        await waSendText(from, "Please send: `emi <loan amount> <rate% optional> <tenure months>` e.g. `emi 1500000 9.5 60`");
-        return res.sendStatus(200);
-      }
-      const monthly = calcEmi(loanAmt, rate, months);
-      const total = monthly * months;
-      const interest = total - loanAmt;
-      const lines = [
-        `🔸 EMI Calculation`,
-        `Loan: ₹ *${fmtMoney(loanAmt)}*`,
-        `Rate: *${rate}%* p.a.`,
-        `Tenure: *${months} months*`,
-        ``,
-        `📌 Monthly EMI: ₹ *${fmtMoney(monthly)}*`,
-        `📊 Total Payable: ₹ *${fmtMoney(total)}*`,
-        `💰 Total Interest: ₹ *${fmtMoney(interest)}*`,
-        ``,
-        `✅ *Loan approval possible in ~30 minutes (T&Cs apply)*`,
-        `\n*Terms & Conditions Apply ✅*`
-      ].join("\n");
-      await waSendText(from, lines);
-      await waSendText(from, "Options: Change Tenure | Check Eligibility | Documents Required | Bullet EMI Option — reply with the option or use 'bullet <loan> <rate%> <tenure>'.");
-      return res.sendStatus(200);
-    }
+    // bullet calculator
+    const bulletCmd = (msgText||'').trim().match(/^bullet\s+([\d,]+)\s*(\d+)?/i);
+    if(bulletCmd){ const loanRaw = String(bulletCmd[1]||'').replace(/[,₹\s]/g,''); const months = Number(bulletCmd[2]||60); const loanAmt = Number(loanRaw); if(!loanAmt||!months){ await waSendText(from, 'Please send: `bullet <loan amount> <tenure months>` e.g. `bullet 750000 60`'); return res.sendStatus(200); } const sim = simulateBulletPlan({ loanAmount: loanAmt, months, internalRatePct: USED_CAR_ROI_INTERNAL, bulletPct:0.25 }); if(!sim){ await waSendText(from, 'Bullet calculation failed.'); return res.sendStatus(200); } const lines=[]; lines.push(`🔷 *Bullet EMI Plan — Used Car*`); lines.push(`Loan Amount: ₹ *${fmtMoney(sim.loan)}*`); lines.push(`ROI (shown): *${USED_CAR_ROI_VISIBLE}%*`); lines.push(`Tenure: *${sim.months} months*`); lines.push(''); lines.push(`📌 Monthly EMI (amortising principal excluding bullets): ₹ *${fmtMoney(sim.monthly_emi)}*`); lines.push(`📌 Bullet total (25%): ₹ *${fmtMoney(sim.bullet_total)}*`); lines.push(`• Bullet each: ₹ *${fmtMoney(sim.bullet_each)}* on months: ${Array.from({length: sim.num_bullets}, (_,i) => (12*(i+1))).join(' • ')}`); lines.push(''); lines.push(`📊 Total payable (EMIs + bullets): ₹ *${fmtMoney(sim.total_payable)}*`); lines.push(`💰 Total interest (approx): ₹ *${fmtMoney(sim.total_interest)}*`); lines.push(''); lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*'); lines.push('\n*Terms & Conditions Apply ✅*'); await waSendText(from, lines.join('\n')); try{ postLeadToCRM({ from, name, text: `BULLET_CALC ${loanAmt} ${months}` }); }catch(e){} return res.sendStatus(200); }
 
-    // bullet calculator: "bullet 750000 10.5 60"
-    const bulletCmd = (msgText||"").trim().match(/^bullet\s+([\d,]+)\s*([0-9\.]+)?%?\s*(\d+)?/i);
-    if (bulletCmd) {
-      const loanRaw = String(bulletCmd[1]||"").replace(/[,₹\s]/g,"");
-      const rate = Number(bulletCmd[2] || USED_CAR_ROI_VISIBLE);
-      const months = Number(bulletCmd[3] || 60);
-      const loanAmt = Number(loanRaw);
-      if (!loanAmt || !months) { await waSendText(from, "Please send: `bullet <loan amount> <rate%> <tenure months>` e.g., `bullet 750000 10.5 60`"); return res.sendStatus(200); }
-      const sim = simulateBulletPlan({ loanAmount: loanAmt, months, internalRatePct: rate, bulletPct:0.25 });
-      if (!sim) { await waSendText(from, "Bullet calculation failed."); return res.sendStatus(200); }
-      const lines = [];
-      lines.push(`🔷 *Bullet EMI Plan — Used Car*`);
-      lines.push(`Loan Amount: ₹ *${fmtMoney(sim.loan)}*`);
-      lines.push(`ROI (shown): *${rate}%*`);
-      lines.push(`Tenure: *${sim.months} months*`);
-      lines.push("");
-      lines.push(`📌 Monthly EMI (amortising principal excluding bullets): ₹ *${fmtMoney(sim.monthly_emi)}*`);
-      lines.push(`📌 Bullet total (25%): ₹ *${fmtMoney(sim.bullet_total)}*`);
-      lines.push(`• Bullet each: ₹ *${fmtMoney(sim.bullet_each)}* on months: ${Array.from({length: sim.num_bullets}, (_,i) => (12*(i+1))).join(" • ")}`);
-      lines.push("");
-      lines.push(`📊 Total payable (EMIs + bullets): ₹ *${fmtMoney(sim.total_payable)}*`);
-      lines.push(`💰 Total interest (approx): ₹ *${fmtMoney(sim.total_interest)}*`);
-      lines.push("");
-      lines.push(`✅ *Loan approval possible in ~30 minutes (T&Cs apply)*`);
-      lines.push("\n*Terms & Conditions Apply ✅*");
-      await waSendText(from, lines.join("\n"));
-      try{ postLeadToCRM({ from, name, text: `BULLET_CALC ${loanAmt} ${rate} ${months}` }); }catch(e){}
-      return res.sendStatus(200);
-    }
+    // emi calculator
+    const emiCmd = (msgText||'').trim().match(/^emi\s+([\d,]+)(?:\s+([\d\.]+)%?)?\s*(\d+)?/i);
+    if(emiCmd){ const loanRaw = String(emiCmd[1]||'').replace(/[,₹\s]/g,''); let rate = Number(emiCmd[2] || NEW_CAR_ROI); const months = Number(emiCmd[3] || 60); const loanAmt = Number(loanRaw); if(!loanAmt||!months){ await waSendText(from, 'Please send: `emi <loan amount> <rate% optional> <tenure months>` e.g. `emi 1500000 9.5 60`'); return res.sendStatus(200); } const monthly = calcEmiSimple(loanAmt, rate, months); const total = monthly * months; const interest = total - loanAmt; const lines = [ `🔸 EMI Calculation`, `Loan: ₹ *${fmtMoney(loanAmt)}*`, `Rate: *${rate}%* p.a.`, `Tenure: *${months} months*`, ``, `📌 Monthly EMI: ₹ *${fmtMoney(monthly)}*`, `📊 Total Payable: ₹ *${fmtMoney(total)}*`, `💰 Total Interest: ₹ *${fmtMoney(interest)}*`, ``, `✅ *Loan approval possible in ~30 minutes (T&Cs apply)*`, `\n*Terms & Conditions Apply ✅*` ].join('\n'); await waSendText(from, lines); return res.sendStatus(200); }
 
-    // budget search: "budget 15 lacs" or "budget 1500000"
-    const budgetCmd = (msgText||"").trim().match(/^budget\s+([,\d]+)\s*(l|lakhs|lac|inr)?/i) || (msgText||"").trim().match(/^(less than)\s*(15|30|50)\s*(l|lakhs|lac)?/i);
-    if (budgetCmd) {
-      // find numeric amount
-      let amt = 0;
-      try{
-        const raw = String(budgetCmd[1]||"").replace(/[, ]/g,"");
-        amt = Number(raw) || 0;
-        if(budgetCmd[2] && /l|lac|lakhs/i.test(budgetCmd[2])) amt = amt * 100000;
-      }catch(e){ amt = 0; }
-      if(!amt){ await waSendText(from, "Please send budget like: `budget 15 lacs` or `budget 1500000`."); return res.sendStatus(200); }
-      // perform a quick scan in used sheet if available
-      const rows = await loadUsedSheet();
-      if(!rows || rows.length<=1){ await waSendText(from, "Sorry — used car inventory not configured for budget search."); return res.sendStatus(200); }
-      const header = rows[0].map(h=>String(h||"").toUpperCase());
-      let priceIdx = header.findIndex(h => h.includes("EXPECTED")||h.includes("PRICE")||h.includes("EXPECTED PRICE"));
-      if(priceIdx<0) priceIdx = header.findIndex(h => /\bPRICE\b/.test(h));
-      if(priceIdx<0) priceIdx = 2;
-      const matches = [];
-      for(const r of rows.slice(1)){
-        const v = Number(String(r[priceIdx]||"").replace(/[,₹\s]/g,"")) || 0;
-        if(v && v <= amt) matches.push({ row: r, price: v });
-        if(matches.length >= 6) break;
-      }
-      if(matches.length === 0){ await waSendText(from, "No used cars found within that budget. We will get back to you — please share exact requirement and contact number."); return res.sendStatus(200); }
-      let reply = `Found ${matches.length} cars within ₹ ${fmtMoney(amt)}:\n`;
-      for(const m of matches.slice(0,5)){ reply += `• ${String(m.row[0]||m.row[1]||"Car").slice(0,60)} — ₹ ${fmtMoney(m.price)}\n`; }
-      reply += `\nReply with 'more' to see more or 'photos <#>' to request images.`;
-      await waSendText(from, reply);
-      return res.sendStatus(200);
-    }
+    // CRM fallback
+    try{ const crmReply = await fetchCRMReply({ from, msgText }); if(crmReply){ await waSendText(from, crmReply); return res.sendStatus(200); } }catch(e){ console.warn('CRM reply failed', e && e.message); }
 
-    // CRM fallback: ask CRM for a reply
-    try {
-      const crmReply = await fetchCRMReply({ from, msgText });
-      if (crmReply) { await waSendText(from, crmReply); return res.sendStatus(200); }
-    } catch (e) { console.warn("CRM reply failed", e && e.message ? e.message : e); }
-
-    // default fallback
-    await waSendText(from, "Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.");
+    await waSendText(from, "Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*." );
     return res.sendStatus(200);
-  } catch (err) {
-    console.error("Webhook error:", err && err.stack ? err.stack : err);
-    try{ if(ADMIN_WA) await waSendText(ADMIN_WA, `Webhook crash: ${String(err && err.message ? err.message : err).slice(0,500)}`); }catch(e){}
-    return res.sendStatus(200);
-  }
+  }catch(err){ console.error('Webhook error:', err && err.stack ? err.stack : err); try{ if(ADMIN_WA) await waSendText(ADMIN_WA, `Webhook crash: ${String(err && err.message ? err.message : err)}`); }catch(e){} return res.sendStatus(200); }
 });
 
 // ---------------- start server ----------------
-app.listen(PORT, ()=> {
+app.listen(PORT, ()=>{
   console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
-  console.log("ENV summary:", {
+  console.log('ENV summary:', {
     SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL,
     SHEET_USED_CSV_URL: !!SHEET_USED_CSV_URL || fs.existsSync(LOCAL_USED_CSV_PATH),
-    PHONE_NUMBER_ID: !!PHONE_NUMBER_ID, META_TOKEN: !!META_TOKEN, ADMIN_WA: !!ADMIN_WA, DEBUG: process.env.DEBUG_VARIANT === "true"
+    PHONE_NUMBER_ID: !!PHONE_NUMBER_ID, META_TOKEN: !!META_TOKEN, ADMIN_WA: !!ADMIN_WA, DEBUG
   });
 });
+
+module.exports = { app };
