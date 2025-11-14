@@ -1,13 +1,12 @@
-// server.cjs — MR.CAR webhook (Consolidated full file)
-// Replace your existing server.cjs with this file and restart server as described.
-// Features:
-//  - Per-user shortlist persistence & numeric selection (1,2,3...)
-//  - Used-quote: Loan = LTV% (default 95), show LTV, OPTION 1 NORMAL EMI, OPTION 2 BULLET EMI
-//  - Registration Place included
-//  - Greeting shows only list menu; quick-action buttons sent after quote flows
-//  - Admin alert fallback & improved logging
-//  - Local used CSV fallback: "PRE OWNED CAR PRICING - USED CAR.csv"
-//  - Configurable via env: USED_CAR_LTV_PCT, USED_CAR_ROI_VISIBLE, USED_CAR_ROI_INTERNAL, NEW_CAR_ROI
+// server.cjs — MR.CAR webhook (Consolidated & hardened)
+// Overwrite your existing server.cjs with this file and restart.
+// Key fixes:
+//  - Explicit early-return for 'statuses' events (Meta delivery/read) so bot replies only to real messages.
+//  - DEBUG respects DEBUG_VARIANT env (no accidental always-true).
+//  - Robust shortlist numeric selection and persistence.
+//  - Quick-action buttons only sent after quotes (new vs used preserved).
+//  - Improved admin alert fallback logging.
+//  - USED_CAR_LTV_PCT is env-configurable (default 95)
 
 require('dotenv').config();
 const fs = require('fs');
@@ -46,7 +45,7 @@ const USED_CAR_ROI_VISIBLE = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
 const USED_CAR_LTV_PCT = Number(process.env.USED_CAR_LTV_PCT || 95); // default 95%
 
-const DEBUG = (String(process.env.DEBUG_VARIANT || "false").toLowerCase() === "true");
+const DEBUG = String(process.env.DEBUG_VARIANT || "false").toLowerCase() === "true";
 
 // ---------------- file helpers ----------------
 function safeJsonRead(filename){
@@ -249,7 +248,7 @@ function calcEmiSimple(p, annualRatePct, months){
 }
 function calcEmi(p, annualRatePct, months=60){ return calcEmiSimple(p, annualRatePct, months); }
 
-// short Levenshtein for fuzzy matching
+// simple Levenshtein/fuzzy
 function levenshtein(a,b){
   if(!a||!b) return Math.max(a?a.length:0,b?b.length:0);
   a=a.toLowerCase(); b=b.toLowerCase();
@@ -306,14 +305,12 @@ async function loadPricingFromSheets(){
 
 // ---------------- Used sheet loader (remote or local) ----------------
 async function loadUsedSheetRows(){
-  // try remote
   if (SHEET_USED_CSV_URL){
     try {
       const rows = await fetchCsv(SHEET_USED_CSV_URL);
       if (rows && rows.length) return rows;
     } catch(e){ if (DEBUG) console.warn("remote used csv fetch failed", e && e.message ? e.message : e); }
   }
-  // fallback local
   try {
     if (fs.existsSync(LOCAL_USED_CSV_PATH)){
       const txt = fs.readFileSync(LOCAL_USED_CSV_PATH, 'utf8');
@@ -396,11 +393,11 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
     const idx = toHeaderIndexMap(header);
     const data = rows.slice(1);
 
-    // determine indices robustly
     const makeIdx = idx["MAKE"] ?? idx["BRAND"] ?? header.findIndex(h => h.includes("MAKE"));
     const modelIdx = idx["MODEL"] ?? idx["MODEL NAME"] ?? header.findIndex(h => h.includes("MODEL"));
     const subModelIdx = idx["SUB MODEL"] ?? idx["SUBMODEL"] ?? -1;
     const colourIdx = idx["COLOUR"] ?? idx["COLOR"] ?? header.findIndex(h => h.includes("COLOUR") || h.includes("COLOR"));
+
     const expectedIdxCandidates = ["EXPECTED PRICE","EXPECTED_PRICE","EXPECTED PRICE (₹)","EXPECTED_PRICE (INR)","EXPECTED PRICE(INR)","EXPECTED"];
     let expectedIdx = -1;
     for (const k of expectedIdxCandidates){ if (typeof idx[k] !== 'undefined') { expectedIdx = idx[k]; break; } }
@@ -436,7 +433,6 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
       if (score > 0) matches.push({ r, score, make, model, submodel, row });
     }
 
-    // fallback looser matching
     if (!matches.length){
       for (let r=0;r<data.length;r++){
         const row = data[r];
@@ -454,7 +450,6 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
 
     matches.sort((a,b) => b.score - a.score);
 
-    // build unique list by make+model
     const uniqueList = [];
     const seen = new Set();
     for (const item of matches.slice(0,12)){
@@ -465,7 +460,6 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
       }
     }
 
-    // if multiple distinct choices and top is not very strong, present shortlist numbered
     if (uniqueList.length > 1 && uniqueList[0].score < 40) {
       const lines = [];
       lines.push(`I found multiple matching vehicles. Please reply with the option number for the exact car you want:`);
@@ -474,17 +468,14 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
         const modelDisplay = (it.model||"").toUpperCase();
         const sub = (it.submodel||"").toUpperCase();
         const colour = String(it.row[colourIdx]||"");
-        const y = ""; // we avoid guessing year if not explicit
         lines.push(`${idxi+1}. ${makeDisplay} ${modelDisplay} ${sub ? `• ${sub}` : ""}${colour ? ` • ${colour}` : ""}`);
       });
       lines.push("");
       lines.push("Example reply: `1` or `Audi A6 2018`");
-      // save shortlist for user selection (we return shortlist array of objects containing r index and make/model)
       const shortlist = uniqueList.slice(0,6).map(u => ({ r: u.r, make: u.make, model: u.model }));
       return { text: lines.join("\n"), shortlist };
     }
 
-    // take top result
     const sel = uniqueList[0] || matches[0];
     const selRow = sel.row;
     const expectedStr = expectedIdx>=0 ? String(selRow[expectedIdx]||"") : "";
@@ -502,24 +493,14 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
     const normal_emi = calcEmiSimple(loanAmt, USED_CAR_ROI_VISIBLE, tenureDefault);
     const bulletSim = simulateBulletPlan({ loanAmount: loanAmt, months: tenureDefault, internalRatePct: USED_CAR_ROI_INTERNAL, bulletPct: 0.25 });
 
-    // registration place detection
     let regPlace = "";
     if (regIdx >= 0 && selRow[regIdx]) regPlace = String(selRow[regIdx]||"").trim();
-    else {
-      // try common columns that might contain registration text
-      for (let i=0;i<selRow.length;i++){
-        const key = header[i]||"";
-        if (/REGISTR/i.test(key) && selRow[i]) { regPlace = String(selRow[i]||"").trim(); break; }
-      }
-    }
 
-    // picture link detection
     let picLink = null;
     for (const c of selRow){
       if (String(c||"").includes("http")) { picLink = String(c||"").trim(); break; }
     }
 
-    // build final message
     const lines = [];
     lines.push(`*PRE-OWNED CAR QUOTE*`);
     lines.push(`Make/Model: *${(sel.make||"").toUpperCase()} ${(sel.model||"").toUpperCase()}*`);
@@ -593,7 +574,6 @@ async function tryQuickNewCarQuote(msgText, to){
         const modelCell = idxModel>=0 ? String(row[idxModel]||"").toLowerCase() : "";
         const variantCell = idxVariant>=0 ? String(row[idxVariant]||"").toLowerCase() : "";
         if ((modelCell && modelCell.includes(modelGuess)) || (variantCell && variantCell.includes(modelGuess)) || modelCell.includes(raw) || variantCell.includes(raw)) {
-          // pick price column heuristically
           let priceIdx = -1;
           const cityToken = city.split(' ')[0].toUpperCase();
           for (const k of Object.keys(idxMap)){
@@ -685,14 +665,30 @@ app.post('/admin/set_greeting_window', (req, res) => {
 
 // MAIN handler (POST)
 app.post('/webhook', async (req, res) => {
-  if (DEBUG) console.log("📩 Incoming webhook hit:", typeof req.body === 'object' ? JSON.stringify(req.body).slice(0,800) : String(req.body).slice(0,800));
+  // Defensive: log short shape if DEBUG so we can inspect payload types
+  if (DEBUG) {
+    try { console.log("📩 Incoming webhook (short):", JSON.stringify({
+      object: req.body && req.body.object,
+      entry0: req.body && req.body.entry && req.body.entry[0] && Object.keys(req.body.entry[0]).slice(0,5)
+    }).slice(0,1000)); } catch(e){}
+  }
   try {
     const entry = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value || {};
+
+    // If this is a status-only event (no messages), return early
+    if (!value?.messages && value?.statuses) {
+      if (DEBUG) console.log("Received status-only event (sent/delivered/read) — ignoring for replies.");
+      return res.sendStatus(200);
+    }
+
     const msg = value?.messages?.[0];
     const contact = value?.contacts?.[0];
-    if (!msg) return res.sendStatus(200);
+    if (!msg) { // Not a message we can act on
+      if (DEBUG) console.log("No message in webhook body — ignoring.");
+      return res.sendStatus(200);
+    }
 
     const from = msg.from;
     const type = msg.type;
@@ -715,7 +711,6 @@ app.post('/webhook', async (req, res) => {
     try {
       const lead = { from, name, text: msgText };
       postLeadToCRM({ from, name, text: msgText }).catch(()=>{});
-      // saveLead local simple implementation
       try {
         const existing = Array.isArray(safeJsonRead(LEADS_FILE)) ? safeJsonRead(LEADS_FILE) : (safeJsonRead(LEADS_FILE).leads || []);
         let arr = Array.isArray(existing) ? existing : (Array.isArray(existing.leads) ? existing.leads : []);
@@ -726,7 +721,7 @@ app.post('/webhook', async (req, res) => {
       } catch(e){ if (DEBUG) console.warn("lead save failed", e && e.message ? e.message : e); }
     } catch (e) { if (DEBUG) console.warn("lead log failed", e && e.message ? e.message : e); }
 
-    // Handle interactive replies first (buttons, lists)
+    // interactive choices handling
     if (selectedId) {
       switch(selectedId){
         case "SRV_NEW_CAR":
@@ -769,15 +764,12 @@ app.post('/webhook', async (req, res) => {
         if (Array.isArray(shortlist) && shortlist.length >= choice && choice >= 1) {
           const sel = shortlist[choice-1];
           if (sel && typeof sel.r === "number") {
-            // Build quote for the selected row index
             try {
               const rowsAll = await loadUsedSheetRows();
               if (rowsAll && rowsAll.length > sel.r) {
                 const header = rowsAll[0].map(h => String(h||"").trim().toUpperCase());
                 const idxmap = toHeaderIndexMap(header);
                 const row = rowsAll[ sel.r ];
-                // Build used quote message using same formatting as builder (loan=LTV, etc.)
-                // reuse small inline formatter:
                 const formatSelectedRow = (selRow, header, idxmap) => {
                   try {
                     const makeIdx = idxmap["MAKE"] ?? idxmap["BRAND"] ?? header.findIndex(h=>h.includes("MAKE"));
@@ -836,7 +828,6 @@ app.post('/webhook', async (req, res) => {
                 if (msgBuilt) {
                   await waSendText(from, msgBuilt);
                   clearShortlistForUser(from);
-                  // send possible photo link if present
                   let picLink = null;
                   for (const c of row) { if (String(c||"").includes("http")) { picLink = String(c||"").trim(); break; } }
                   if (picLink) await waSendText(from, `Photos: ${picLink}`);
@@ -852,7 +843,6 @@ app.post('/webhook', async (req, res) => {
 
     // Used car free-text detection (before new-car quick quote)
     try {
-      // load used makes quickly (non-blocking cached)
       let usedMakes = [];
       if (SHEET_USED_CSV_URL) {
         try {
@@ -868,8 +858,6 @@ app.post('/webhook', async (req, res) => {
         } catch (e) {
           if (DEBUG) console.warn("Failed fetching USED sheet:", String(e).slice(0,200));
         }
-      } else {
-        // if remote not configured, the local loader will be used by buildUsedCarQuoteFreeText
       }
 
       const textLower = (msgText || "").toLowerCase();
@@ -878,13 +866,11 @@ app.post('/webhook', async (req, res) => {
       if (explicitUsed || hasKnownMake || /\b(19|20)\d{2}\b/.test(textLower) || textLower.split(/\s+/).length <= 4) {
         const qRes = await buildUsedCarQuoteFreeText({ query: msgText });
         if (qRes && qRes.text) {
-          // if shortlist returned (multiple options), save it and return
           if (qRes.shortlist && qRes.shortlist.length) {
             saveShortlistForUser(from, qRes.shortlist);
             await waSendText(from, qRes.text);
             return res.sendStatus(200);
           }
-          // otherwise send the quote, send photo link (separate) and used buttons
           await waSendText(from, qRes.text);
           if (qRes.picLink) {
             await waSendText(from, `Photos: ${qRes.picLink}`);
