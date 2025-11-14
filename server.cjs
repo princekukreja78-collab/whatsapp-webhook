@@ -123,55 +123,94 @@ async function waSendRaw(payload) {
 }
 async function waSendText(to, body){ return waSendRaw({ messaging_product:"whatsapp", to, type:"text", text:{ body } }); }
 
-// compact menu: greeting quick buttons (max 3)
+// ---------------- safe title / fallback helpers ----------------
+function sanitizeTitle(title){
+  if(!title) return "Option";
+  // remove strange control chars & collapse spaces
+  let t = String(title).replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").replace(/\s+/g," ").trim();
+  // remove emojis (simple strip of most wide unicode emoji ranges)
+  t = t.replace(/[\u{1F300}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "").trim();
+  // ensure max length 20 (WhatsApp limit). Leave at least 1 char.
+  if(t.length === 0) t = "Option";
+  if(t.length > 20) t = t.slice(0,20).trim();
+  return t;
+}
+
+async function waSendWithFallback(payload, textFallback, to){
+  // Always attempt interactive first; if WA returns non-ok, send plain text fallback so user isn't left hanging.
+  const resp = await waSendRaw(payload);
+  try {
+    if (resp && resp.error) {
+      console.warn("Interactive send failed, falling back to text. WA response:", JSON.stringify(resp).slice(0,600));
+      if (textFallback && to) await waSendText(to, textFallback);
+    }
+  } catch(e){
+    console.warn("waSendWithFallback fallback failed", e && e.message ? e.message : e);
+  }
+  return resp;
+}
+
+// ---------------- compact menu: greeting quick buttons (max 3) ----------------
 async function waSendCompactButtons(to, footerText){
+  const buttons = [
+    { type:"reply", reply:{ id:"BTN_NEW_QUOTE", title: sanitizeTitle("Another Quote") } },
+    { type:"reply", reply:{ id:"BTN_NEW_LOAN", title: sanitizeTitle("Loan / EMI Calculator") } },
+    { type:"reply", reply:{ id:"BTN_CONTACT_SALES", title: sanitizeTitle("Contact Sales") } }
+  ].slice(0,3);
+
   const payload = { messaging_product:"whatsapp", to, type:"interactive", interactive:{
     type:"button",
     body:{ text:"You can continue with these quick actions:" },
     footer:{ text: footerText || "Premium Deals • Trusted Service • Mr. Car" },
-    action:{ buttons:[
-      { type:"reply", reply:{ id:"BTN_NEW_QUOTE", title:"Another Quote" } },
-      { type:"reply", reply:{ id:"BTN_NEW_LOAN", title:"Loan / EMI Calculator" } },
-      { type:"reply", reply:{ id:"BTN_CONTACT_SALES", title:"Contact Sales" } }
-    ]}
+    action:{ buttons }
   }};
-  return waSendRaw(payload);
+
+  const textFallback = "Options:\n1) Another Quote\n2) Loan / EMI Calculator\n3) Contact Sales\nReply with the option name.";
+  return waSendWithFallback(payload, textFallback, to);
 }
 
 async function waSendListMenu(to){
-  // a simple list (keeps services only; brands not inside this menu to avoid confusion)
+  const rows = [
+    { id:"SRV_NEW_CAR", title: sanitizeTitle("New Car Deals"), description: "On-road prices & offers" },
+    { id:"SRV_USED_CAR", title: sanitizeTitle("Pre-Owned Cars"), description: "Certified used inventory" },
+    { id:"SRV_SELL_CAR", title: sanitizeTitle("Sell My Car"), description: "Best selling quote" },
+    { id:"SRV_LOAN", title: sanitizeTitle("Loan / Finance"), description: "Fast approvals & low ROI" }
+  ];
+
   const interactive = {
     type: "list",
     header:{ type:"text", text:"MR. CAR SERVICES" },
     body:{ text:"Please choose one option 👇" },
     footer:{ text:"Premium Deals • Trusted Service • Mr. Car" },
-    action:{ button:"Select Service", sections:[ { title:"Available", rows:[
-      { id:"SRV_NEW_CAR", title:"New Car Deals", description:"On-road prices & offers" },
-      { id:"SRV_USED_CAR", title:"Pre-Owned Cars", description:"Certified used inventory" },
-      { id:"SRV_SELL_CAR", title:"Sell My Car", description:"Best selling quote" },
-      { id:"SRV_LOAN", title:"Loan / Finance", description:"Fast approvals & low ROI" }
-    ] } ] }
+    action:{ button: sanitizeTitle("Select Service"), sections:[ { title:"Available", rows } ] }
   };
-  return waSendRaw({ messaging_product:"whatsapp", to, type:"interactive", interactive });
+  const payload = { messaging_product:"whatsapp", to, type:"interactive", interactive };
+  const textFallback = "Services:\n- New Car Deals\n- Pre-Owned Cars\n- Sell My Car\n- Loan / Finance\nReply with the option name.";
+  return waSendWithFallback(payload, textFallback, to);
 }
 
 async function sendNewCarButtons(to){
   const payload = { messaging_product:"whatsapp", to, type:"interactive", interactive:{
     type:"button", body:{ text:"You can continue with these quick actions:" }, action:{ buttons:[
-      { type:"reply", reply:{ id:"BTN_NEW_LOAN", title:"Loan Options" } },
-      { type:"reply", reply:{ id:"BTN_NEW_QUOTE", title:"Another Quote" } }
+      { type:"reply", reply:{ id:"BTN_NEW_LOAN", title:sanitizeTitle("Loan Options") } },
+      { type:"reply", reply:{ id:"BTN_NEW_QUOTE", title:sanitizeTitle("Another Quote") } }
     ]}}};
-  return waSendRaw(payload);
+  const textFallback = "Options:\n- Loan Options\n- Another Quote\nReply with the option name.";
+  return waSendWithFallback(payload, textFallback, to);
 }
+
 async function sendUsedCarButtons(to, hasPhotoLink){
   const buttons = [
-    { type:"reply", reply:{ id:"BTN_USED_LOAN", title:"Loan Options" } },
-    { type:"reply", reply:{ id:"BTN_USED_MORE", title:"More Options" } }
+    { type:"reply", reply:{ id:"BTN_USED_LOAN", title: sanitizeTitle("Loan Options") } },
+    { type:"reply", reply:{ id:"BTN_USED_MORE", title: sanitizeTitle("More Options") } }
   ];
-  if (hasPhotoLink) buttons.unshift({ type:"reply", reply:{ id:"BTN_USED_PHOTOS", title:"View Photos 📸" } });
+  if (hasPhotoLink) buttons.unshift({ type:"reply", reply:{ id:"BTN_USED_PHOTOS", title: sanitizeTitle("View Photos") } });
   // Ensure max 3 buttons to comply with WhatsApp limits
   const payload = { messaging_product:"whatsapp", to, type:"interactive", interactive:{ type:"button", body:{ text:"Quick actions:" }, action:{ buttons: buttons.slice(0,3) } }};
-  return waSendRaw(payload);
+  const textFallback = hasPhotoLink
+    ? "Options:\n- View Photos\n- Loan Options\n- More Options\nReply with the option name."
+    : "Options:\n- Loan Options\n- More Options\nReply with the option name.";
+  return waSendWithFallback(payload, textFallback, to);
 }
 
 // ---------------- admin alerts & throttling ----------------
