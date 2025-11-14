@@ -1,12 +1,6 @@
-// server.cjs — MR.CAR webhook (Consolidated & hardened)
-// Overwrite your existing server.cjs with this file and restart.
-// Key fixes:
-//  - Explicit early-return for 'statuses' events (Meta delivery/read) so bot replies only to real messages.
-//  - DEBUG respects DEBUG_VARIANT env (no accidental always-true).
-//  - Robust shortlist numeric selection and persistence.
-//  - Quick-action buttons only sent after quotes (new vs used preserved).
-//  - Improved admin alert fallback logging.
-//  - USED_CAR_LTV_PCT is env-configurable (default 95)
+// server.cjs — MR.CAR webhook (Consolidated final — ready to deploy)
+// Includes: used-quote LTV=95% (configurable), shortlist handling, stricter used-detection,
+// admin alert fallback, avoid status-only replies, debug controlled by DEBUG_VARIANT.
 
 require('dotenv').config();
 const fs = require('fs');
@@ -45,6 +39,7 @@ const USED_CAR_ROI_VISIBLE = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
 const USED_CAR_LTV_PCT = Number(process.env.USED_CAR_LTV_PCT || 95); // default 95%
 
+// DEBUG respects DEBUG_VARIANT env; default false
 const DEBUG = String(process.env.DEBUG_VARIANT || "false").toLowerCase() === "true";
 
 // ---------------- file helpers ----------------
@@ -705,12 +700,18 @@ app.post('/webhook', async (req, res) => {
     if (DEBUG) console.log("INBOUND", { from, type, sample: (msgText||'').slice(0,300) });
 
     // send admin alert (throttled)
-    if (from !== ADMIN_WA) await sendAdminAlert({ from, name, text: msgText });
+    if (from !== ADMIN_WA) {
+      try {
+        // Guarded CRM/sendAdminAlert and prevent uncaught rejections
+        await sendAdminAlert({ from, name, text: msgText });
+      } catch(e){ if (DEBUG) console.warn("sendAdminAlert internal failed", e && e.message ? e.message : e); }
+    }
 
     // non-blocking lead log to CRM and save locally
     try {
       const lead = { from, name, text: msgText };
-      postLeadToCRM({ from, name, text: msgText }).catch(()=>{});
+      // guarded async CRM call to avoid raw HTML 404 spamming logs
+      (async ()=>{ try{ await postLeadToCRM({ from, name, text: msgText }); }catch(e){ if(DEBUG) console.warn('CRM post failed', e && e.message ? e.message : e); } })();
       try {
         const existing = Array.isArray(safeJsonRead(LEADS_FILE)) ? safeJsonRead(LEADS_FILE) : (safeJsonRead(LEADS_FILE).leads || []);
         let arr = Array.isArray(existing) ? existing : (Array.isArray(existing.leads) ? existing.leads : []);
@@ -861,9 +862,12 @@ app.post('/webhook', async (req, res) => {
       }
 
       const textLower = (msgText || "").toLowerCase();
+      // stricter used detection: require explicit used keywords OR a known make OR a year token
       const explicitUsed = /\b(used|pre-?owned|pre owned|preowned|second hand|secondhand)\b/.test(textLower);
       const hasKnownMake = usedMakes.some(m => m && textLower.includes(m));
-      if (explicitUsed || hasKnownMake || /\b(19|20)\d{2}\b/.test(textLower) || textLower.split(/\s+/).length <= 4) {
+      const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
+
+      if (explicitUsed || hasKnownMake || hasYear) {
         const qRes = await buildUsedCarQuoteFreeText({ query: msgText });
         if (qRes && qRes.text) {
           if (qRes.shortlist && qRes.shortlist.length) {
@@ -917,7 +921,7 @@ app.post('/webhook', async (req, res) => {
       lines.push("");
       lines.push(`✅ *Loan approval possible in ~30 minutes (T&Cs apply)*`);
       await waSendText(from, lines.join("\n"));
-      try { postLeadToCRM({ from, name, text: `BULLET_CALC ${loanAmt} ${months}` }); } catch(e){}
+      try { (async ()=>{ try{ await postLeadToCRM({ from, name, text: `BULLET_CALC ${loanAmt} ${months}` }); }catch(e){ if(DEBUG) console.warn('CRM post failed', e && e.message ? e.message : e); } })(); } catch(e){}
       return res.sendStatus(200);
     }
 
