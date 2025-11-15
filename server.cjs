@@ -1,10 +1,9 @@
-// server.cjs — MR.CAR webhook (FINAL with new-car variants & loan menu, fixed used detection)
-// ✅ Used car: LTV=95% + normal/bullet EMI + registration place
-// ✅ New car: quick quote + variant list when only model name is given
-// ✅ Budget queries: 15 lakh / 15 lac budget handled
-// ✅ Loan & finance: 3-option menu (EMI calculator, Documents, Eligibility)
-// ✅ Admin alerts, CRM posting, status-only events ignored
-// ✅ FIX: Used-car detection no longer hijacks BMW/Audi etc. new-car quotes
+// server.cjs — MR.CAR webhook (new car + used car fixed)
+// - Used: 95% LTV, option 1/2 EMI view, registration place, no total payable/interest lines
+// - New: quick quote, variant listing when only model, budget handling
+// - Loan: EMI calc, docs, eligibility menu
+// - Fixed: "Preowned" alone just asks for details (no CSV search/buttons)
+// - Fixed: used detection does NOT block new-car quotes for BMW/Audi/etc.
 
 require('dotenv').config();
 const fs = require('fs');
@@ -40,7 +39,7 @@ const LEADS_FILE          = path.resolve(__dirname, "crm_leads.json");
 const NEW_CAR_ROI         = Number(process.env.NEW_CAR_ROI || 8.10);
 const USED_CAR_ROI_VISIBLE   = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL  = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
-const USED_CAR_LTV_PCT       = Number(process.env.USED_CAR_LTV_PCT || 95); // loan as % of price
+const USED_CAR_LTV_PCT       = Number(process.env.USED_CAR_LTV_PCT || 95); // % of expected price
 
 const DEBUG = String(process.env.DEBUG_VARIANT || "true").toLowerCase() === "true";
 
@@ -119,14 +118,19 @@ async function waSendRaw(payload) {
 }
 async function waSendText(to, body){ return waSendRaw({ messaging_product:"whatsapp", to, type:"text", text:{ body } }); }
 
-// quick buttons (used *after quotes*, not on greeting)
+// quick buttons (after quotes / flows, not on greeting)
 async function waSendQuickButtons(to){
   const buttons = [
     { type:"reply", reply:{ id:"BTN_NEW_QUOTE", title:"Another Quote" } },
     { type:"reply", reply:{ id:"BTN_NEW_LOAN", title:"Loan / EMI Calc" } },
     { type:"reply", reply:{ id:"BTN_CONTACT_SALES", title:"Contact Sales" } }
   ];
-  return waSendRaw({ messaging_product:"whatsapp", to, type:"interactive", interactive:{ type:"button", body:{ text:"Choose a quick action:" }, action:{ buttons } }});
+  return waSendRaw({
+    messaging_product:"whatsapp",
+    to,
+    type:"interactive",
+    interactive:{ type:"button", body:{ text:"Choose a quick action:" }, action:{ buttons } }
+  });
 }
 
 // service list (menu)
@@ -147,27 +151,36 @@ async function waSendListMenu(to){
   return waSendRaw({ messaging_product:"whatsapp", to, type:"interactive", interactive });
 }
 
-// used car quick buttons (after used quote)
-async function sendUsedCarButtons(to, hasPhotoLink){
+// used car quick buttons (after a real used quote)
+async function sendUsedCarButtons(to){
   const buttons = [
     { type:"reply", reply:{ id:"BTN_USED_MORE", title:"More Similar Cars" } },
     { type:"reply", reply:{ id:"BTN_BOOK_TEST", title:"Book Test Drive" } },
     { type:"reply", reply:{ id:"BTN_CONTACT_SALES", title:"Contact Sales" } }
   ];
-  return waSendRaw({ messaging_product:"whatsapp", to, type:"interactive", interactive:{ type:"button", body:{ text:"Quick actions:" }, action:{ buttons } }});
+  return waSendRaw({
+    messaging_product:"whatsapp",
+    to,
+    type:"interactive",
+    interactive:{ type:"button", body:{ text:"Quick actions:" }, action:{ buttons } }
+  });
 }
 
 // new car quick buttons (after new car quote)
 async function sendNewCarButtons(to){
-  const payload = { messaging_product:"whatsapp", to, type:"interactive", interactive:{
-    type:"button", body:{ text:"You can continue with these quick actions:" }, action:{ buttons:[
-      { type:"reply", reply:{ id:"BTN_NEW_LOAN", title:"Loan Options" } },
-      { type:"reply", reply:{ id:"BTN_NEW_QUOTE", title:"Another Quote" } }
-    ]}}};
-  return waSendRaw(payload);
+  const buttons = [
+    { type:"reply", reply:{ id:"BTN_NEW_LOAN", title:"Loan Options" } },
+    { type:"reply", reply:{ id:"BTN_NEW_QUOTE", title:"Another Quote" } }
+  ];
+  return waSendRaw({
+    messaging_product:"whatsapp",
+    to,
+    type:"interactive",
+    interactive:{ type:"button", body:{ text:"You can continue with these quick actions:" }, action:{ buttons } }
+  });
 }
 
-// loan options (3 buttons: EMI calc, docs, eligibility)
+// loan options (EMI, docs, eligibility)
 async function waSendLoanMenu(to){
   const buttons = [
     { type:"reply", reply:{ id:"BTN_LOAN_EMI",  title:"EMI Calculator" } },
@@ -194,8 +207,12 @@ async function sendAdminAlert({ from, name, text }) {
   if (now - prev < ALERT_WINDOW_MS) { if (DEBUG) console.log("throttled admin alert for", from); return; }
   lastAlert.set(from, now);
   try {
-    const resp = await waSendRaw({ messaging_product:"whatsapp", to: ADMIN_WA, type:"text",
-      text: { body: `🔔 NEW WA LEAD\nFrom: ${from}\nName: ${name||'-'}\nMsg: ${String(text||'').slice(0,1000)}` }});
+    const resp = await waSendRaw({
+      messaging_product:"whatsapp",
+      to: ADMIN_WA,
+      type:"text",
+      text: { body: `🔔 NEW WA LEAD\nFrom: ${from}\nName: ${name||'-'}\nMsg: ${String(text||'').slice(0,1000)}` }
+    });
     if (DEBUG) console.log("sendAdminAlert response", JSON.stringify(resp).slice(0,200));
   } catch(e){
     console.warn("sendAdminAlert failed", e && e.message ? e.message : e);
@@ -258,7 +275,7 @@ function calcEmiSimple(p, annualRatePct, months){
   return emi;
 }
 
-// small Levenshtein
+// Levenshtein
 function levenshtein(a,b){
   if(!a||!b) return Math.max(a?a.length:0,b?b.length:0);
   a=a.toLowerCase(); b=b.toLowerCase();
@@ -331,7 +348,7 @@ async function loadUsedSheetRows(){
   return [];
 }
 
-// ---------------- Shortlist for used (per user) ----------------
+// ---------------- shortlist per user ----------------
 function shortlistPathFor(from){ return path.resolve(__dirname, "shortlist_" + String(from).replace(/\D/g,"") + ".json"); }
 function saveShortlistForUser(from, shortlist){
   try { fs.writeFileSync(shortlistPathFor(from), JSON.stringify({ ts: Date.now(), shortlist }, null, 2), "utf8"); return true; }
@@ -389,11 +406,11 @@ function simulateBulletPlan({ loanAmount, months, internalRatePct, bulletPct=0.2
   };
 }
 
-// ---------------- Used car quote (free-text) ----------------
+// ---------------- Used car quote ----------------
 async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel }){
   try {
     const rows = await loadUsedSheetRows();
-    if (!rows || !rows.length) return { text: "Used car pricing not configured." };
+    if (!rows || !rows.length) return { text: "Used car pricing not configured.", foundExact:false };
 
     const header = rows[0].map(h => String(h||"").trim().toUpperCase());
     const idx = toHeaderIndexMap(header);
@@ -403,6 +420,8 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
     const modelIdx = idx["MODEL"] ?? idx["MODEL NAME"] ?? header.findIndex(h => h.includes("MODEL"));
     const subModelIdx = idx["SUB MODEL"] ?? idx["SUBMODEL"] ?? -1;
     const colourIdx = idx["COLOUR"] ?? idx["COLOR"] ?? header.findIndex(h => h.includes("COLOUR") || h.includes("COLOR"));
+    let regIdx = idx["REGISTRATION PLACE"] ?? idx["REGISTRATION"] ?? header.findIndex(h => h.includes("REGISTR"));
+    if (regIdx < 0) regIdx = -1;
 
     const expectedIdxCandidates = ["EXPECTED PRICE","EXPECTED_PRICE","EXPECTED PRICE (₹)","EXPECTED_PRICE (INR)","EXPECTED PRICE(INR)","EXPECTED"];
     let expectedIdx = -1;
@@ -411,8 +430,6 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
       const ei = header.findIndex(h => h.includes("EXPECTED") || h.includes("PRICE"));
       expectedIdx = ei >= 0 ? ei : -1;
     }
-    let regIdx = idx["REGISTRATION PLACE"] ?? idx["REGISTRATION"] ?? header.findIndex(h => h.includes("REGISTR"));
-    if (regIdx < 0) regIdx = -1;
 
     const q = (query || "").toLowerCase();
     const qTokens = q.replace(/[^\w\s]/g," ").split(/\s+/).filter(Boolean);
@@ -451,7 +468,10 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
     }
 
     if (!matches.length) {
-      return { text: `Sorry, I couldn’t find an exact match for "${query}".\nPlease share brand and model (e.g., "Audi A6 2018") or give a budget and I’ll suggest options.` };
+      return {
+        text: `Sorry, I couldn’t find an exact match for "${query}".\nPlease share brand and model (e.g., "Audi A6 2018") or give a budget and I’ll suggest options.`,
+        foundExact:false
+      };
     }
 
     matches.sort((a,b) => b.score - a.score);
@@ -478,7 +498,7 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
       lines.push("");
       lines.push("Example reply: `1` or `Audi A6 2018`");
       const shortlist = uniqueList.slice(0,6).map(u => ({ r: u.r, make: u.make, model: u.model }));
-      return { text: lines.join("\n"), shortlist };
+      return { text: lines.join("\n"), shortlist, foundExact:false };
     }
 
     const sel = uniqueList[0] || matches[0];
@@ -491,7 +511,7 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
         if (/^\d+$/.test(v) && Number(v) > 100000) { price = Number(v); break; }
       }
     }
-    if (!price) return { text: `Price for *${sel.make.toUpperCase()} ${sel.model.toUpperCase()}* not available.` };
+    if (!price) return { text: `Price for *${sel.make.toUpperCase()} ${sel.model.toUpperCase()}* not available.`, foundExact:false };
 
     const loanAmt = Math.round(price * (USED_CAR_LTV_PCT/100));
     const tenureDefault = 60;
@@ -529,10 +549,10 @@ async function buildUsedCarQuoteFreeText({ query, requestedBrand, requestedModel
     lines.push("");
     lines.push(`✅ Loan approval possible in ~30 minutes (subject to documents & verification)`);
 
-    return { text: lines.join("\n"), picLink, selRowIndex: sel.r };
+    return { text: lines.join("\n"), picLink, selRowIndex: sel.r, foundExact:true };
   } catch(e){
     console.error("buildUsedCarQuoteFreeText error", e && e.stack ? e.stack : e);
-    return { text: "Used car pricing failed." , picLink:null};
+    return { text: "Used car pricing failed.", picLink:null, foundExact:false };
   }
 }
 
@@ -548,15 +568,14 @@ function detectExShowIdx(idxMap){
   return -1;
 }
 
-// When user sends only "hyryder" / "fortuner" -> list variants instead of guessing a row
+// list variants when only model name sent (e.g., "hyryder")
 async function sendVariantListIfModelOnly(msgText, tables, to){
   const t = String(msgText || "").toLowerCase();
-  // strip city/profile words first
   let raw = t.replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bangalore|bengaluru|chennai)\b/g," ")
              .replace(/\b(individual|company|corporate|firm|personal)\b/g," ")
              .replace(/[^\w\s]/g," ").replace(/\s+/g," ").trim();
   const tokens = raw.split(/\s+/).filter(Boolean);
-  if (tokens.length !== 1) return false; // not model-only
+  if (tokens.length !== 1) return false;
   const modelToken = tokens[0];
 
   for (const [brand, tab] of Object.entries(tables)){
@@ -564,8 +583,8 @@ async function sendVariantListIfModelOnly(msgText, tables, to){
     const header = tab.header.map(h => String(h||"").toUpperCase());
     const idxModel = header.findIndex(h=> h.includes("MODEL") || h.includes("VEHICLE"));
     const idxVariant = header.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX"));
-
     if (idxModel < 0 || idxVariant < 0) continue;
+
     const variantsSet = new Set();
     for (const row of tab.data){
       const modelCell = String(row[idxModel]||"").toLowerCase();
@@ -597,7 +616,7 @@ async function tryQuickNewCarQuote(msgText, to){
 
     const t = String(msgText || "").toLowerCase();
 
-    // FIRST: if only model name (no variant) -> list variants and stop
+    // if only model name => list variants
     const listed = await sendVariantListIfModelOnly(msgText, tables, to);
     if (listed) return true;
 
@@ -748,7 +767,7 @@ app.post('/webhook', async (req, res) => {
     }
     if (DEBUG) console.log("INBOUND", { from, type, sample: (msgText||'').slice(0,300) });
 
-    // Admin alert (throttled)
+    // Admin alert
     if (from !== ADMIN_WA) {
       try { await sendAdminAlert({ from, name, text: msgText }); } catch(e){}
     }
@@ -796,260 +815,8 @@ app.post('/webhook', async (req, res) => {
         case "BTN_BOOK_TEST":
           await waSendText(from, "Thanks — share preferred date/time and we'll call to confirm the test drive.");
           break;
-        // Loan menu sub-options
         case "BTN_LOAN_EMI":
           await waSendText(from, "For EMI calculation, reply like:\n`emi 1500000 9.5 60`\n\nFormat: `emi <loan amount> <rate% optional> <months>`");
           break;
         case "BTN_LOAN_DOCS":
-          await waSendText(from, "Basic loan documents:\n• PAN & Aadhaar\n• 3/6 months bank statements\n• 2/3 years ITR or salary slips\n• Address proof\n• Photos & car details\n\nReply with *city + salaried/self-employed* to get exact checklist.");
-          break;
-        case "BTN_LOAN_ELIG":
-          await waSendText(from, "For eligibility, please share:\n• City\n• Salaried / Self-employed\n• Monthly income\n• Existing EMIs (if any)\n\nExample: `Delhi salaried 1.2L income 15k existing EMI`");
-          break;
-        default:
-          await waSendText(from, "Thanks! You can type your request anytime.");
-      }
-      return res.sendStatus(200);
-    }
-
-    // 2) Numeric reply = used-car shortlist selection
-    try {
-      const numericOnly = (msgText||"").trim().match(/^(\d{1,2})$/);
-      if (numericOnly && numericOnly[1]) {
-        const choice = Number(numericOnly[1]);
-        const shortlist = loadShortlistForUser(from);
-        if (Array.isArray(shortlist) && shortlist.length >= choice && choice >= 1) {
-          const sel = shortlist[choice-1];
-          if (sel && typeof sel.r === "number") {
-            const rowsAll = await loadUsedSheetRows();
-            if (rowsAll && rowsAll.length > sel.r) {
-              const header = rowsAll[0].map(h => String(h||"").trim().toUpperCase());
-              const idxmap = toHeaderIndexMap(header);
-              const row = rowsAll[ sel.r ];
-
-              const makeIdx = idxmap["MAKE"] ?? idxmap["BRAND"] ?? header.findIndex(h=>h.includes("MAKE"));
-              const modelIdx = idxmap["MODEL"] ?? header.findIndex(h=>h.includes("MODEL"));
-              const subModelIdx = idxmap["SUB MODEL"] ?? idxmap["SUBMODEL"] ?? -1;
-              const colourIdx = idxmap["COLOUR"] ?? idxmap["COLOR"] ?? header.findIndex(h => h.includes("COLOUR") || h.includes("COLOR"));
-
-              const expectedIdxCandidates = ["EXPECTED PRICE","EXPECTED_PRICE","EXPECTED PRICE (₹)","EXPECTED_PRICE (INR)","EXPECTED"];
-              let expectedIdx = -1;
-              for (const k of expectedIdxCandidates) if (typeof idxmap[k] !== 'undefined') { expectedIdx = idxmap[k]; break; }
-              if (expectedIdx < 0) { const ei = header.findIndex(h => h.includes("EXPECTED")||h.includes("PRICE")); expectedIdx = ei>=0?ei:-1; }
-              let regIdx = idxmap["REGISTRATION PLACE"] ?? idxmap["REGISTRATION"] ?? header.findIndex(h => h.includes("REGISTR"));
-              if (regIdx < 0) regIdx = -1;
-
-              const expectedStr = expectedIdx>=0 ? String(row[expectedIdx]||"") : "";
-              let price = Number(String(expectedStr||'').replace(/[,₹\s]/g,'')) || 0;
-              if (!price) {
-                for (let i=0;i<row.length;i++){
-                  const v = String(row[i]||"").replace(/[,₹\s]/g,"");
-                  if (/^\d+$/.test(v) && Number(v) > 100000) { price = Number(v); break; }
-                }
-              }
-              if (price) {
-                const loanAmt = Math.round(price * (USED_CAR_LTV_PCT/100));
-                const tenureDefault = 60;
-                const normal_emi = calcEmiSimple(loanAmt, USED_CAR_ROI_VISIBLE, tenureDefault);
-                const bulletSim = simulateBulletPlan({ loanAmount: loanAmt, months: tenureDefault, internalRatePct: USED_CAR_ROI_INTERNAL, bulletPct: 0.25 });
-                let regPlace = "";
-                if (regIdx >= 0 && row[regIdx]) regPlace = String(row[regIdx]||"").trim();
-
-                const lines = [];
-                lines.push(`*PRE-OWNED CAR QUOTE*`);
-                const make = (row[makeIdx]||"").toString().toUpperCase();
-                const model = (row[modelIdx]||"").toString().toUpperCase();
-                lines.push(`Make/Model: *${make} ${model}*`);
-                if (subModelIdx >= 0 && row[subModelIdx]) lines.push(`Variant: ${(row[subModelIdx]||"").toString().toUpperCase()}`);
-                if (row[colourIdx]) lines.push(`Colour: ${(row[colourIdx]||"").toString().toUpperCase()}`);
-                if (regPlace) lines.push(`Registration Place: ${regPlace.toUpperCase()}`);
-                lines.push("");
-                lines.push(`Expected Price: ₹ *${fmtMoney(price)}*`);
-                lines.push(`Loan: ₹ *${fmtMoney(loanAmt)}*  •  LTV: *${USED_CAR_LTV_PCT}%*`);
-                lines.push(`ROI (Shown): *${USED_CAR_ROI_VISIBLE}%* • Tenure: *${tenureDefault} months*`);
-                lines.push("");
-                lines.push(`OPTION 1 — NORMAL EMI`);
-                lines.push(`📌 EMI (on ₹ ${fmtMoney(loanAmt)}): ₹ *${fmtMoney(normal_emi)}*`);
-                if (bulletSim) {
-                  lines.push("");
-                  lines.push(`OPTION 2 — BULLET EMI`);
-                  lines.push(`📌 Monthly EMI (amortising): ₹ *${fmtMoney(bulletSim.monthly_emi)}*`);
-                  lines.push(` • Bullet total: ₹ *${fmtMoney(bulletSim.bullet_total)}*`);
-                  lines.push(` • Bullet each: ₹ *${fmtMoney(bulletSim.bullet_each)}* on months: ${Array.from({length: bulletSim.num_bullets}, (_,i) => (12*(i+1))).join(" • ")}`);
-                }
-                lines.push("");
-                lines.push(`✅ Loan approval possible in ~30 minutes (subject to documents & verification)`);
-                await waSendText(from, lines.join("\n"));
-                clearShortlistForUser(from);
-                let picLink = null;
-                for (const c of row) { if (String(c||"").includes("http")) { picLink = String(c||"").trim(); break; } }
-                if (picLink) await waSendText(from, `Photos: ${picLink}`);
-                await sendUsedCarButtons(from, !!picLink);
-                return res.sendStatus(200);
-              }
-            }
-          }
-        }
-      }
-    } catch(e){ if (DEBUG) console.warn("numeric shortlist handler failed", e && e.message ? e.message : e); }
-
-    // 3) Budget-only handling (e.g., "15 lac", "20 lakh budget")
-    if (type === "text") {
-      const low = (msgText || "").toLowerCase();
-      const budgetMatch = low.match(/(\d+(\.\d+)?)\s*(lakh|lac|lacs|lakhs)\b/);
-      if (budgetMatch) {
-        const lakhs = parseFloat(budgetMatch[1] || "0");
-        const amt = Math.round(lakhs * 100000);
-        const lines = [];
-        lines.push(`Noted approx budget: ₹ *${fmtMoney(amt)}* (about ${lakhs} lakh).`);
-        lines.push("");
-        lines.push(`To help you best, please share:`);
-        lines.push(`• *New* or *Pre-owned*`);
-        lines.push(`• Brand & model (e.g., Toyota Hyryder / BMW X1)`);
-        lines.push(`• City & profile (individual/company)`);
-        lines.push("");
-        lines.push(`Example: _New Toyota Hyryder around ${lakhs} lakh in Delhi individual_`);
-        lines.push(`\nFor approximate EMI, you can also send: \`emi ${amt} 9.5 60\``);
-        await waSendText(from, lines.join("\n"));
-        return res.sendStatus(200);
-      }
-    }
-
-    // 4) Used car detection (keywords / year)
-    try {
-      let usedMakes = [];
-      if (SHEET_USED_CSV_URL) {
-        try {
-          const usedCsv = await fetchCsv(SHEET_USED_CSV_URL);
-          if (usedCsv && usedCsv.length > 1) {
-            const usedHeader = usedCsv[0].map(h => String(h || "").trim().toUpperCase());
-            const makeIdx = usedHeader.findIndex(h => h.includes("MAKE"));
-            if (makeIdx >= 0) {
-              usedMakes = Array.from(new Set(usedCsv.slice(1).map(r => String(r[makeIdx] || "").trim().toLowerCase()).filter(Boolean))).slice(0, 200);
-              if (DEBUG) console.log("USED sheet loaded, makes sample:", usedMakes.slice(0, 10));
-            }
-          }
-        } catch (e) {
-          if (DEBUG) console.warn("Failed fetching USED sheet:", String(e).slice(0,200));
-        }
-      }
-
-      const textLower = (msgText || "").toLowerCase();
-      const explicitUsed = /\b(used|pre-?owned|pre owned|preowned|second hand|secondhand)\b/.test(textLower);
-      const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
-
-      // ✅ FIX: no longer triggering only because brand matches USED sheet.
-      if (explicitUsed || hasYear) {
-        const qRes = await buildUsedCarQuoteFreeText({ query: msgText });
-        if (qRes && qRes.text) {
-          if (qRes.shortlist && qRes.shortlist.length) {
-            saveShortlistForUser(from, qRes.shortlist);
-            await waSendText(from, qRes.text);
-            return res.sendStatus(200);
-          }
-          await waSendText(from, qRes.text);
-          if (qRes.picLink) {
-            await waSendText(from, `Photos: ${qRes.picLink}`);
-          }
-          await sendUsedCarButtons(from, !!qRes.picLink);
-          return res.sendStatus(200);
-        }
-      }
-    } catch(e){ if (DEBUG) console.warn("Used-detection error", e && e.message ? e.message : e); }
-
-    // 5) Greeting
-    if (shouldGreetNow(from, msgText)){
-      await waSendText(from, `🔴 *MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.`);
-      await waSendListMenu(from);
-      return res.sendStatus(200);
-    }
-
-    // 6) New car quick quote
-    if (msgText && type === "text") {
-      const servedNew = await tryQuickNewCarQuote(msgText, from);
-      if (servedNew) return res.sendStatus(200);
-    }
-
-    // 7) Bullet command
-    const bulletCmd = (msgText||"").trim().match(/^bullet\s+([\d,]+)\s*(\d+)?/i);
-    if (bulletCmd) {
-      const loanRaw = String(bulletCmd[1]||"").replace(/[,₹\s]/g,"");
-      const months = Number(bulletCmd[2] || 60);
-      const loanAmt = Number(loanRaw);
-      if (!loanAmt || !months) { await waSendText(from, "Please send: `bullet <loan amount> <tenure months>` e.g. `bullet 750000 60`"); return res.sendStatus(200); }
-      const sim = simulateBulletPlan({ loanAmount: loanAmt, months, internalRatePct: USED_CAR_ROI_INTERNAL, bulletPct:0.25 });
-      if (!sim) { await waSendText(from, "Bullet calculation failed."); return res.sendStatus(200); }
-      const lines = [];
-      lines.push(`🔷 *Bullet EMI Plan — Used Car*`);
-      lines.push(`Loan Amount: ₹ *${fmtMoney(sim.loan)}*`);
-      lines.push(`ROI (shown): *${USED_CAR_ROI_VISIBLE}%*`);
-      lines.push(`Tenure: *${sim.months} months*`);
-      lines.push("");
-      lines.push(`📌 Monthly EMI (amortising): ₹ *${fmtMoney(sim.monthly_emi)}*`);
-      lines.push(`📌 Bullet total (25%): ₹ *${fmtMoney(sim.bullet_total)}*`);
-      lines.push(`• Bullet each: ₹ *${fmtMoney(sim.bullet_each)}* on months: ${Array.from({length: sim.num_bullets}, (_,i) => (12*(i+1))).join(" • ")}`);
-      lines.push("");
-      lines.push(`✅ *Loan approval possible in ~30 minutes (T&Cs apply)*`);
-      await waSendText(from, lines.join("\n"));
-      return res.sendStatus(200);
-    }
-
-    // 8) EMI calculator
-    const emiCmd = (msgText||"").trim().match(/^emi\s+([\d,]+)(?:\s+([\d\.]+)%?)?\s*(\d+)?/i);
-    if (emiCmd){
-      const loanRaw = String(emiCmd[1]||"").replace(/[,₹\s]/g,"");
-      let rate = Number(emiCmd[2] || NEW_CAR_ROI);
-      const months = Number(emiCmd[3] || 60);
-      const loanAmt = Number(loanRaw);
-      if (!loanAmt || !months) {
-        await waSendText(from, "Please send: `emi <loan amount> <rate% optional> <tenure months>` e.g. `emi 1500000 9.5 60`");
-        return res.sendStatus(200);
-      }
-      const monthly = calcEmiSimple(loanAmt, rate, months);
-      const total = monthly * months;
-      const interest = total - loanAmt;
-      const lines = [
-        `🔸 EMI Calculation`,
-        `Loan: ₹ *${fmtMoney(loanAmt)}*`,
-        `Rate: *${rate}%* p.a.`,
-        `Tenure: *${months} months*`,
-        ``,
-        `📌 Monthly EMI: ₹ *${fmtMoney(monthly)}*`,
-        `📊 Total Payable: ₹ *${fmtMoney(total)}*`,
-        `💰 Total Interest: ₹ *${fmtMoney(interest)}*`,
-        ``,
-        `✅ *Loan approval possible in ~30 minutes (T&Cs apply)*`
-      ].join("\n");
-      await waSendText(from, lines);
-      return res.sendStatus(200);
-    }
-
-    // 9) CRM fallback
-    try {
-      const crmReply = await fetchCRMReply({ from, msgText });
-      if (crmReply) { await waSendText(from, crmReply); return res.sendStatus(200); }
-    } catch (e) { if (DEBUG) console.warn("CRM reply failed", e && e.message ? e.message : e); }
-
-    // 10) Default fallback
-    await waSendText(from, "Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.");
-    return res.sendStatus(200);
-
-  } catch (err) {
-    console.error("Webhook error:", err && err.stack ? err.stack : err);
-    try { if (ADMIN_WA) await waSendText(ADMIN_WA, `Webhook crash: ${String(err && err.message ? err.message : err)}`); } catch(e){}
-    return res.sendStatus(200);
-  }
-});
-
-// ---------------- Start server ----------------
-app.listen(PORT, ()=> {
-  console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
-  console.log("ENV summary:", {
-    SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL,
-    SHEET_USED_CSV_URL: !!SHEET_USED_CSV_URL || fs.existsSync(LOCAL_USED_CSV_PATH),
-    PHONE_NUMBER_ID: !!PHONE_NUMBER_ID,
-    META_TOKEN: !!META_TOKEN,
-    ADMIN_WA: !!ADMIN_WA,
-    DEBUG
-  });
-});
+          await waSendTex
