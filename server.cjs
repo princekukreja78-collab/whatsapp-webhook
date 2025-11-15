@@ -73,6 +73,34 @@ const lastGreeting = global.lastGreeting;
 if (typeof global.lastAlert === 'undefined') global.lastAlert = new Map();
 const lastAlert = global.lastAlert;
 
+// ---------------- per-user service context (NEW / USED / SELL / LOAN) ----------------
+if (typeof global.sessionService === 'undefined') global.sessionService = new Map();
+const sessionService = global.sessionService;
+
+function setLastService(from, svc) {
+  try {
+    if (!from) return;
+    sessionService.set(from, { svc, ts: Date.now() });
+  } catch (e) {
+    if (DEBUG) console.warn('setLastService failed', e && e.message ? e.message : e);
+  }
+}
+
+function getLastService(from) {
+  try {
+    if (!from) return null;
+    const rec = sessionService.get(from);
+    if (!rec) return null;
+    // expire after 60 minutes so it doesn’t stick forever
+    const MAX_AGE_MS = 60 * 60 * 1000;
+    if (Date.now() - rec.ts > MAX_AGE_MS) return null;
+    return rec.svc || null;
+  } catch (e) {
+    if (DEBUG) console.warn('getLastService failed', e && e.message ? e.message : e);
+    return null;
+  }
+}
+
 // ---------------- Quote limits ----------------
 function loadQuoteLimits() {
   return safeJsonRead(QUOTE_LIMIT_FILE) || {};
@@ -178,8 +206,8 @@ async function waSendListMenu(to) {
 // used car quick buttons (after used quote)
 async function sendUsedCarButtons(to) {
   const buttons = [
-    { type: 'reply', reply: { id: 'BTN_USED_MORE',   title: 'More Similar Cars' } },
-    { type: 'reply', reply: { id: 'BTN_BOOK_TEST',   title: 'Book Test Drive' } },
+    { type: 'reply', reply: { id: 'BTN_USED_MORE',     title: 'More Similar Cars' } },
+    { type: 'reply', reply: { id: 'BTN_BOOK_TEST',     title: 'Book Test Drive' } },
     { type: 'reply', reply: { id: 'BTN_CONTACT_SALES', title: 'Contact Sales' } }
   ];
   const interactive = {
@@ -644,6 +672,18 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     const t = String(msgText || '').toLowerCase();
 
+    // brand guess from free text — only used to narrow search, not to change reply language
+    let brandGuess = null;
+    if (/\b(bmw)\b/.test(t)) {
+      brandGuess = 'BMW';
+    } else if (/\b(mercedes|merc|benz)\b/.test(t)) {
+      brandGuess = 'MERCEDES';
+    } else if (/\b(hyundai|creta|verna|venue|alcazar|tucson|exter|grand i10|i20)\b/.test(t)) {
+      brandGuess = 'HYUNDAI';
+    } else if (/\b(toyota|fortuner|innova|crysta|legender|hyryder|hycross|glanza|camry|rumion|urban cruiser)\b/.test(t)) {
+      brandGuess = 'TOYOTA';
+    }
+
     let cityMatch =
       (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bangalore|bengaluru|chennai)\b/) || [])[1] ||
       null;
@@ -671,15 +711,21 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     const modelGuess = raw.split(' ').slice(0, 3).join(' ');
     const userNorm = normForMatch(raw);
+    const tokens = userNorm.split(' ').filter(Boolean);
 
     let best = null; // {brand, row, idxModel, idxVariant, idxMap, onroad, exShow}
 
     for (const [brand, tab] of Object.entries(tables)) {
       if (!tab || !tab.data) continue;
+      // if we have a brand guess, only search that brand
+      if (brandGuess && brand !== brandGuess) continue;
+
       const header = tab.header.map(h => String(h || '').toUpperCase());
       const idxMap = tab.idxMap || toHeaderIndexMap(header);
       const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
       const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+      const idxVarKw = header.findIndex(h => h.includes('VARIANT_KEYWORDS'));
+      const idxSuffixCol = header.findIndex(h => h.includes('SUFFIX'));
 
       for (const row of tab.data) {
         const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
@@ -689,15 +735,35 @@ async function tryQuickNewCarQuote(msgText, to) {
 
         let score = 0;
 
+        // coarse text includes
         if (modelCell && modelCell.includes(modelGuess)) score += 40;
         if (variantCell && variantCell.includes(modelGuess)) score += 45;
         if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
 
+        // whole-string normalized match
         if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) {
           score += 35;
         }
         if (userNorm && variantNorm && (variantNorm.includes(userNorm) || userNorm.includes(variantNorm))) {
           score += 35;
+        }
+
+        // token-level scoring with VARIANT_KEYWORDS + SUFFIX (fixes ZX(O), 4X2 AT, etc.)
+        let varKwNorm = '';
+        let suffixNorm = '';
+        if (idxVarKw >= 0 && row[idxVarKw] != null) {
+          varKwNorm = normForMatch(row[idxVarKw]);
+        }
+        if (idxSuffixCol >= 0 && row[idxSuffixCol] != null) {
+          suffixNorm = normForMatch(row[idxSuffixCol]);
+        }
+
+        for (const tok of tokens) {
+          if (!tok) continue;
+          if (modelNorm && modelNorm.includes(tok)) score += 5;
+          if (variantNorm && variantNorm.includes(tok)) score += 8;
+          if (suffixNorm && suffixNorm.includes(tok)) score += 10;
+          if (varKwNorm && varKwNorm.includes(tok)) score += 15;
         }
 
         if (!score) continue;
@@ -757,6 +823,7 @@ async function tryQuickNewCarQuote(msgText, to) {
     await waSendText(to, lines.join('\n'));
     await sendNewCarButtons(to);
     incrementQuoteUsage(to);
+    setLastService(to, 'NEW');
     return true;
   } catch (e) {
     console.error('tryQuickNewCarQuote error', e && e.stack ? e.stack : e);
@@ -855,6 +922,7 @@ app.post('/webhook', async (req, res) => {
       switch (selectedId) {
         case 'SRV_NEW_CAR':
         case 'BTN_NEW_QUOTE':
+          setLastService(from, 'NEW');
           await waSendText(
             from,
             'Please share your *city, model, variant/suffix & profile (individual/company)*.'
@@ -863,6 +931,7 @@ app.post('/webhook', async (req, res) => {
 
         case 'SRV_USED_CAR':
         case 'BTN_USED_MORE':
+          setLastService(from, 'USED');
           await waSendText(
             from,
             'Share *make, model, year* (optional colour/budget) and I’ll suggest options.'
@@ -870,6 +939,7 @@ app.post('/webhook', async (req, res) => {
           break;
 
         case 'SRV_SELL_CAR':
+          setLastService(from, 'SELL');
           await waSendText(
             from,
             'Please share *car make/model, year, km, city* and a few photos. We’ll get you the best quote.'
@@ -877,6 +947,7 @@ app.post('/webhook', async (req, res) => {
           break;
 
         case 'SRV_LOAN':
+          setLastService(from, 'LOAN');
           await waSendText(from, 'Loan assistance options below 👇');
           await waSendRaw({
             messaging_product: 'whatsapp',
@@ -1033,17 +1104,21 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // USED CAR detection — only when explicit "used" wording
+    // USED CAR detection
     if (type === 'text' && msgText) {
       const textLower = msgText.toLowerCase();
       const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
-      if (explicitUsed) {
+      const lastSvc = getLastService(from);
+
+      // either user says "used/pre-owned" OR they chose Pre-Owned Cars menu
+      if (explicitUsed || lastSvc === 'USED') {
         const usedRes = await buildUsedCarQuoteFreeText({ query: msgText });
         await waSendText(from, usedRes.text || 'Used car quote failed.');
         if (usedRes.picLink) {
           await waSendText(from, `Photos: ${usedRes.picLink}`);
         }
         await sendUsedCarButtons(from);
+        setLastService(from, 'USED');
         return res.sendStatus(200);
       }
     }
