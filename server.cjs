@@ -1,9 +1,10 @@
-// server.cjs — MR.CAR webhook (FINAL with new-car variants & loan menu)
+// server.cjs — MR.CAR webhook (FINAL with new-car variants & loan menu, fixed used detection)
 // ✅ Used car: LTV=95% + normal/bullet EMI + registration place
 // ✅ New car: quick quote + variant list when only model name is given
 // ✅ Budget queries: 15 lakh / 15 lac budget handled
 // ✅ Loan & finance: 3-option menu (EMI calculator, Documents, Eligibility)
 // ✅ Admin alerts, CRM posting, status-only events ignored
+// ✅ FIX: Used-car detection no longer hijacks BMW/Audi etc. new-car quotes
 
 require('dotenv').config();
 const fs = require('fs');
@@ -41,7 +42,6 @@ const USED_CAR_ROI_VISIBLE   = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL  = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
 const USED_CAR_LTV_PCT       = Number(process.env.USED_CAR_LTV_PCT || 95); // loan as % of price
 
-// DEBUG controlled only by env
 const DEBUG = String(process.env.DEBUG_VARIANT || "true").toLowerCase() === "true";
 
 // ---------------- file helpers ----------------
@@ -915,7 +915,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // 4) Used car detection (keywords / known make / year)
+    // 4) Used car detection (keywords / year)
     try {
       let usedMakes = [];
       if (SHEET_USED_CSV_URL) {
@@ -936,10 +936,10 @@ app.post('/webhook', async (req, res) => {
 
       const textLower = (msgText || "").toLowerCase();
       const explicitUsed = /\b(used|pre-?owned|pre owned|preowned|second hand|secondhand)\b/.test(textLower);
-      const hasKnownMake = usedMakes.some(m => m && textLower.includes(m));
       const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
 
-      if (explicitUsed || hasKnownMake || hasYear) {
+      // ✅ FIX: no longer triggering only because brand matches USED sheet.
+      if (explicitUsed || hasYear) {
         const qRes = await buildUsedCarQuoteFreeText({ query: msgText });
         if (qRes && qRes.text) {
           if (qRes.shortlist && qRes.shortlist.length) {
