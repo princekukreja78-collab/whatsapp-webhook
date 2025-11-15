@@ -1,10 +1,10 @@
-// server.cjs — MR.CAR webhook (New + Used, CRM, buttons stable)
-// This version:
-//  • Greeting => ONLY service list (no quick buttons).
-//  • New-car quote => New-car buttons only.
-//  • Used-car quote => Used-car buttons only.
-//  • Used loan = 95% LTV of Expected Price, shows LTV%, EMI, Registration Place.
-//  • Loan menu: EMI Calculator, Loan Documents, Loan Eligibility.
+// server.cjs — MR.CAR webhook (New + Used, multi-bot CRM core)
+// - Greeting => service list (no quick buttons).
+// - New-car quote => New-car buttons only.
+// - Used-car quote => Used-car buttons only.
+// - Used loan = 95% LTV of Expected Price, EMI, Bullet option.
+// - Loan menu: EMI Calculator, Loan Documents, Loan Eligibility.
+// - Central CRM core: /crm/leads (GET), /crm/ingest (POST) for all bots.
 
 require('dotenv').config();
 const fs = require('fs');
@@ -73,7 +73,7 @@ const lastGreeting = global.lastGreeting;
 if (typeof global.lastAlert === 'undefined') global.lastAlert = new Map();
 const lastAlert = global.lastAlert;
 
-// ---------------- per-user service context (NEW / USED / SELL / LOAN) ----------------
+// per-user service context (NEW / USED / SELL / LOAN)
 if (typeof global.sessionService === 'undefined') global.sessionService = new Map();
 const sessionService = global.sessionService;
 
@@ -544,7 +544,7 @@ async function buildUsedCarQuoteFreeText({ query }) {
   // Brand-level search: e.g. "audi", "used audi", "pre owned audi"
   const genericWords = new Set([
     'used', 'preowned', 'pre-owned', 'pre', 'owned', 'second', 'secondhand', 'second-hand',
-    'car', 'cars', 'pre', 'preowned', 'preownedcar', 'pre owned'
+    'car', 'cars'
   ]);
   const coreTokens = tokens.filter(t => t && !genericWords.has(t));
   if (coreTokens.length === 1) {
@@ -697,11 +697,13 @@ function shouldGreetNow(from, msgText) {
 // ---------------- CRM helpers placeholder ----------------
 let postLeadToCRM = async () => {};
 let fetchCRMReply = async () => null;
+let getAllLeads   = async () => [];
 
 try {
   const crmHelpers = require('./crm_helpers.cjs');
   postLeadToCRM = crmHelpers.postLeadToCRM || postLeadToCRM;
   fetchCRMReply = crmHelpers.fetchCRMReply || fetchCRMReply;
+  getAllLeads   = crmHelpers.getAllLeads   || getAllLeads;
   if (DEBUG) console.log('crm_helpers.cjs loaded');
 } catch (e) {
   if (DEBUG) console.log('crm_helpers.cjs not loaded (ok for dev).');
@@ -789,12 +791,10 @@ async function tryQuickNewCarQuote(msgText, to) {
 
         let score = 0;
 
-        // coarse text includes
         if (modelCell && modelCell.includes(modelGuess)) score += 40;
         if (variantCell && variantCell.includes(modelGuess)) score += 45;
         if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
 
-        // whole-string normalized match
         if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) {
           score += 35;
         }
@@ -802,7 +802,6 @@ async function tryQuickNewCarQuote(msgText, to) {
           score += 35;
         }
 
-        // token-level scoring with VARIANT_KEYWORDS + SUFFIX (fixes ZX(O), 4X2 AT, etc.)
         let varKwNorm = '';
         let suffixNorm = '';
         if (idxVarKw >= 0 && row[idxVarKw] != null) {
@@ -825,7 +824,7 @@ async function tryQuickNewCarQuote(msgText, to) {
         const varKwUpper = String(varKwNorm || '').toUpperCase();
         for (const sw of SPECIAL_WORDS) {
           if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw.toLowerCase())) {
-            score -= 25; // de-prioritise special editions unless explicitly asked
+            score -= 25;
           }
         }
 
@@ -910,6 +909,52 @@ app.get('/webhook', (req, res) => {
   return res.sendStatus(403);
 });
 
+// -------------- CRM API ROUTES ---------------
+
+// GET /crm/leads  (for dashboards)
+app.get('/crm/leads', async (req, res) => {
+  try {
+    const limit = Number(req.query.limit || 100);
+    const leads = await getAllLeads(limit);
+    res.json({ ok: true, count: leads.length, leads });
+  } catch (e) {
+    console.error('CRM /crm/leads error:', e && e.message ? e.message : e);
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// POST /crm/ingest  (for other bots: Signature, Property, Loan, etc.)
+app.post('/crm/ingest', async (req, res) => {
+  try {
+    const lead = req.body || {};
+    const enrichedLead = {
+      bot: lead.bot || 'UNKNOWN',
+      channel: lead.channel || 'whatsapp',
+      from: lead.from || '',
+      name: lead.name || '',
+      lastMessage: lead.lastMessage || lead.text || '',
+      service: lead.service || null,
+      tags: Array.isArray(lead.tags) ? lead.tags : [],
+      meta: lead.meta || {}
+    };
+    await postLeadToCRM(enrichedLead);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('CRM /crm/ingest error:', e && e.message ? e.message : e);
+    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// optional ADMIN route to clear greeting throttles
+app.post('/admin/reset_greetings', (req, res) => {
+  try {
+    lastGreeting.clear();
+    res.json({ ok: true, message: 'Greeting counters reset' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
 // ---------------- main webhook handler ----------------
 app.post('/webhook', async (req, res) => {
   try {
@@ -962,7 +1007,16 @@ app.post('/webhook', async (req, res) => {
 
     // save lead locally + CRM (non-blocking)
     try {
-      const lead = { from, name, text: msgText };
+      const lead = {
+        bot: 'MR_CAR_AUTO',
+        channel: 'whatsapp',
+        from,
+        name,
+        lastMessage: msgText,
+        service: getLastService(from) || null,
+        tags: [],
+        meta: {}
+      };
       postLeadToCRM(lead).catch(() => {});
       let existing = safeJsonRead(LEADS_FILE);
       if (Array.isArray(existing)) {
@@ -972,7 +1026,7 @@ app.post('/webhook', async (req, res) => {
       } else {
         existing = [];
       }
-      existing.unshift({ ...lead, ts: Date.now() });
+      existing.unshift({ from, name, text: msgText, ts: Date.now() });
       existing = existing.slice(0, 1000);
       fs.writeFileSync(LEADS_FILE, JSON.stringify(existing, null, 2), 'utf8');
       if (DEBUG) console.log('✅ Lead saved:', from, (msgText || '').slice(0, 120));
@@ -1128,7 +1182,7 @@ app.post('/webhook', async (req, res) => {
       lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*');
       await waSendText(from, lines.join('\n'));
       try {
-        postLeadToCRM({ from, name, text: `BULLET_CALC ${loanAmt} ${months}` });
+        postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `BULLET_CALC ${loanAmt} ${months}`, service: 'LOAN', tags: ['BULLET_EMI'], meta: {} });
       } catch (_) {}
       return res.sendStatus(200);
     }
@@ -1165,6 +1219,19 @@ app.post('/webhook', async (req, res) => {
       ];
       await waSendText(from, lines.join('\n'));
       return res.sendStatus(200);
+    }
+
+    // numeric reply after used-car list (safe behaviour)
+    if (type === 'text' && msgText) {
+      const trimmed = msgText.trim();
+      const lastSvc = getLastService(from);
+      if (lastSvc === 'USED' && /^[1-9]\d*$/.test(trimmed)) {
+        await waSendText(
+          from,
+          'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.'
+        );
+        return res.sendStatus(200);
+      }
     }
 
     // USED CAR detection
