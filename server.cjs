@@ -91,7 +91,6 @@ function getLastService(from) {
     if (!from) return null;
     const rec = sessionService.get(from);
     if (!rec) return null;
-    // expire after 60 minutes so it doesn’t stick forever
     const MAX_AGE_MS = 60 * 60 * 1000;
     if (Date.now() - rec.ts > MAX_AGE_MS) return null;
     return rec.svc || null;
@@ -468,6 +467,7 @@ async function buildUsedCarQuoteFreeText({ query }) {
   const modelIdx = idxMap['MODEL'] ?? header.findIndex(h => h.includes('MODEL'));
   const subModelIdx = idxMap['SUB MODEL'] ?? idxMap['SUBMODEL'] ?? header.findIndex(h => h.includes('SUB MODEL') || h.includes('SUBMODEL') || h.includes('VARIANT'));
   const colourIdx = idxMap['COLOUR'] ?? idxMap['COLOR'] ?? header.findIndex(h => h.includes('COLOUR') || h.includes('COLOR'));
+  const yearIdx = idxMap['MANUFACTURING YEAR'] ?? idxMap['YEAR'] ?? header.findIndex(h => h.includes('MANUFACTURING') && h.includes('YEAR'));
   const regIdx = (() => {
     const keys = Object.keys(idxMap);
     for (const k of keys) {
@@ -541,6 +541,57 @@ async function buildUsedCarQuoteFreeText({ query }) {
     };
   }
 
+  // Brand-level search: e.g. "audi", "used audi", "pre owned audi"
+  const genericWords = new Set([
+    'used', 'preowned', 'pre-owned', 'pre', 'owned', 'second', 'secondhand', 'second-hand',
+    'car', 'cars', 'pre', 'preowned', 'preownedcar', 'pre owned'
+  ]);
+  const coreTokens = tokens.filter(t => t && !genericWords.has(t));
+  if (coreTokens.length === 1) {
+    const brandTok = coreTokens[0];
+    let brandMatches = matches.filter(m => m.make.includes(brandTok));
+    if (!brandMatches.length) brandMatches = matches;
+    if (brandMatches.length > 1) {
+      brandMatches.sort((a, b) => b.score - a.score);
+      const top = brandMatches.slice(0, Math.min(10, brandMatches.length));
+      const lines = [];
+      const brandLabel = brandTok.toUpperCase();
+      lines.push(`*PRE-OWNED OPTIONS – ${brandLabel}*`);
+      for (let i = 0; i < top.length; i++) {
+        const row = top[i].row;
+        const makeDisp  = (row[makeIdx]  || '').toString().toUpperCase();
+        const modelDisp = (row[modelIdx] || '').toString().toUpperCase();
+        const subDisp   = subModelIdx >= 0 && row[subModelIdx]
+          ? row[subModelIdx].toString().toUpperCase()
+          : '';
+        const yearDisp  = yearIdx >= 0 && row[yearIdx] ? String(row[yearIdx]) : '';
+        const regPlace  = regIdx >= 0 && row[regIdx] ? String(row[regIdx]) : '';
+
+        let expectedVal = 0;
+        if (expectedIdx >= 0) {
+          const exStr = String(row[expectedIdx] || '');
+          expectedVal = Number(exStr.replace(/[,₹\s]/g, '')) || 0;
+        }
+
+        const titleParts = [];
+        if (makeDisp)  titleParts.push(makeDisp);
+        if (modelDisp) titleParts.push(modelDisp);
+        if (subDisp)   titleParts.push(subDisp);
+        if (yearDisp)  titleParts.push(yearDisp);
+        const title = titleParts.join(' ');
+
+        let line = `${i + 1}) *${title}*`;
+        if (expectedVal) line += ` – ₹ ${fmtMoney(expectedVal)}`;
+        if (regPlace)   line += ` – Reg: ${regPlace}`;
+        lines.push(line);
+      }
+      lines.push('');
+      lines.push('Please reply with the *exact car* you are interested in (for example: "Audi A6 2018") for a detailed quote.');
+      return { text: lines.join('\n') };
+    }
+  }
+
+  // Single best match (normal flow)
   matches.sort((a, b) => b.score - a.score);
   const selRow = matches[0].row;
 
@@ -671,8 +722,9 @@ async function tryQuickNewCarQuote(msgText, to) {
     if (!tables || Object.keys(tables).length === 0) return false;
 
     const t = String(msgText || '').toLowerCase();
+    const tUpper = t.toUpperCase();
 
-    // brand guess from free text — only used to narrow search, not to change reply language
+    // brand guess from free text — only used to narrow search
     let brandGuess = null;
     if (/\b(bmw)\b/.test(t)) {
       brandGuess = 'BMW';
@@ -714,6 +766,8 @@ async function tryQuickNewCarQuote(msgText, to) {
     const tokens = userNorm.split(' ').filter(Boolean);
 
     let best = null; // {brand, row, idxModel, idxVariant, idxMap, onroad, exShow}
+
+    const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
 
     for (const [brand, tab] of Object.entries(tables)) {
       if (!tab || !tab.data) continue;
@@ -766,7 +820,16 @@ async function tryQuickNewCarQuote(msgText, to) {
           if (varKwNorm && varKwNorm.includes(tok)) score += 15;
         }
 
-        if (!score) continue;
+        // penalise special editions (LEADER, LEGENDER, GRS) if user didn't mention them
+        const variantUpper = String(variantCell || '').toUpperCase();
+        const varKwUpper = String(varKwNorm || '').toUpperCase();
+        for (const sw of SPECIAL_WORDS) {
+          if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw.toLowerCase())) {
+            score -= 25; // de-prioritise special editions unless explicitly asked
+          }
+        }
+
+        if (score <= 0) continue;
 
         // pick price
         let priceIdx = -1;
@@ -1110,7 +1173,6 @@ app.post('/webhook', async (req, res) => {
       const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
       const lastSvc = getLastService(from);
 
-      // either user says "used/pre-owned" OR they chose Pre-Owned Cars menu
       if (explicitUsed || lastSvc === 'USED') {
         const usedRes = await buildUsedCarQuoteFreeText({ query: msgText });
         await waSendText(from, usedRes.text || 'Used car quote failed.');
