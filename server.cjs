@@ -722,8 +722,6 @@ async function tryQuickNewCarQuote(msgText, to) {
       return true;
     }
 
-    const tables = await loadPricingFromSheets();
-    if (!tables || Object.keys(tables).length === 0) return false;
         
     const t = String(msgText || '').toLowerCase();
     const tUpper = t.toUpperCase();
