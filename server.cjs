@@ -1000,6 +1000,43 @@ app.post('/admin/test_alert', async (req, res) => {
   }
 });
 
+// ---------- ADMIN TEST ALERT ----------
+app.post('/admin/test_alert', async (req, res) => {
+  try {
+    const payload = {
+      messaging_product: "whatsapp",
+      to: process.env.ADMIN_WA,
+      type: "text",
+      text: {
+        body: `🔔 ADMIN TEST ALERT\n\nThis is a test admin alert from MR.CAR server.\nTime: ${new Date().toLocaleString()}`
+      }
+    };
+
+    console.log("ADMIN TEST ALERT → WA PAYLOAD:", JSON.stringify(payload, null, 2));
+
+    const resp = await fetch(
+      `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.META_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const result = await resp.json();
+    console.log("ADMIN ALERT WA RESPONSE:", result);
+
+    return res.json({ ok: true, result });
+
+  } catch (e) {
+    console.error("ADMIN TEST ALERT FAILED:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // ---------------- main webhook handler ----------------
 app.post('/webhook', async (req, res) => {
   try {
