@@ -1,0 +1,169 @@
+/* dashboard/src/App.tsx */
+import React, { useEffect, useState } from "react";
+
+/* (Paste the same App.tsx content you were given earlier here) */
+export default function App(): JSX.Element {
+  const [leads, setLeads] = useState<any[]>([]);
+  const [selected, setSelected] = useState<any|null>(null);
+  const [loading, setLoading] = useState(false);
+  const [usedCars, setUsedCars] = useState<any[]>([]);
+  const [pricing, setPricing] = useState<any[]>([]);
+  const [replyText, setReplyText] = useState("");
+  const [bots, setBots] = useState<{ id: string; name: string }[]>([]);
+  const [selectedBot, setSelectedBot] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchBots();
+    fetchLeads();
+    fetchUsedCars();
+    fetchPricing();
+  }, []);
+
+  async function fetchBots() {
+    try {
+      const res = await fetch("/bots");
+      const j = await res.json().catch(() => []);
+      setBots(Array.isArray(j) ? j : []);
+      if (Array.isArray(j) && j[0]) setSelectedBot(j[0].id);
+    } catch (e) { console.error(e); }
+  }
+
+  async function fetchLeads(botId?: string) {
+    setLoading(true);
+    try {
+      const qs = botId ? `?bot=${encodeURIComponent(botId)}` : "";
+      const res = await fetch(`/leads${qs}`);
+      const j = await res.json().catch(() => []);
+      setLeads(Array.isArray(j) ? j.reverse() : []);
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  }
+
+  async function fetchUsedCars() {
+    try { const res = await fetch("/usedcars"); const j = await res.json().catch(() => []); setUsedCars(Array.isArray(j) ? j : []); } catch (e) { console.error(e); }
+  }
+
+  async function fetchPricing() {
+    try { const res = await fetch("/pricing"); const j = await res.json().catch(() => []); setPricing(Array.isArray(j) ? j : []); } catch (e) { console.error(e); }
+  }
+
+  async function sendQuickReply() {
+    if (!selected) return alert("Select a lead first");
+    try {
+      const body = { to: selected.from, text: replyText || "Thanks — we will call you shortly.", bot: selected.bot || selectedBot };
+      await fetch("/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      setReplyText("");
+      alert("Reply sent (attempted)");
+      await fetchLeads(selectedBot || undefined);
+    } catch (e) { alert("Send failed"); console.error(e); }
+  }
+
+  async function testUsedCarEvaluation(idx: number) {
+    const car = usedCars[idx];
+    if (!car) return;
+    try {
+      const res = await fetch("/usedcars/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(car) });
+      const j = await res.json();
+      alert("Used car test result: " + JSON.stringify(j).slice(0, 200));
+    } catch (e) { alert("Test failed"); console.error(e); }
+  }
+
+  async function previewGPTReply() {
+    if (!selected) return alert("Select a lead");
+    const res = await fetch(`/prompt?text=${encodeURIComponent(selected.text || "")}&from=${encodeURIComponent(selected.from)}&bot=${encodeURIComponent(selected.bot || selectedBot || "")}`);
+    const j = await res.json().catch(() => null);
+    alert("CRM prompt reply: " + (j?.reply || j?.text || JSON.stringify(j)));
+  }
+
+  return (
+    <div style={{ padding: 24, background: "#f7fafc", minHeight: "100vh", fontFamily: "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 600 }}>Signature Savings — CRM Dashboard</h1>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select value={selectedBot || ""} onChange={(e) => { setSelectedBot(e.target.value); fetchLeads(e.target.value); }} style={{ padding: "6px 10px", borderRadius: 6 }}>
+              {bots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <button onClick={() => fetchLeads(selectedBot || undefined)} style={{ padding: "6px 10px", borderRadius: 6 }}>Refresh Leads</button>
+            <button onClick={fetchUsedCars} style={{ padding: "6px 10px", borderRadius: 6 }}>Refresh Used Cars</button>
+            <button onClick={fetchPricing} style={{ padding: "6px 10px", borderRadius: 6 }}>Sync Pricing</button>
+          </div>
+        </header>
+
+        <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 20 }}>
+          <section style={{ background: "#fff", borderRadius: 8, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+            <h2 style={{ marginBottom: 12, fontWeight: 600 }}>Leads</h2>
+            {loading ? <div>Loading…</div> : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, maxHeight: "60vh", overflow: "auto" }}>
+                {leads.map((L, i) => (
+                  <li key={i} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee", marginBottom: 8, display: "flex", justifyContent: "space-between", cursor: "pointer" }} onClick={() => setSelected(L)}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{L.name || L.from}</div>
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>{(L.text || '').slice(0, 60)}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af" }}>{new Date(L.ts || Date.now()).toLocaleString()}</div>
+                    </div>
+                    <div style={{ marginLeft: 12, textAlign: "right" }}>
+                      <div style={{ fontSize: 12, color: "#374151" }}>{L.from}</div>
+                      <button onClick={(e) => { e.stopPropagation(); setSelected(L); setReplyText(`Hi ${L.name || ''}, replying about ${(L.text || '').slice(0, 30)}...`); }} style={{ marginTop: 8, padding: "6px 8px", borderRadius: 6 }}>Quick Reply</button>
+                    </div>
+                  </li>
+                ))}
+                {leads.length === 0 && <li style={{ color: "#6b7280" }}>No leads yet</li>}
+              </ul>
+            )}
+          </section>
+
+          <section style={{ background: "#fff", borderRadius: 8, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+            <h2 style={{ marginBottom: 12, fontWeight: 600 }}>Lead Details & Actions</h2>
+            {selected ? (
+              <div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 18, fontWeight: 600 }}>{selected.name || selected.from}</div>
+                  <div style={{ fontSize: 13, color: "#374151" }}>{selected.from} • {new Date(selected.ts || Date.now()).toLocaleString()}</div>
+                </div>
+                <div style={{ marginBottom: 12, padding: 12, background: "#f3f4f6", borderRadius: 6 }}>{selected.text}</div>
+
+                    <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                      <div style={{ background: "#fff", borderRadius: 8, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                        <h3 style={{ fontWeight: 600, marginBottom: 12 }}>Used Car Testing</h3>
+                        <div style={{ maxHeight: 220, overflow: "auto", display: "grid", gap: 12 }}>
+                          {usedCars.map((c, i) => (
+                            <div key={i} style={{ padding: 12, borderRadius: 6, border: "1px solid #eee" }}>
+                              <div style={{ fontWeight: 600 }}>{c.make} {c.model} • {c.year}</div>
+                              <div style={{ fontSize: 13, color: "#6b7280" }}>Km: {c.km} • Owner: {c.owners}</div>
+                              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                                <button onClick={() => testUsedCarEvaluation(i)}>Run Test</button>
+                                <button onClick={() => navigator.clipboard.writeText(JSON.stringify(c))}>Copy JSON</button>
+                              </div>
+                            </div>
+                          ))}
+                          {usedCars.length === 0 && <div style={{ color: "#6b7280" }}>No used cars loaded</div>}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#fff", borderRadius: 8, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                        <h3 style={{ fontWeight: 600, marginBottom: 12 }}>Pricing & Sync</h3>
+                        <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>Show current pricing rows; edit in your Google CSV source and hit Sync.</div>
+                        <div style={{ maxHeight: 220, overflow: "auto" }}>
+                          {pricing.map((p, i) => (
+                            <div key={i} style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                              <div style={{ fontWeight: 600 }}>{p.brand} {p.model}</div>
+                              <div style={{ fontSize: 12, color: "#6b7280" }}>On-Road: {p.onroad} • Ex: {p.exshowroom}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <footer style={{ marginTop: 24, fontSize: 12, color: "#9ca3af" }}>Dashboard preview • Endpoints: /leads /prompt /usedcars /pricing /send</footer>
+                  </div>
+                ) : (
+                  <div style={{ color: "#6b7280" }}>Select a lead to view details</div>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

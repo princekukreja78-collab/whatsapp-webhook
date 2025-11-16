@@ -711,8 +711,36 @@ try {
 
 // ---------------- tryQuickNewCarQuote ----------------
 async function tryQuickNewCarQuote(msgText, to) {
-  try {
+  try { 
     if (!msgText || !msgText.trim()) return false;
+
+    if (!canSendQuote(to)) {
+      await waSendText(
+        to,
+        'You’ve reached today’s assistance limit for quotes. Please try again tomorrow or provide full details.'
+      );
+      return true;
+    }
+
+    const tables = await loadPricingFromSheets();
+    if (!tables || Object.keys(tables).length === 0) return false;
+        
+    const t = String(msgText || '').toLowerCase();
+    const tUpper = t.toUpperCase();
+
+    // brand guess from free text — only used to narrow search
+    let brandGuess = null;
+    if (/\b(bmw)\b/.test(t)) {  
+      brandGuess = 'BMW';
+    } else if (/\b(mercedes|merc|benz)\b/.test(t)) {
+      brandGuess = 'MERCEDES';
+    } else if (/\b(hyundai|creta|verna|venue|alcazar|tucson|exter|grand i10|i20)\b/.test(t)) {
+      brandGuess = 'HYUNDAI';
+    } else if (/\b(toyota|fortuner|hycross|innova|glanza|legender|hyryder)\b/.test(t)) {
+      brandGuess = 'TOYOTA';
+    }
+
+>>>>>>> fix/used-quote-shortlist
     if (!canSendQuote(to)) {
       await waSendText(
         to,
@@ -720,10 +748,15 @@ async function tryQuickNewCarQuote(msgText, to) {
       );
       return true;
     }
+<<<<<<< HEAD
+=======
+
+>>>>>>> fix/used-quote-shortlist
     const tables = await loadPricingFromSheets();
     if (!tables || Object.keys(tables).length === 0) return false;
 
     const t = String(msgText || '').toLowerCase();
+<<<<<<< HEAD
     const tUpper = t.toUpperCase();
 
     // brand guess from free text — only used to narrow search
@@ -737,6 +770,8 @@ async function tryQuickNewCarQuote(msgText, to) {
     } else if (/\b(toyota|fortuner|innova|crysta|legender|hyryder|hycross|glanza|camry|rumion|urban cruiser)\b/.test(t)) {
       brandGuess = 'TOYOTA';
     }
+=======
+>>>>>>> fix/used-quote-shortlist
 
     let cityMatch =
       (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bangalore|bengaluru|chennai)\b/) || [])[1] ||
@@ -751,6 +786,10 @@ async function tryQuickNewCarQuote(msgText, to) {
       cityMatch = 'delhi';
     }
     const city = cityMatch;
+<<<<<<< HEAD
+=======
+
+>>>>>>> fix/used-quote-shortlist
     const profile =
       (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
 
@@ -765,6 +804,7 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     const modelGuess = raw.split(' ').slice(0, 3).join(' ');
     const userNorm = normForMatch(raw);
+<<<<<<< HEAD
     const tokens = userNorm.split(' ').filter(Boolean);
 
     let best = null; // {brand, row, idxModel, idxVariant, idxMap, onroad, exShow}
@@ -784,6 +824,26 @@ async function tryQuickNewCarQuote(msgText, to) {
       const idxSuffixCol = header.findIndex(h => h.includes('SUFFIX'));
 
       for (const row of tab.data) {
+=======
+    const tUpper = t.toUpperCase();
+    const tokens = raw.split(/\s+/).filter(Boolean);
+
+    let best = null;
+
+    for (const [brand, tab] of Object.entries(tables)) {
+      if (!tab || !tab.data) continue;
+
+      const header = tab.header.map(h => String(h || '').toUpperCase());
+      const idxMap = tab.idxMap || toHeaderIndexMap(header);
+
+      const idxModel   = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+      const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+      const idxVarKw   = header.findIndex(h => h.includes('KEYWORD'));
+      const idxSuffix  = header.findIndex(h => h.includes('SUFFIX'));
+
+      for (const row of tab.data) {
+
+>>>>>>> fix/used-quote-shortlist
         const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
         const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
         const modelNorm = normForMatch(modelCell);
@@ -804,6 +864,7 @@ async function tryQuickNewCarQuote(msgText, to) {
 
         let varKwNorm = '';
         let suffixNorm = '';
+<<<<<<< HEAD
         if (idxVarKw >= 0 && row[idxVarKw] != null) {
           varKwNorm = normForMatch(row[idxVarKw]);
         }
@@ -822,6 +883,34 @@ async function tryQuickNewCarQuote(msgText, to) {
         // penalise special editions (LEADER, LEGENDER, GRS) if user didn't mention them
         const variantUpper = String(variantCell || '').toUpperCase();
         const varKwUpper = String(varKwNorm || '').toUpperCase();
+=======
+        if (idxVarKw >= 0 && row[idxVarKw] != null) varKwNorm = normForMatch(row[idxVarKw]);
+        if (idxSuffix >= 0 && row[idxSuffix] != null) suffixNorm = normForMatch(row[idxSuffix]);
+
+        for (const tok of tokens) {
+          if (!tok) continue;
+          if (modelNorm.includes(tok)) score += 5;
+          if (variantNorm.includes(tok)) score += 8;
+          if (suffixNorm.includes(tok)) score += 10;
+          if (varKwNorm.includes(tok)) score += 15;
+        }
+
+        const specialSuffixes = ['zxo', 'gxo', 'vxo'];
+        const userSuffix = specialSuffixes.find(sfx => t.includes(sfx));
+        if (userSuffix) {
+          const inVariant = variantNorm.includes(userSuffix);
+          const inSuffix  = suffixNorm.includes(userSuffix);
+          const inKw      = varKwNorm.includes(userSuffix);
+
+          if (inVariant || inSuffix || inKw) score += 80;
+          else score -= 25;
+        }
+
+        const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
+        const variantUpper = String(variantCell || '').toUpperCase();
+        const varKwUpper = String(varKwNorm || '').toUpperCase();
+
+>>>>>>> fix/used-quote-shortlist
         for (const sw of SPECIAL_WORDS) {
           if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw.toLowerCase())) {
             score -= 25;
@@ -830,15 +919,25 @@ async function tryQuickNewCarQuote(msgText, to) {
 
         if (score <= 0) continue;
 
+<<<<<<< HEAD
         // pick price
         let priceIdx = -1;
         const cityToken = city.split(' ')[0].toUpperCase();
+=======
+        let priceIdx = -1;
+        const cityToken = city.split(' ')[0].toUpperCase();
+
+>>>>>>> fix/used-quote-shortlist
         for (const k of Object.keys(idxMap)) {
           if (k.includes('ON ROAD') && k.includes(cityToken)) {
             priceIdx = idxMap[k];
             break;
           }
         }
+<<<<<<< HEAD
+=======
+
+>>>>>>> fix/used-quote-shortlist
         if (priceIdx < 0) {
           for (let i = 0; i < row.length; i++) {
             const v = String(row[i] || '').replace(/[,₹\s]/g, '');
@@ -885,6 +984,7 @@ async function tryQuickNewCarQuote(msgText, to) {
     await waSendText(to, lines.join('\n'));
     await sendNewCarButtons(to);
     incrementQuoteUsage(to);
+<<<<<<< HEAD
     setLastService(to, 'NEW');
     return true;
   } catch (e) {
@@ -893,6 +993,16 @@ async function tryQuickNewCarQuote(msgText, to) {
   }
 }
 
+=======
+    return true;
+
+  } catch (e) {
+    console.error('tryQuickNewCarQuote error', e);
+    return false;
+  }
+}
+            
+>>>>>>> fix/used-quote-shortlist
 // ---------------- webhook verify & health ----------------
 app.get('/healthz', (req, res) => {
   res.json({ ok: true, t: Date.now(), debug: DEBUG });
@@ -955,6 +1065,93 @@ app.post('/admin/reset_greetings', (req, res) => {
   }
 });
 
+<<<<<<< HEAD
+=======
+// ---------- ADMIN TEST ALERT ----------
+app.post('/admin/test_alert', async (req, res) => {
+  try {
+    const body = {
+      bot: 'ADMIN_TEST',
+      channel: 'internal',
+      from: 'ADMIN',
+      name: 'ADMIN TEST',
+      lastMessage: 'This is a test admin alert from MR.CAR server.',
+      service: 'ALERT',
+      tags: ['ALERT_TEST'],
+      meta: {}
+    };
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: process.env.ADMIN_WA,
+      type: "text",
+      text: {
+        body: `🔔 ADMIN TEST ALERT\n\nThis is a test admin alert from MR.CAR server.\nTime: ${new Date().toLocaleString()}`
+      }
+    };
+
+    console.log("ADMIN TEST ALERT → WA PAYLOAD:", JSON.stringify(payload, null, 2));
+
+    const fetchResp = await fetch(
+      `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.META_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const result = await fetchResp.json();
+    console.log("ADMIN ALERT WA RESPONSE:", result);
+
+    return res.json({ ok: true, result });
+  } catch (e) {
+    console.error("ADMIN TEST ALERT FAILED:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// ---------- ADMIN TEST ALERT ----------
+app.post('/admin/test_alert', async (req, res) => {
+  try {
+    const payload = {
+      messaging_product: "whatsapp",
+      to: process.env.ADMIN_WA,
+      type: "text",
+      text: {
+        body: `🔔 ADMIN TEST ALERT\n\nThis is a test admin alert from MR.CAR server.\nTime: ${new Date().toLocaleString()}`
+      }
+    };
+
+    console.log("ADMIN TEST ALERT → WA PAYLOAD:", JSON.stringify(payload, null, 2));
+
+    const resp = await fetch(
+      `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.META_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const result = await resp.json();
+    console.log("ADMIN ALERT WA RESPONSE:", result);
+
+    return res.json({ ok: true, result });
+
+  } catch (e) {
+    console.error("ADMIN TEST ALERT FAILED:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+>>>>>>> fix/used-quote-shortlist
 // ---------------- main webhook handler ----------------
 app.post('/webhook', async (req, res) => {
   try {
@@ -1303,3 +1500,7 @@ app.listen(PORT, () => {
     DEBUG
   });
 });
+<<<<<<< HEAD
+=======
+
+>>>>>>> fix/used-quote-shortlist
