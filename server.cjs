@@ -709,6 +709,216 @@ try {
   if (DEBUG) console.log('crm_helpers.cjs not loaded (ok for dev).');
 }
 
+/* =======================================================================
+   ADDED: Signature GPT & Brochure helpers
+   - callSignatureBrain: safe OpenAI chat call
+   - isAdvisory: heuristic advisory intent detection
+   - loadBrochureIndex/findRelevantBrochures/findPhonesInBrochures: optional
+   ======================================================================= */
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || '';
+const SIGNATURE_MODEL = process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || 'gpt-4o-mini';
+const BROCHURE_INDEX_PATH = process.env.BROCHURE_INDEX_PATH || './brochures/index.json';
+
+function isAdvisory(msgText) {
+  const t = (msgText || '').toLowerCase();
+  return (
+    t.includes("insurance") ||
+    t.includes("addon") ||
+    t.includes("coverage") ||
+    t.includes("which is better") ||
+    t.includes("compare") ||
+    t.includes("pros and cons") ||
+    t.includes("vs ") ||
+    t.includes("warranty") ||
+    t.includes("extended warranty") ||
+    t.includes("service cost") ||
+    t.includes("maintenance") ||
+    t.includes("rsa") ||
+    t.includes("roadside") ||
+    t.includes("helpline") ||
+    t.includes("features") ||
+    t.includes("variant") ||
+    t.includes("which car") ||
+    t.includes("buy used") ||
+    t.includes("used vs new") ||
+    t.includes("which to buy")
+  );
+}
+
+// brochure index loader (optional — non-fatal)
+function loadBrochureIndex() {
+  try {
+    const p = path.resolve(__dirname, BROCHURE_INDEX_PATH || './brochures/index.json');
+    if (!fs.existsSync(p)) return [];
+    const txt = fs.readFileSync(p, 'utf8') || '[]';
+    const j = JSON.parse(txt);
+    return Array.isArray(j) ? j : [];
+  } catch (e) {
+    if (DEBUG) console.warn('loadBrochureIndex failed', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+function findRelevantBrochures(index, msgText) {
+  try {
+    if (!Array.isArray(index) || !index.length) return [];
+    const q = (msgText || '').toLowerCase();
+    // simple scoring
+    const scored = index.map(b => {
+      const title = (b.title || b.id || '').toString().toLowerCase();
+      const brand = (b.brand || '').toString().toLowerCase();
+      const variants = (b.variants || []).map(v => v.toString().toLowerCase());
+      let score = 0;
+      if (title && q.includes(title)) score += 30;
+      if (brand && q.includes(brand)) score += 25;
+      for (const v of variants) if (v && q.includes(v)) score += 18;
+      // keywords in summary
+      if (b.summary && b.summary.toLowerCase().includes(q)) score += 15;
+      return { b, score };
+    }).filter(x => x.score > 0);
+    scored.sort((a,b) => b.score - a.score);
+    return scored.slice(0,3).map(x => x.b);
+  } catch (e) {
+    if (DEBUG) console.warn('findRelevantBrochures fail', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+const PHONE_RE = /(?:(?:\+?\d{1,3}[\s\-\.])?(?:\(?\d{2,4}\)?[\s\-\.])?\d{3,4}[\s\-\.]\d{3,4})(?:\s*(?:ext|x|ext.)\s*\d{1,5})?/g;
+function extractPhonesFromText(text) {
+  try {
+    if (!text) return [];
+    const found = (String(text).match(PHONE_RE) || []).map(s => s.trim());
+    const norm = found.map(s => s.replace(/[\s\-\.\(\)]+/g, ''));
+    const unique = [];
+    const seen = new Set();
+    for (let i = 0; i < norm.length; i++) {
+      if (!seen.has(norm[i])) {
+        seen.add(norm[i]);
+        unique.push(found[i]);
+      }
+    }
+    return unique;
+  } catch (e) {
+    if (DEBUG) console.warn('extractPhonesFromText fail', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+function findPhonesInBrochures(entries) {
+  const matches = [];
+  try {
+    for (const b of (entries || [])) {
+      const srcId = b.id || b.title || b.url || 'unknown';
+      const candidates = [];
+      if (b.summary) candidates.push(b.summary);
+      if (b.title) candidates.push(b.title);
+      if (b.helpline) candidates.push(String(b.helpline));
+      const joined = candidates.join(' \n ');
+      const phones = extractPhonesFromText(joined);
+      for (const p of phones) {
+        const low = joined.toLowerCase();
+        let label = '';
+        if (low.includes('rsa') || low.includes('roadside')) label = 'RSA helpline';
+        else if (low.includes('service') || low.includes('service center') || low.includes('service helpline')) label = 'Service helpline';
+        else if (low.includes('warranty')) label = 'Warranty helpline';
+        else if (low.includes('customer') || low.includes('care')) label = 'Customer care';
+        else label = 'Helpline';
+        matches.push({ label, phone: p, sourceId: srcId });
+      }
+    }
+    // dedupe
+    const uniq = [];
+    const seen = new Set();
+    for (const m of matches) {
+      const k = (m.phone || '').replace(/[\s\-\.\(\)]+/g, '');
+      if (!seen.has(k)) {
+        seen.add(k);
+        uniq.push(m);
+      }
+    }
+    return uniq;
+  } catch (e) {
+    if (DEBUG) console.warn('findPhonesInBrochures fail', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+async function callSignatureBrain({ from, name, msgText, lastService = null }) {
+  try {
+    if (!OPENAI_API_KEY) {
+      if (DEBUG) console.log('Signature Brain skipped - OPENAI_API_KEY missing');
+      return null;
+    }
+    const index = loadBrochureIndex();
+    const relevant = findRelevantBrochures(index, msgText);
+    const phones = findPhonesInBrochures(relevant);
+    let phoneContext = '';
+    if (phones && phones.length) {
+      phoneContext = 'Detected helplines:\n' + phones.map(p => `- ${p.label}: ${p.phone} (source: ${p.sourceId})`).join('\n') + '\n\n';
+    }
+    let brochureContext = '';
+    if (relevant && relevant.length) {
+      brochureContext = 'Brochure snippets:\n' + relevant.map((b, i) => `${i+1}) ${b.title || b.id || 'n/a'} — ${b.summary ? b.summary.slice(0,300) : (b.url||'')}`).join('\n') + '\n\n';
+    }
+
+    const sys = `
+You are SIGNATURE SAVINGS — a crisp dealership advisory assistant for MR.CAR.
+Answer concisely, with dealership-level accuracy, focusing on:
+- insurance addons & benefits,
+- warranty & RSA,
+- variant feature lists (quote only if present in provided brochure snippets),
+- pros & cons (new vs used),
+- maintenance and service cost advice,
+- roadside help and helpline instructions.
+Never invent or state current new-car prices — MR.CAR handles pricing.
+If brochures/snippets are provided, prefer quoting them briefly.
+Always include a one-line CTA: "Reply 'Talk to agent' to request a human." Keep answers short (max ~250 words).
+    `.trim();
+
+    const userContent = `${phoneContext}${brochureContext}User question: ${msgText}\nContext: lastService=${String(lastService || 'none')}`;
+
+    const body = {
+      model: SIGNATURE_MODEL,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: userContent }
+      ],
+      temperature: 0.35,
+      max_tokens: 800
+    };
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body),
+      timeout: 8000
+    });
+
+    if (!r.ok) {
+      if (DEBUG) console.log('Signature Brain Error status', r.status);
+      try { const txt = await r.text(); if (DEBUG) console.log('Signature Brain Error body', txt.slice(0,1000)); } catch(_) {}
+      return null;
+    }
+
+    const j = await r.json();
+    const ans = j.choices?.[0]?.message?.content || null;
+    return ans;
+
+  } catch (e) {
+    if (DEBUG) console.warn('Signature Brain Exception:', e && e.message ? e.message : e);
+    return null;
+  }
+}
+
+/* =======================================================================
+   END ADDED: Signature GPT & Brochure helpers
+   ======================================================================= */
+
 // ---------------- tryQuickNewCarQuote ----------------
 async function tryQuickNewCarQuote(msgText, to) {
   try { 
@@ -1194,6 +1404,47 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
+    /* ADDED: Advisory auto-detect - run AFTER greeting and BEFORE pricing/quote logic */
+    if (type === 'text' && msgText && isAdvisory(msgText)) {
+      try {
+        // quick: check brochure index for helplines and send quick phone list
+        const index = loadBrochureIndex();
+        const relevant = findRelevantBrochures(index, msgText);
+        const phones = findPhonesInBrochures(relevant);
+        if (phones && phones.length) {
+          const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
+          await waSendText(from, `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`);
+        }
+
+        // call the Signature brain
+        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from) });
+        if (sigReply) {
+          await waSendText(from, sigReply);
+          // log to CRM with advisory tag
+          try {
+            await postLeadToCRM({
+              bot: 'SIGNATURE_ADVISORY',
+              channel: 'whatsapp',
+              from,
+              name,
+              lastMessage: msgText,
+              service: 'ADVISORY',
+              tags: ['SIGNATURE_ADVISORY'],
+              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
+              createdAt: Date.now()
+            });
+          } catch (e) {
+            if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
+          }
+          return res.sendStatus(200);
+        }
+      } catch (e) {
+        if (DEBUG) console.warn('Advisory flow failed', e && e.message ? e.message : e);
+        // fallthrough to normal flows
+      }
+    }
+    /* END ADDED: Advisory auto-detect */
+
     // bullet command
     const bulletCmd = (msgText || '').trim().match(/^bullet\s+([\d,]+)\s*([\d\.]+)?\s*(\d+)?/i);
     if (bulletCmd) {
@@ -1354,4 +1605,3 @@ app.listen(PORT, () => {
     DEBUG
   });
 });
-
