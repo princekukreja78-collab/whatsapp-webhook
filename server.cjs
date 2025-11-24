@@ -742,6 +742,7 @@ const BROCHURE_INDEX_PATH = process.env.BROCHURE_INDEX_PATH || './brochures/inde
 
 function isAdvisory(msgText) {
   const t = (msgText || '').toLowerCase();
+<<<<<<< HEAD
 
   // quick phrase checks (expanded)
   const advisoryPhrases = [
@@ -791,6 +792,30 @@ function isAdvisory(msgText) {
   if (/\bis\s+better\b/.test(t) || /\bbetter\b.*\bor\b/.test(t)) return true;
 
   return false;
+=======
+  return (
+    t.includes("insurance") ||
+    t.includes("addon") ||
+    t.includes("coverage") ||
+    t.includes("which is better") ||
+    t.includes("compare") ||
+    t.includes("pros and cons") ||
+    t.includes("vs ") ||
+    t.includes("warranty") ||
+    t.includes("extended warranty") ||
+    t.includes("service cost") ||
+    t.includes("maintenance") ||
+    t.includes("rsa") ||
+    t.includes("roadside") ||
+    t.includes("helpline") ||
+    t.includes("features") ||
+    t.includes("variant") ||
+    t.includes("which car") ||
+    t.includes("buy used") ||
+    t.includes("used vs new") ||
+    t.includes("which to buy")
+  );
+>>>>>>> 64444ffec0e7a3061a12ba852ccf57492b5ef3ec
 }
 
 // brochure index loader (optional — non-fatal)
@@ -892,6 +917,7 @@ function findPhonesInBrochures(entries) {
   }
 }
 
+<<<<<<< HEAD
 // === SIGNATURE BRAIN (REBUILT CLEAN) ===
 async function callSignatureBrain({ from, name, msgText, lastService, ragHits = [] } = {}) {
   try {
@@ -925,6 +951,77 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
 }
 // === SIGNATURE BRAIN END ===
 
+=======
+async function callSignatureBrain({ from, name, msgText, lastService = null }) {
+  try {
+    if (!OPENAI_API_KEY) {
+      if (DEBUG) console.log('Signature Brain skipped - OPENAI_API_KEY missing');
+      return null;
+    }
+    const index = loadBrochureIndex();
+    const relevant = findRelevantBrochures(index, msgText);
+    const phones = findPhonesInBrochures(relevant);
+    let phoneContext = '';
+    if (phones && phones.length) {
+      phoneContext = 'Detected helplines:\n' + phones.map(p => `- ${p.label}: ${p.phone} (source: ${p.sourceId})`).join('\n') + '\n\n';
+    }
+    let brochureContext = '';
+    if (relevant && relevant.length) {
+      brochureContext = 'Brochure snippets:\n' + relevant.map((b, i) => `${i+1}) ${b.title || b.id || 'n/a'} — ${b.summary ? b.summary.slice(0,300) : (b.url||'')}`).join('\n') + '\n\n';
+    }
+
+    const sys = `
+You are SIGNATURE SAVINGS — a crisp dealership advisory assistant for MR.CAR.
+Answer concisely, with dealership-level accuracy, focusing on:
+- insurance addons & benefits,
+- warranty & RSA,
+- variant feature lists (quote only if present in provided brochure snippets),
+- pros & cons (new vs used),
+- maintenance and service cost advice,
+- roadside help and helpline instructions.
+Never invent or state current new-car prices — MR.CAR handles pricing.
+If brochures/snippets are provided, prefer quoting them briefly.
+Always include a one-line CTA: "Reply 'Talk to agent' to request a human." Keep answers short (max ~250 words).
+    `.trim();
+
+    const userContent = `${phoneContext}${brochureContext}User question: ${msgText}\nContext: lastService=${String(lastService || 'none')}`;
+
+    const body = {
+      model: SIGNATURE_MODEL,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: userContent }
+      ],
+      temperature: 0.35,
+      max_tokens: 800
+    };
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body),
+      timeout: 8000
+    });
+
+    if (!r.ok) {
+      if (DEBUG) console.log('Signature Brain Error status', r.status);
+      try { const txt = await r.text(); if (DEBUG) console.log('Signature Brain Error body', txt.slice(0,1000)); } catch(_) {}
+      return null;
+    }
+
+    const j = await r.json();
+    const ans = j.choices?.[0]?.message?.content || null;
+    return ans;
+
+  } catch (e) {
+    if (DEBUG) console.warn('Signature Brain Exception:', e && e.message ? e.message : e);
+    return null;
+  }
+}
+>>>>>>> 64444ffec0e7a3061a12ba852ccf57492b5ef3ec
 
 /* =======================================================================
    END ADDED: Signature GPT & Brochure helpers
@@ -1455,7 +1552,11 @@ try {
         }
 
         // call the Signature brain
+<<<<<<< HEAD
         const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
+=======
+        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from) });
+>>>>>>> 64444ffec0e7a3061a12ba852ccf57492b5ef3ec
         if (sigReply) {
           await waSendText(from, sigReply);
           // log to CRM with advisory tag
@@ -1711,4 +1812,3 @@ app.listen(PORT, () => {
     DEBUG
   });
 });
-
