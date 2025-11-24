@@ -1,0 +1,858 @@
+// server.cjs — MR.CAR webhook (New + Used, multi-bot CRM core)
+// - Greeting => service list (no quick buttons).
+// - New-car quote => New-car buttons only.
+// - Used-car quote => Used-car buttons only.
+// - Used loan = 95% LTV of Expected Price, EMI, Bullet option.
+// - Loan menu: EMI Calculator, Loan Documents, Loan Eligibility.
+// - Central CRM core: /crm/leads (GET), /crm/ingest (POST) for all bots.
+
+require('dotenv').config();
+const ADMIN_WA = (process.env.ADMIN_WA || "").replace(/\D/g, "") || null;
+const SERVER_PORT = process.env.PORT || 3000;
+const DEBUG = (process.env.DEBUG_VARIANT === "true") || true;
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
+const app = express();
+app.use(express.json());
+
+// fetch compatibility
+const fetch = (global.fetch) ? global.fetch : require('node-fetch');
+
+// -------- Signature Savings GPT Config --------
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const SIGNATURE_BRAIN_MODEL = process.env.SIGNATURE_BRAIN_MODEL || "gpt-4o-mini";
+
+async function callSignatureBrain({ from, name, msgText }) {
+// ------------------------------------------------------------
+//  GENERAL ADVISORY / COMPARISON / WARRANTY / SERVICE QUESTIONS
+//  (Inserted automatically — goes inside the POST /webhook handler
+//   right after msgText is created.)
+// ------------------------------------------------------------
+if (type === "text" && msgText) {
+  const t = (msgText || "").toLowerCase();
+
+  const advisoryKeywords = [
+    // comparisons
+    "which is better", "compare", "comparison", "pros and cons", "vs ",
+    // warranty / roadside / rsa
+    "warranty", "extended warranty", "rsa", "roadside",
+    // maintenance & repair
+    "service cost", "maintenance", "engine oil", "tyres", "brakes", "repair",
+    // documents / insurance
+    "idv", "ncb", "insurance", "rto", "rc", "documents", "papers",
+    // buying decision & help
+    "should i buy", "should i", "suggest", "help", "issue", "problem"
+  ];
+
+  const looksLikeAdvisory = advisoryKeywords.some(kw => t.includes(kw));
+
+  if (looksLikeAdvisory) {
+    console.log("Advisory detector → triggered for:", (msgText || "").slice(0,120));
+    const reply = await callSignatureBrain({ from, name, msgText });
+    console.log("Advisory detector → signature reply present?:", Boolean(reply));
+    if (reply) {
+      await waSendText(from, reply);
+      console.log("Advisory detector → sent reply to", from);
+      return res.sendStatus(200);
+    } else {
+      console.log("Advisory detector → signature returned null, falling through to price logic");
+    }
+  }
+}
+  try {
+    const apiKey = (process.env.OPENAI_API_KEY || "").trim();
+    if (!apiKey) {
+      console.warn("Signature brain debug → MISSING OPENAI_API_KEY");
+      return null;
+    }
+
+    const model = (process.env.SIGNATURE_BRAIN_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
+    const endpoint = "https://api.openai.com/v1/chat/completions";
+
+    console.log("Signature brain debug → calling OpenAI", { model, from, name, preview: (msgText || "").slice(0,120) });
+
+    const systemPrompt = `
+You are Signature Savings — an advisory brain for MR.CAR. Answer concisely in WhatsApp style.
+Do NOT invent prices (pricing handled by sheets). If missing data, ask exactly one clarifying question.
+    `.trim();
+
+    const payload = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: msgText }
+      ],
+      temperature: 0.3
+    };
+
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    console.log("Signature brain debug → OpenAI HTTP status:", resp.status);
+
+    const text = await resp.text().catch(() => "");
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { console.log("Signature brain debug → JSON parse failed", e && e.message ? e.message : e, "raw:", text.slice(0,800)); }
+
+    const reply = data?.choices?.[0]?.message?.content || (typeof text === "string" ? text : null) || null;
+    console.log("Signature brain debug → got reply length:", reply ? reply.length : 0);
+
+    return reply ? String(reply).trim() : null;
+  } catch (e) {
+    console.error("Signature brain debug → exception:", e && e.stack ? e.stack : e);
+    return null;
+  }
+}
+
+try {
+  const crmHelpers = require('./crm_helpers.cjs');
+  postLeadToCRM = crmHelpers.postLeadToCRM || postLeadToCRM;
+  fetchCRMReply = crmHelpers.fetchCRMReply || fetchCRMReply;
+  getAllLeads   = crmHelpers.getAllLeads   || getAllLeads;
+  if (DEBUG) console.log('crm_helpers.cjs loaded');
+} catch (e) {
+  if (DEBUG) console.log('crm_helpers.cjs not loaded (ok for dev).');
+}
+
+// ---------------- tryQuickNewCarQuote ----------------
+async function tryQuickNewCarQuote(msgText, to) {
+  try { 
+    if (!msgText || !msgText.trim()) return false;
+
+    if (!canSendQuote(to)) {
+      await waSendText(
+        to,
+        'You’ve reached today’s assistance limit for quotes. Please try again tomorrow or provide your details for a personalised quote.'
+      );
+      return true;
+    }
+
+    const tables = await loadPricingFromSheets();
+    if (!tables || Object.keys(tables).length === 0) return false;
+        
+    const t = String(msgText || '').toLowerCase();
+    const tUpper = t.toUpperCase();
+
+    // brand guess from free text — only used to narrow search
+    let brandGuess = null;
+    if (/\b(bmw)\b/.test(t)) {
+      brandGuess = 'BMW';
+    } else if (/\b(mercedes|merc|benz)\b/.test(t)) {
+      brandGuess = 'MERCEDES';
+    } else if (/\b(hyundai|creta|verna|venue|alcazar|tucson|exter|grand i10|i20)\b/.test(t)) {
+      brandGuess = 'HYUNDAI';
+    } else if (/\b(toyota|fortuner|innova|crysta|legender|hyryder|hycross|glanza|camry|rumion|urban cruiser)\b/.test(t)) {
+      brandGuess = 'TOYOTA';
+    }
+
+    let cityMatch =
+      (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bangalore|bengaluru|chennai)\b/) || [])[1] ||
+      null;
+    if (cityMatch) {
+      if (cityMatch === 'dilli') cityMatch = 'delhi';
+      if (cityMatch === 'hr') cityMatch = 'haryana';
+      if (cityMatch === 'chd') cityMatch = 'chandigarh';
+      if (cityMatch === 'up') cityMatch = 'uttar pradesh';
+      if (cityMatch === 'hp') cityMatch = 'himachal pradesh';
+    } else {
+      cityMatch = 'delhi';
+    }
+    const city = cityMatch;
+
+    const profile =
+      (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
+
+    let raw = t
+      .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bangalore|bengaluru|chennai)\b/g, ' ')
+      .replace(/\b(individual|company|corporate|firm|personal)\b/g, ' ')
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!raw) return false;
+
+    const modelGuess = raw.split(' ').slice(0, 3).join(' ');
+    const userNorm = normForMatch(raw);
+    const tokens = userNorm.split(' ').filter(Boolean);
+
+    let best = null; // {brand, row, idxModel, idxVariant, idxMap, onroad, exShow}
+
+    const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
+
+    for (const [brand, tab] of Object.entries(tables)) {
+      if (!tab || !tab.data) continue;
+      // if we have a brand guess, only search that brand
+      if (brandGuess && brand !== brandGuess) continue;
+
+      const header = tab.header.map(h => String(h || '').toUpperCase());
+      const idxMap = tab.idxMap || toHeaderIndexMap(header);
+      const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+      const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+      const idxVarKw = header.findIndex(h => h.includes('VARIANT_KEYWORDS') || h.includes('KEYWORD'));
+      const idxSuffixCol = header.findIndex(h => h.includes('SUFFIX'));
+
+      for (const row of tab.data) {
+        const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
+        const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
+        const modelNorm = normForMatch(modelCell);
+        const variantNorm = normForMatch(variantCell);
+
+        let score = 0;
+
+        if (modelCell && modelCell.includes(modelGuess)) score += 40;
+        if (variantCell && variantCell.includes(modelGuess)) score += 45;
+        if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
+
+        if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) {
+          score += 35;
+        }
+        if (userNorm && variantNorm && (variantNorm.includes(userNorm) || userNorm.includes(variantNorm))) {
+          score += 35;
+        }
+
+        let varKwNorm = '';
+        let suffixNorm = '';
+        if (idxVarKw >= 0 && row[idxVarKw] != null) {
+          varKwNorm = normForMatch(row[idxVarKw]);
+        }
+        if (idxSuffixCol >= 0 && row[idxSuffixCol] != null) {
+          suffixNorm = normForMatch(row[idxSuffixCol]);
+        }
+
+        for (const tok of tokens) {
+          if (!tok) continue;
+          if (modelNorm && modelNorm.includes(tok)) score += 5;
+          if (variantNorm && variantNorm.includes(tok)) score += 8;
+          if (suffixNorm && suffixNorm.includes(tok)) score += 10;
+          if (varKwNorm && varKwNorm.includes(tok)) score += 15;
+        }
+
+        // suffix detection: ZXO / VXO / GXO and optional ZX / VX / GX
+        const specialSuffixes = ['zxo', 'gxo', 'vxo', 'zx', 'vx', 'gx'];
+        const userSuffix = specialSuffixes.find(sfx => userNorm.includes(sfx));
+        if (userSuffix) {
+          const inVariant = variantNorm.includes(userSuffix);
+          const inSuffix  = suffixNorm.includes(userSuffix);
+          const inKw      = varKwNorm.includes(userSuffix);
+
+          if (inVariant || inSuffix || inKw) score += 80;
+          else score -= 20;
+        }
+
+        const variantUpper = String(variantCell || '').toUpperCase();
+        const varKwUpper = String(varKwNorm || '').toUpperCase();
+        for (const sw of SPECIAL_WORDS) {
+          if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw.toLowerCase())) {
+            score -= 25;
+          }
+        }
+
+        if (score <= 0) continue;
+
+        // pick price
+        let priceIdx = -1;
+        const cityToken = city.split(' ')[0].toUpperCase();
+        for (const k of Object.keys(idxMap)) {
+          if (k.includes('ON ROAD') && k.includes(cityToken)) {
+            priceIdx = idxMap[k];
+            break;
+          }
+        }
+        if (priceIdx < 0) {
+          for (let i = 0; i < row.length; i++) {
+            const v = String(row[i] || '').replace(/[,₹\s]/g, '');
+            if (v && /^\d+$/.test(v)) {
+              priceIdx = i;
+              break;
+            }
+          }
+        }
+
+        const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
+        const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
+        if (!onroad) continue;
+
+        const exIdx = detectExShowIdx(idxMap);
+        const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
+
+        if (!best || score > best.score) {
+          best = { brand, row, idxModel, idxVariant, idxMap, onroad, exShow, score };
+        }
+      }
+    }
+
+    if (!best) return false;
+
+    const loanAmt = best.exShow || best.onroad || 0;
+    const emi60 = loanAmt ? calcEmiSimple(loanAmt, NEW_CAR_ROI, 60) : 0;
+
+    const modelName  = best.idxModel   >= 0 ? String(best.row[best.idxModel]   || '').toUpperCase() : '';
+    const variantStr = best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
+
+    const lines = [];
+    lines.push(`*${best.brand}* ${modelName} ${variantStr}`);
+    lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
+    if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
+    if (best.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(best.onroad)}`);
+    if (loanAmt) {
+      lines.push(
+        `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
+      );
+    }
+    lines.push('\n*Terms & Conditions Apply ✅*');
+
+    await waSendText(to, lines.join('\n'));
+    await sendNewCarButtons(to);
+    incrementQuoteUsage(to);
+    setLastService(to, 'NEW');
+    return true;
+  } catch (e) {
+    console.error('tryQuickNewCarQuote error', e && e.stack ? e.stack : e);
+    return false;
+  }
+}
+            
+// ---------------- webhook verify & health ----------------
+app.get('/healthz', (req, res) => {
+  res.json({ ok: true, t: Date.now(), debug: DEBUG });
+});
+
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === VERIFY_TOKEN && challenge) {
+    console.log('Webhook verified ✅');
+    return res.status(200).type('text/plain').send(String(challenge));
+  }
+  return res.sendStatus(403);
+});
+
+// -------------- CRM API ROUTES ---------------
+
+// GET /crm/leads  (for dashboards)
+app.get('/crm/leads', async (req, res) => {
+  try {
+    const limit = Number(req.query.limit || 100);
+    const leads = await getAllLeads(limit);
+    res.json({ ok: true, count: leads.length, leads });
+  } catch (e) {
+    console.error('CRM /crm/leads error:', e && e.message ? e.message : e);
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// POST /crm/ingest  (for other bots: Signature, Property, Loan, etc.)
+app.post('/crm/ingest', async (req, res) => {
+  try {
+    const lead = req.body || {};
+    const enrichedLead = {
+      bot: lead.bot || 'UNKNOWN',
+      channel: lead.channel || 'whatsapp',
+      from: lead.from || '',
+      name: lead.name || '',
+      lastMessage: lead.lastMessage || lead.text || '',
+      service: lead.service || null,
+      tags: Array.isArray(lead.tags) ? lead.tags : [],
+      meta: lead.meta || {}
+    };
+    await postLeadToCRM(enrichedLead);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('CRM /crm/ingest error:', e && e.message ? e.message : e);
+    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// optional ADMIN route to clear greeting throttles
+app.post('/admin/reset_greetings', (req, res) => {
+  try {
+    lastGreeting.clear();
+    res.json({ ok: true, message: 'Greeting counters reset' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// ---------- ADMIN TEST ALERT ----------
+app.post('/admin/test_alert', async (req, res) => {
+  try {
+    const payload = {
+      messaging_product: "whatsapp",
+      to: process.env.ADMIN_WA,
+      type: "text",
+      text: {
+        body: `🔔 ADMIN TEST ALERT\n\nThis is a test admin alert from MR.CAR server.\nTime: ${new Date().toLocaleString()}`
+      }
+    };
+
+    console.log("ADMIN TEST ALERT → WA PAYLOAD:", JSON.stringify(payload, null, 2));
+
+    const resp = await fetch(
+      `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.META_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const result = await resp.json();
+    console.log("ADMIN ALERT WA RESPONSE:", result);
+
+    return res.json({ ok: true, result });
+
+  } catch (e) {
+    console.error("ADMIN TEST ALERT FAILED:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// ---------------- main webhook handler ----------------
+app.post('/webhook', async (req, res) => {
+  try {
+    if (DEBUG) {
+      const short = {
+        object: req.body && req.body.object,
+        entry0: Array.isArray(req.body?.entry)
+          ? Object.keys(req.body.entry[0] || {})
+          : undefined
+      };
+      console.log('📩 Incoming webhook (short):', JSON.stringify(short));
+    }
+
+    const entry  = req.body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value  = change?.value || {};
+
+    if (value.statuses && !value.messages) {
+      if (DEBUG) console.log('Received status-only event (sent/delivered/read) — ignoring for replies.');
+      return res.sendStatus(200);
+    }
+
+    const msg     = value?.messages?.[0];
+    const contact = value?.contacts?.[0];
+    if (!msg) return res.sendStatus(200);
+
+    const from = msg.from;
+    const type = msg.type;
+    const name = (contact?.profile?.name || 'Unknown').toString().toUpperCase();
+
+    let msgText = '';
+    let selectedId = null;
+
+    if (type === 'text') {
+      msgText = msg.text?.body || '';
+    } else if (type === 'interactive') {
+      selectedId =
+        msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id || null;
+      msgText =
+        msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '';
+    } else {
+      msgText = JSON.stringify(msg);
+    }
+
+    if (DEBUG) console.log('INBOUND', { from, type, sample: (msgText || '').slice(0, 300) });
+
+/* ---- SAFE SEND ADMIN ALERT (LOCAL + RENDER COMPATIBLE) ---- */
+async function sendAdminAlert({ from, name, text }) {
+  try {
+    if (!process.env.ADMIN_WA) return;
+
+    const admin = process.env.ADMIN_WA;
+
+    // Build alert message
+    const body =
+      `🔔 ADMIN ALERT\n` +
+      `From: ${from}\n` +
+      `Name: ${name || "-"}\n` +
+      `Msg: ${(text || "").slice(0, 500)}`;
+
+    // Send simple WA message
+    await waSendRaw({
+      messaging_product: "whatsapp",
+      to: admin,
+      type: "text",
+      text: { body },
+    });
+
+    console.log("Admin alert sent →", admin);
+
+  } catch (err) {
+    console.log("Admin alert failed:", err?.message || err);
+  }
+}
+
+    if (from !== ADMIN_WA) {
+      sendAdminAlert({ from, name, text: msgText }).catch(() => {});
+    }
+
+    // save lead locally + CRM (non-blocking)
+    try {
+      const lead = {
+        bot: 'MR_CAR_AUTO',
+        channel: 'whatsapp',
+        from,
+        name,
+        lastMessage: msgText,
+        service: getLastService(from) || null,
+        tags: [],
+        meta: {}
+      };
+      postLeadToCRM(lead).catch(() => {});
+      let existing = safeJsonRead(LEADS_FILE);
+      if (Array.isArray(existing)) {
+        // ok
+      } else if (Array.isArray(existing.leads)) {
+        existing = existing.leads;
+      } else {
+        existing = [];
+      }
+      existing.unshift({ from, name, text: msgText, ts: Date.now() });
+      existing = existing.slice(0, 1000);
+      fs.writeFileSync(LEADS_FILE, JSON.stringify(existing, null, 2), 'utf8');
+      if (DEBUG) console.log('✅ Lead saved:', from, (msgText || '').slice(0, 120));
+    } catch (e) {
+      console.warn('lead save failed', e && e.message ? e.message : e);
+    }
+
+    // log conversation to new CRM backend (basic)
+    logConversationToCRM({
+      sourceBot: 'MR_CAR',
+      from,
+      name,
+      message: msgText,
+      service: getLastService(from) || null,
+      ts: new Date().toISOString()
+    }).catch(() => {});
+
+    // interactive choices
+    if (selectedId) {
+      switch (selectedId) {
+        case 'SRV_NEW_CAR':
+        case 'BTN_NEW_QUOTE':
+          setLastService(from, 'NEW');
+          await waSendText(
+            from,
+            'Please share your *city, model, variant/suffix & profile (individual/company)*.'
+          );
+          break;
+
+        case 'SRV_USED_CAR':
+        case 'BTN_USED_MORE':
+          setLastService(from, 'USED');
+          await waSendText(
+            from,
+            'Share *make, model, year* (optional colour/budget) and I’ll suggest options.'
+          );
+          break;
+
+        case 'SRV_SELL_CAR':
+          setLastService(from, 'SELL');
+          await waSendText(
+            from,
+            'Please share *car make/model, year, km, city* and a few photos. We’ll get you the best quote.'
+          );
+          break;
+
+        case 'SRV_LOAN':
+          setLastService(from, 'LOAN');
+          await waSendText(from, 'Loan assistance options below 👇');
+          await waSendRaw({
+            messaging_product: 'whatsapp',
+            to: from,
+            type: 'interactive',
+            interactive: {
+              type: 'button',
+              body: { text: 'Choose a loan option:' },
+              action: {
+                buttons: [
+                  { type: 'reply', reply: { id: 'BTN_LOAN_EMI',         title: 'EMI Calculator' } },
+                  { type: 'reply', reply: { id: 'BTN_LOAN_DOCS',        title: 'Loan Documents' } },
+                  { type: 'reply', reply: { id: 'BTN_LOAN_ELIGIBILITY', title: 'Loan Eligibility' } }
+                ]
+              }
+            }
+          });
+          break;
+
+        case 'BTN_LOAN_EMI':
+          await waSendText(
+            from,
+            'For EMI calculation, reply like:\n`emi 1500000 9.5 60`\n\nFormat: `emi <loan amount> <rate% optional> <months>`'
+          );
+          break;
+
+        case 'BTN_LOAN_DOCS':
+          await waSendText(
+            from,
+            'Basic loan documents:\n• PAN, Aadhaar\n• 3–6 months bank statement\n• Salary slips / ITRs\n• Address proof\n\nShare your *city + profile (salaried/self-employed)* for a precise list.'
+          );
+          break;
+
+        case 'BTN_LOAN_ELIGIBILITY':
+          await waSendText(
+            from,
+            'For eligibility, please share:\n• City\n• Salaried / Self-employed\n• Monthly income\n• Existing EMIs (if any)\n\nExample: `Delhi salaried 1.2L income 15k existing EMI`'
+          );
+          break;
+
+        case 'BTN_NEW_LOAN':
+          await waSendText(
+            from,
+            `For loan assistance, share *city + car model + budget*. New car ROI from *${NEW_CAR_ROI}%*, Used car *${USED_CAR_ROI_VISIBLE}%*.`
+          );
+          break;
+
+        case 'BTN_CONTACT_SALES':
+          await waSendText(
+            from,
+            'Our sales team will contact you shortly. Share your preferred time and contact details.'
+          );
+          break;
+
+        case 'BTN_BOOK_TEST':
+          await waSendText(
+            from,
+            'Thanks — share preferred date/time and we\'ll call to confirm the test drive.'
+          );
+          break;
+
+        default:
+          await waSendText(from, 'Thanks! You can type your request anytime.');
+          break;
+      }
+      return res.sendStatus(200);
+    }
+
+    // Greeting first – ONLY service menu (no quick buttons now)
+    if (shouldGreetNow(from, msgText)) {
+      await waSendText(
+        from,
+        '🔴 *MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.'
+      );
+      await waSendListMenu(from);
+      return res.sendStatus(200);
+    }
+
+    // bullet command
+    const bulletCmd = (msgText || '').trim().match(/^bullet\s+([\d,]+)\s*([\d\.]+)?\s*(\d+)?/i);
+    if (bulletCmd) {
+      const loanRaw = String(bulletCmd[1] || '').replace(/[,₹\s]/g, '');
+      const months  = Number(bulletCmd[3] || 60);
+      const loanAmt = Number(loanRaw);
+      if (!loanAmt || !months) {
+        await waSendText(
+          from,
+          'Please send: `bullet <loan amount> <rate% optional> <tenure months>` e.g. `bullet 750000 10 60`'
+        );
+        return res.sendStatus(200);
+      }
+      const sim = simulateBulletPlan({
+        loanAmount: loanAmt,
+        months,
+        internalRatePct: USED_CAR_ROI_INTERNAL,
+        bulletPct: 0.25
+      });
+      if (!sim) {
+        await waSendText(from, 'Bullet calculation failed.');
+        return res.sendStatus(200);
+      }
+      const lines = [];
+      lines.push('🔷 *Bullet EMI Plan — Used Car*');
+      lines.push(`Loan Amount: ₹ *${fmtMoney(sim.loan)}*`);
+      lines.push(`ROI (shown): *${USED_CAR_ROI_VISIBLE}%*`);
+      lines.push(`Tenure: *${sim.months} months*`);
+      lines.push('');
+      lines.push(`📌 Monthly EMI (approx): ₹ *${fmtMoney(sim.monthly_emi)}*`);
+      lines.push(`📌 Bullet total (25%): ₹ *${fmtMoney(sim.bullet_total)}*`);
+      lines.push(
+        `• Bullet each: ₹ *${fmtMoney(sim.bullet_each)}* on months: ` +
+        Array.from({ length: sim.num_bullets }, (_, i) => 12 * (i + 1)).join(' • ')
+      );
+      lines.push('');
+      lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*');
+      await waSendText(from, lines.join('\n'));
+      try {
+        postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `BULLET_CALC ${loanAmt} ${months}`, service: 'LOAN', tags: ['BULLET_EMI'], meta: {} });
+      } catch (_) {}
+      return res.sendStatus(200);
+    }
+
+    // emi command
+    const emiCmd = (msgText || '').trim().match(/^emi\s+([\d,]+)(?:\s+([\d\.]+)%?)?\s*(\d+)?/i);
+    if (emiCmd) {
+      const loanRaw = String(emiCmd[1] || '').replace(/[,₹\s]/g, '');
+      const rate    = Number(emiCmd[2] || NEW_CAR_ROI);
+      const months  = Number(emiCmd[3] || 60);
+      const loanAmt = Number(loanRaw);
+      if (!loanAmt || !months) {
+        await waSendText(
+          from,
+          'Please send: `emi <loan amount> <rate% optional> <tenure months>` e.g. `emi 1500000 9.5 60`'
+        );
+        return res.sendStatus(200);
+      }
+      const monthly = calcEmiSimple(loanAmt, rate, months);
+      const total   = monthly * months;
+      const interest = total - loanAmt;
+      const lines = [
+        '🔸 EMI Calculation',
+        `Loan: ₹ *${fmtMoney(loanAmt)}*`,
+        `Rate: *${rate}%* p.a.`,
+        `Tenure: *${months} months*`,
+        '',
+        `📌 Monthly EMI: ₹ *${fmtMoney(monthly)}*`,
+        `📊 Total Payable: ₹ *${fmtMoney(total)}*`,
+        `💰 Total Interest: ₹ *${fmtMoney(interest)}*`,
+        '',
+        '✅ *Loan approval possible in ~30 minutes (T&Cs apply)*',
+        '\n*Terms & Conditions Apply ✅*'
+      ];
+      await waSendText(from, lines.join('\n'));
+      return res.sendStatus(200);
+    }
+
+    // numeric reply after used-car list (safe behaviour)
+    if (type === 'text' && msgText) {
+      const trimmed = msgText.trim();
+      const lastSvc = getLastService(from);
+      if (lastSvc === 'USED' && /^[1-9]\d*$/.test(trimmed)) {
+        await waSendText(
+          from,
+          'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.'
+        );
+        return res.sendStatus(200);
+      }
+    }
+
+    // USED CAR detection
+    if (type === 'text' && msgText) {
+      const textLower = msgText.toLowerCase();
+      const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
+      const lastSvc = getLastService(from);
+
+      if (explicitUsed || lastSvc === 'USED') {
+        const usedRes = await buildUsedCarQuoteFreeText({ query: msgText });
+        await waSendText(from, usedRes.text || 'Used car quote failed.');
+        if (usedRes.picLink) {
+          await waSendText(from, `Photos: ${usedRes.picLink}`);
+        }
+        await sendUsedCarButtons(from);
+        setLastService(from, 'USED');
+        return res.sendStatus(200);
+      }
+    }
+
+// ------------------------------------------------------------
+//  GENERAL ADVISORY / COMPARISON / WARRANTY / SERVICE QUESTIONS
+//  These must go directly to Signature Savings GPT (NO PRICING)
+// ------------------------------------------------------------
+if (type === "text" && msgText) {
+  const t = (msgText || "").toLowerCase();
+
+  const advisoryKeywords = [
+    // comparisons
+    "which is better", "compare", "comparison", "pros and cons", "vs ",
+    // warranty / roadside / rsa
+    "warranty", "extended warranty", "rsa", "roadside",
+    // maintenance & repair
+    "service cost", "maintenance", "engine oil", "tyres", "brakes", "repair",
+    // documents / insurance
+    "idv", "ncb", "insurance", "rto", "rc", "documents", "papers",
+    // buying decision & help
+    "should i buy", "should i", "suggest", "help", "issue", "problem"
+  ];
+
+  const looksLikeAdvisory = advisoryKeywords.some(kw => t.includes(kw));
+
+  if (looksLikeAdvisory) {
+    console.log("Advisory detector → triggered for:", (msgText || "").slice(0,120));
+    const reply = await callSignatureBrain({ from, name, msgText });
+    console.log("Advisory detector → signature reply present?:", Boolean(reply));
+    if (reply) {
+      await waSendText(from, reply);
+      console.log("Advisory detector → sent reply to", from);
+      return res.sendStatus(200);
+    } else {
+      console.log("Advisory detector → signature returned null, falling through to price logic");
+    }
+  }
+}
+
+    // NEW CAR quick quote
+    if (type === 'text' && msgText) {
+      const served = await tryQuickNewCarQuote(msgText, from);
+      if (served) {
+        return res.sendStatus(200);
+      }
+    }
+
+    // CRM + Signature Savings brain fallback
+    let finalReply = null;
+
+    // 1) Try existing CRM helper first (if any)
+    try {
+      const crmReply = await fetchCRMReply({ from, msgText });
+      if (crmReply && String(crmReply).trim()) {
+        finalReply = String(crmReply).trim();
+      }
+    } catch (e) {
+      console.warn('CRM reply failed', e && e.message ? e.message : e);
+    }
+
+    // 2) If CRM had no answer, ask Signature Savings brain
+    if (!finalReply) {
+      finalReply = await callSignatureBrain({ from, name, msgText });
+    }
+
+    // 3) If either CRM or Signature gave an answer, send it
+    if (finalReply) {
+      await waSendText(from, finalReply);
+      return res.sendStatus(200);
+    }
+
+    // 4) Last-resort fallback if absolutely nothing worked
+    await waSendText(
+      from,
+      'Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.'
+    );
+    return res.sendStatus(200);
+
+  } catch (err) {
+    console.error('Webhook error:', err && err.stack ? err.stack : err);
+    try {
+      if (process.env.ADMIN_WA) {
+        await waSendText(
+          process.env.ADMIN_WA,
+          `Webhook crash: ${String(err && err.message ? err.message : err)}`
+        );
+      }
+    } catch (_) {}
+    return res.sendStatus(200);
+  }
+});
+
+// ---------------- start server ----------------
+app.listen(SERVER_PORT, () => {
+  console.log(`✅ MR.CAR webhook CRM server running on port ${SERVER_PORT}`);
+  console.log('ENV summary:', {
+    SHEET_TOYOTA_CSV_URL: !!process.env.SHEET_TOYOTA_CSV_URL,
+    SHEET_USED_CSV_URL: !!process.env.SHEET_USED_CSV_URL || (typeof LOCAL_USED_CSV_PATH !== 'undefined' ? fs.existsSync(LOCAL_USED_CSV_PATH) : false),
+    PHONE_NUMBER_ID: !!process.env.PHONE_NUMBER_ID,
+    META_TOKEN: !!process.env.META_TOKEN,
+    ADMIN_WA: !!process.env.ADMIN_WA,
+    DEBUG: !!(typeof DEBUG !== 'undefined' ? DEBUG : false)
+  });
+});
+

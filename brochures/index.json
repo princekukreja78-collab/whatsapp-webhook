@@ -1,0 +1,38 @@
+[
+  {
+    "id": "toyota_hycross",
+    "title": "Toyota Innova Hycross Brochure",
+    "brand": "Toyota",
+    "url": "https://your-drive-link-or-pdf-url-here",
+    "variants": ["GX", "VX", "ZX", "ZX(O)"],
+    "summary": "Full brochure for Toyota Innova Hycross including engine, safety, features, warranty, and variant-level feature breakdown."
+  },
+  {
+    "id": "toyota_hyryder",
+    "title": "Toyota Urban Cruiser Hyryder Brochure",
+    "brand": "Toyota",
+    "url": "https://your-drive-link-or-pdf-url-here",
+    "variants": ["E", "S", "G", "V"],
+    "summary": "Brochure for Toyota Hyryder including hybrid info, features, trims, safety, maintenance, warranty, etc."
+  },
+  {
+    "id": "insurance_addons",
+    "title": "Insurance Addons Explained",
+    "brand": "General",
+    "url": "https://your-drive-link-or-doc-here",
+    "summary": "Covers zero dep, consumables, engine protect, RTI, tyre cover, key cover, personal accident, depreciation, and cashless benefits."
+  },
+  {
+    "id": "helpline_numbers",
+    "title": "Car Brand Helpline Numbers",
+    "brand": "General",
+    "summary": "A quick reference list for RSA and customer support for Toyota, Hyundai, BMW, Mercedes, and more.",
+    "helpline": {
+      "Toyota": "1800 425 0001",
+      "Hyundai": "1800 102 4645",
+      "BMW": "1800 103 2211",
+      "Mercedes": "1800 102 9222"
+    }
+  }
+]
+

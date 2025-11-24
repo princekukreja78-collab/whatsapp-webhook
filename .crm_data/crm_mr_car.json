@@ -1,0 +1,13 @@
+[
+  {
+    "bot": "MR_CAR",
+    "channel": "whatsapp",
+    "from": "919876543211",
+    "name": "CurlTest",
+    "lastMessage": "ingest test",
+    "service": "BULK_IMPORT",
+    "tags": [],
+    "meta": {},
+    "createdAt": 1763479254361
+  }
+]
