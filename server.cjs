@@ -742,7 +742,6 @@ const BROCHURE_INDEX_PATH = process.env.BROCHURE_INDEX_PATH || './brochures/inde
 
 function isAdvisory(msgText) {
   const t = (msgText || '').toLowerCase();
-<<<<<<< HEAD
 
   // quick phrase checks (expanded)
   const advisoryPhrases = [
@@ -792,7 +791,7 @@ function isAdvisory(msgText) {
   if (/\bis\s+better\b/.test(t) || /\bbetter\b.*\bor\b/.test(t)) return true;
 
   return false;
-=======
+
   return (
     t.includes("insurance") ||
     t.includes("addon") ||
@@ -815,7 +814,6 @@ function isAdvisory(msgText) {
     t.includes("used vs new") ||
     t.includes("which to buy")
   );
->>>>>>> 64444ffec0e7a3061a12ba852ccf57492b5ef3ec
 }
 
 // brochure index loader (optional — non-fatal)
@@ -917,7 +915,6 @@ function findPhonesInBrochures(entries) {
   }
 }
 
-<<<<<<< HEAD
 // === SIGNATURE BRAIN (REBUILT CLEAN) ===
 async function callSignatureBrain({ from, name, msgText, lastService, ragHits = [] } = {}) {
   try {
@@ -951,7 +948,6 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
 }
 // === SIGNATURE BRAIN END ===
 
-=======
 async function callSignatureBrain({ from, name, msgText, lastService = null }) {
   try {
     if (!OPENAI_API_KEY) {
@@ -1021,7 +1017,6 @@ Always include a one-line CTA: "Reply 'Talk to agent' to request a human." Keep 
     return null;
   }
 }
->>>>>>> 64444ffec0e7a3061a12ba852ccf57492b5ef3ec
 
 /* =======================================================================
    END ADDED: Signature GPT & Brochure helpers
@@ -1552,11 +1547,9 @@ try {
         }
 
         // call the Signature brain
-<<<<<<< HEAD
+
         const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
-=======
-        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from) });
->>>>>>> 64444ffec0e7a3061a12ba852ccf57492b5ef3ec
+
         if (sigReply) {
           await waSendText(from, sigReply);
           // log to CRM with advisory tag
