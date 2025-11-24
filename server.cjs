@@ -16,7 +16,6 @@ const openai = new OpenAI({
 const { findRelevantChunks } = require("./vector_search.cjs");
 const { getRAG } = require("./rag_loader.cjs");
 
-
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
@@ -52,6 +51,7 @@ const NEW_CAR_ROI             = Number(process.env.NEW_CAR_ROI || 8.10);
 const USED_CAR_ROI_VISIBLE    = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL   = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
 
+// NOTE: hard-wired to true so you see logs; you can change to || false to reduce noise.
 const DEBUG = (process.env.DEBUG_VARIANT === 'true') || true;
 
 // ---------------- file helpers ----------------
@@ -574,7 +574,7 @@ async function buildUsedCarQuoteFreeText({ query }) {
         const subDisp   = subModelIdx >= 0 && row[subModelIdx]
           ? row[subModelIdx].toString().toUpperCase()
           : '';
-        const yearDisp  = yearIdx >= 0 && row[yearIdx] ? String(row[yearIdx]) : '';
+        const yearDispB  = yearIdx >= 0 && row[yearIdx] ? String(row[yearIdx]) : '';
         const regPlace  = regIdx >= 0 && row[regIdx] ? String(row[regIdx]) : '';
 
         let expectedVal = 0;
@@ -587,7 +587,7 @@ async function buildUsedCarQuoteFreeText({ query }) {
         if (makeDisp)  titleParts.push(makeDisp);
         if (modelDisp) titleParts.push(modelDisp);
         if (subDisp)   titleParts.push(subDisp);
-        if (yearDisp)  titleParts.push(yearDisp);
+        if (yearDispB) titleParts.push(yearDispB);
         const title = titleParts.join(' ');
 
         let line = `${i + 1}) *${title}*`;
@@ -610,6 +610,7 @@ async function buildUsedCarQuoteFreeText({ query }) {
   const sub   = subModelIdx >= 0 && selRow[subModelIdx] ? selRow[subModelIdx].toString().toUpperCase() : '';
   const colour = colourIdx >= 0 && selRow[colourIdx] ? selRow[colourIdx].toString().toUpperCase() : '';
   const regPlace = regIdx >= 0 && selRow[regIdx] ? String(selRow[regIdx]) : '';
+  const yearDisp  = yearIdx >= 0 && selRow[yearIdx] ? String(selRow[yearIdx]) : '';
 
   const expectedStr = expectedIdx >= 0 ? String(selRow[expectedIdx] || '') : '';
   let expected = Number(expectedStr.replace(/[,₹\s]/g, '')) || 0;
@@ -649,14 +650,18 @@ async function buildUsedCarQuoteFreeText({ query }) {
         picLink = s.trim();
         break;
       }
-    }
+    } 
   }
 
   const lines = [];
   lines.push('*PRE-OWNED CAR QUOTE*');
   lines.push(`Make/Model: *${make} ${model}${sub ? ' - ' + sub : ''}*`);
+
+  // ✅ FIX: show manufacturing year in quote
+  if (yearDisp)  lines.push(`Manufacturing Year: ${yearDisp}`);
   if (colour)    lines.push(`Colour: ${colour}`);
   if (regPlace)  lines.push(`Registration Place: ${regPlace}`);
+
   lines.push('');
   lines.push(`Expected Price: ₹ *${fmtMoney(expected)}*`);
   lines.push(`Loan up to *${LTV_PCT}% LTV*: ₹ *${fmtMoney(loanAmt)}*`);
@@ -743,32 +748,28 @@ const BROCHURE_INDEX_PATH = process.env.BROCHURE_INDEX_PATH || './brochures/inde
 function isAdvisory(msgText) {
   const t = (msgText || '').toLowerCase();
 
-  // quick phrase checks (expanded)
   const advisoryPhrases = [
-    'which is better', 'which is the better', 'is better', 'better than',
-    'which to buy', 'which to choose', 'which is best', 'compare', 'pros and cons',
-    'pros & cons', 'pros/cons', 'vs ', ' v ', ' vs. ', 'warranty', 'extended warranty',
-    'service cost', 'maintenance', 'rsa', 'roadside', 'helpline', 'features', 'variant',
-    'buy used', 'used vs new', 'which to buy', 'insurance', 'addon', 'coverage',  'ground clearance', 'boot space', 'dimensions', 'mileage', 'power', 'torque',
-  'bhp', 'nm', 'fuel tank', 'wheelbase', 'height', 'width', 'length'
+    'which is better','better than','which to buy','which to choose','compare','pros and cons',
+    'pros & cons','vs ',' v ','features','variant','warranty','extended warranty','service cost',
+    'maintenance','rsa','roadside','helpline','insurance','addon','coverage','ground clearance',
+    'boot space','dimensions','mileage','power','torque','bhp','nm','fuel tank','wheelbase',
+    'height','width','length'
   ];
+
   for (const p of advisoryPhrases) {
     if (t.includes(p)) return true;
   }
 
-  // normalize some common typos / alternate spellings for key models we often care about
   const modelTyposMap = {
     hycross: ['hcyross','hycros','hycoss','hiycross'],
     hyryder: ['hyrydar','hyrider','hyrydr','hyrydar'],
-    fortuner: ['fortuner','fotuner','fortuner'],
-    innova: ['innova','innova crysta','innova crysta','innova']
+    fortuner: ['fortuner','fotuner','forttuner'],
+    innova: ['innova','innova crysta','crysta innova']
   };
 
-  // build set of normalized tokens present in the message
   const toks = t.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
   const tokSet = new Set(toks);
 
-  // check for 2+ model mentions (simple heuristic)
   let modelMentions = 0;
   for (const [canonical, typos] of Object.entries(modelTyposMap)) {
     if (tokSet.has(canonical)) modelMentions++;
@@ -778,42 +779,18 @@ function isAdvisory(msgText) {
       }
     }
   }
-  // also check for common brand words
-  const brands = ['toyota','hyundai','bmw','mercedes','kia','tata','honda','mahindra','audi','skoda'];
-  for (const b of brands) if (t.includes(b)) {
-    // presence of brand + 'compare' or 'is better' likely advisory
-    if (t.includes('compare') || t.includes('is better') || t.includes('vs ')) return true;
-  }
-
   if (modelMentions >= 2) return true;
 
-  // fallback: short comparative sentences like "is better or" or "better or"
+  const brands = ['toyota','hyundai','bmw','mercedes','kia','tata','honda','mahindra','audi','skoda'];
+  for (const b of brands) {
+    if (t.includes(b)) {
+      if (t.includes('compare') || t.includes('is better') || t.includes('vs ')) return true;
+    }
+  }
+
   if (/\bis\s+better\b/.test(t) || /\bbetter\b.*\bor\b/.test(t)) return true;
 
   return false;
-
-  return (
-    t.includes("insurance") ||
-    t.includes("addon") ||
-    t.includes("coverage") ||
-    t.includes("which is better") ||
-    t.includes("compare") ||
-    t.includes("pros and cons") ||
-    t.includes("vs ") ||
-    t.includes("warranty") ||
-    t.includes("extended warranty") ||
-    t.includes("service cost") ||
-    t.includes("maintenance") ||
-    t.includes("rsa") ||
-    t.includes("roadside") ||
-    t.includes("helpline") ||
-    t.includes("features") ||
-    t.includes("variant") ||
-    t.includes("which car") ||
-    t.includes("buy used") ||
-    t.includes("used vs new") ||
-    t.includes("which to buy")
-  );
 }
 
 // brochure index loader (optional — non-fatal)
@@ -910,7 +887,7 @@ function findPhonesInBrochures(entries) {
     }
     return uniq;
   } catch (e) {
-    if (DEBUG) console.warn('findPhonesInBrochures fail', e && e.message ? e.message : e);
+    if (DEBUG) console.warn('findPhonesFromBrochures fail', e && e.message ? e.message : e);
     return [];
   }
 }
@@ -933,7 +910,7 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
     ];
 
     const resp = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: SIGNATURE_MODEL || "gpt-4o-mini",
       messages: promptMessages,
       max_tokens: 600,
       temperature: 0.25
@@ -947,76 +924,6 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
   }
 }
 // === SIGNATURE BRAIN END ===
-
-async function callSignatureBrain({ from, name, msgText, lastService = null }) {
-  try {
-    if (!OPENAI_API_KEY) {
-      if (DEBUG) console.log('Signature Brain skipped - OPENAI_API_KEY missing');
-      return null;
-    }
-    const index = loadBrochureIndex();
-    const relevant = findRelevantBrochures(index, msgText);
-    const phones = findPhonesInBrochures(relevant);
-    let phoneContext = '';
-    if (phones && phones.length) {
-      phoneContext = 'Detected helplines:\n' + phones.map(p => `- ${p.label}: ${p.phone} (source: ${p.sourceId})`).join('\n') + '\n\n';
-    }
-    let brochureContext = '';
-    if (relevant && relevant.length) {
-      brochureContext = 'Brochure snippets:\n' + relevant.map((b, i) => `${i+1}) ${b.title || b.id || 'n/a'} — ${b.summary ? b.summary.slice(0,300) : (b.url||'')}`).join('\n') + '\n\n';
-    }
-
-    const sys = `
-You are SIGNATURE SAVINGS — a crisp dealership advisory assistant for MR.CAR.
-Answer concisely, with dealership-level accuracy, focusing on:
-- insurance addons & benefits,
-- warranty & RSA,
-- variant feature lists (quote only if present in provided brochure snippets),
-- pros & cons (new vs used),
-- maintenance and service cost advice,
-- roadside help and helpline instructions.
-Never invent or state current new-car prices — MR.CAR handles pricing.
-If brochures/snippets are provided, prefer quoting them briefly.
-Always include a one-line CTA: "Reply 'Talk to agent' to request a human." Keep answers short (max ~250 words).
-    `.trim();
-
-    const userContent = `${phoneContext}${brochureContext}User question: ${msgText}\nContext: lastService=${String(lastService || 'none')}`;
-
-    const body = {
-      model: SIGNATURE_MODEL,
-      messages: [
-        { role: "system", content: sys },
-        { role: "user", content: userContent }
-      ],
-      temperature: 0.35,
-      max_tokens: 800
-    };
-
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body),
-      timeout: 8000
-    });
-
-    if (!r.ok) {
-      if (DEBUG) console.log('Signature Brain Error status', r.status);
-      try { const txt = await r.text(); if (DEBUG) console.log('Signature Brain Error body', txt.slice(0,1000)); } catch(_) {}
-      return null;
-    }
-
-    const j = await r.json();
-    const ans = j.choices?.[0]?.message?.content || null;
-    return ans;
-
-  } catch (e) {
-    if (DEBUG) console.warn('Signature Brain Exception:', e && e.message ? e.message : e);
-    return null;
-  }
-}
 
 /* =======================================================================
    END ADDED: Signature GPT & Brochure helpers
@@ -1276,10 +1183,10 @@ app.post('/crm/ingest', async (req, res) => {
 app.post('/admin/reset_greetings', (req, res) => {
   try {
     lastGreeting.clear();
-    res.json({ ok: true, message: 'Greeting counters reset' });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
   }
+  res.json({ ok: true, message: 'Greeting counters reset' });
 });
 
 // ---------- ADMIN TEST ALERT ----------
@@ -1350,51 +1257,51 @@ app.post('/webhook', async (req, res) => {
     const name = (contact?.profile?.name || 'Unknown').toString().toUpperCase();
 
     let msgText = '';
-if (type === 'text') msgText = msg.text?.body || '';
+    if (type === 'text') msgText = msg.text?.body || '';
 
-// ---- EXTRACT selectedId (interactive replies) ----
-let selectedId = null;
-try {
-  if (msg.type === "interactive") {
-    const interactive = msg.interactive || {};
-    if (interactive.list_reply && interactive.list_reply.id) {
-      selectedId = interactive.list_reply.id;
+    // ---- EXTRACT selectedId (interactive replies) ----
+    let selectedId = null;
+    try {
+      if (msg.type === "interactive") {
+        const interactive = msg.interactive || {};
+        if (interactive.list_reply && interactive.list_reply.id) {
+          selectedId = interactive.list_reply.id;
+        }
+        if (interactive.button_reply && interactive.button_reply.id) {
+          selectedId = interactive.button_reply.id;
+        }
+      }
+    } catch (e) {
+      console.warn("selectedId parse fail:", e);
     }
-    if (interactive.button_reply && interactive.button_reply.id) {
-      selectedId = interactive.button_reply.id;
-    }
-  }
-} catch (e) {
-  console.warn("selectedId parse fail:", e);
-}
 
-// ---- RAG EMBEDDING + VECTOR SEARCH BLOCK ----
-let queryEmbedding = null;
-try {
-  if (msgText) {
-    const embedResp = await openai.embeddings.create({
-      model: "text-embedding-3-large",
-      input: msgText
-    });
-    queryEmbedding = embedResp.data?.[0]?.embedding || null;
-  }
-} catch (e) {
-  console.error("Embedding error:", e);
-}
-
-let ragHits = [];
-try {
-  if (queryEmbedding && typeof findRelevantChunks === 'function') {
-    const ragData = await (getRAG ? getRAG() : Promise.resolve(null));
-    if (ragData) {
-      ragHits = findRelevantChunks(queryEmbedding, ragData, 5) || [];
+    // ---- RAG EMBEDDING + VECTOR SEARCH BLOCK ----
+    let queryEmbedding = null;
+    try {
+      if (msgText) {
+        const embedResp = await openai.embeddings.create({
+          model: "text-embedding-3-large",
+          input: msgText
+        });
+        queryEmbedding = embedResp.data?.[0]?.embedding || null;
+      }
+    } catch (e) {
+      console.error("Embedding error:", e);
     }
-  }
-} catch (e) {
-  if (DEBUG) console.warn('RAG search failed', e && e.message ? e.message : e);
-  ragHits = [];
-}
-// ---- END RAG BLOCK ----
+
+    let ragHits = [];
+    try {
+      if (queryEmbedding && typeof findRelevantChunks === 'function') {
+        const ragData = await (getRAG ? getRAG() : Promise.resolve(null));
+        if (ragData) {
+          ragHits = findRelevantChunks(queryEmbedding, ragData, 5) || [];
+        }
+      }
+    } catch (e) {
+      if (DEBUG) console.warn('RAG search failed', e && e.message ? e.message : e);
+      ragHits = [];
+    }
+    // ---- END RAG BLOCK ----
 
     // save lead locally + CRM (non-blocking)
     try {
@@ -1425,7 +1332,7 @@ try {
       console.warn('lead save failed', e && e.message ? e.message : e);
     }
 
-    // interactive choices
+    // ---------------- INTERACTIVE LIST / BUTTON HANDLER ----------------
     if (selectedId) {
       switch (selectedId) {
         case 'SRV_NEW_CAR':
@@ -1524,7 +1431,7 @@ try {
       return res.sendStatus(200);
     }
 
-    // Greeting first – ONLY service menu (no quick buttons now)
+    // ---------------- GREETING HANDLER ----------------
     if (shouldGreetNow(from, msgText)) {
       await waSendText(
         from,
@@ -1534,50 +1441,7 @@ try {
       return res.sendStatus(200);
     }
 
-    /* ADDED: Advisory auto-detect - run AFTER greeting and BEFORE pricing/quote logic */
-    if (type === 'text' && msgText && isAdvisory(msgText)) {
-      try {
-        // quick: check brochure index for helplines and send quick phone list
-        const index = loadBrochureIndex();
-        const relevant = findRelevantBrochures(index, msgText);
-        const phones = findPhonesInBrochures(relevant);
-        if (phones && phones.length) {
-          const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
-          await waSendText(from, `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`);
-        }
-
-        // call the Signature brain
-
-        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
-
-        if (sigReply) {
-          await waSendText(from, sigReply);
-          // log to CRM with advisory tag
-          try {
-            await postLeadToCRM({
-              bot: 'SIGNATURE_ADVISORY',
-              channel: 'whatsapp',
-              from,
-              name,
-              lastMessage: msgText,
-              service: 'ADVISORY',
-              tags: ['SIGNATURE_ADVISORY'],
-              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
-              createdAt: Date.now()
-            });
-          } catch (e) {
-            if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
-          }
-          return res.sendStatus(200);
-        }
-      } catch (e) {
-        if (DEBUG) console.warn('Advisory flow failed', e && e.message ? e.message : e);
-        // fallthrough to normal flows
-      }
-    }
-    /* END ADDED: Advisory auto-detect */
-
-    // bullet command
+    // ---------------- COMMANDS: BULLET / EMI ----------------
     const bulletCmd = (msgText || '').trim().match(/^bullet\s+([\d,]+)\s*([\d\.]+)?\s*(\d+)?/i);
     if (bulletCmd) {
       const loanRaw = String(bulletCmd[1] || '').replace(/[,₹\s]/g, '');
@@ -1616,12 +1480,20 @@ try {
       lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*');
       await waSendText(from, lines.join('\n'));
       try {
-        postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `BULLET_CALC ${loanAmt} ${months}`, service: 'LOAN', tags: ['BULLET_EMI'], meta: {} });
+        postLeadToCRM({
+          bot: 'MR_CAR_AUTO',
+          channel: 'whatsapp',
+          from,
+          name,
+          lastMessage: `BULLET_CALC ${loanAmt} ${months}`,
+          service: 'LOAN',
+          tags: ['BULLET_EMI'],
+          meta: {}
+        });
       } catch (_) {}
       return res.sendStatus(200);
     }
 
-    // emi command
     const emiCmd = (msgText || '').trim().match(/^emi\s+([\d,]+)(?:\s+([\d\.]+)%?)?\s*(\d+)?/i);
     if (emiCmd) {
       const loanRaw = String(emiCmd[1] || '').replace(/[,₹\s]/g, '');
@@ -1635,8 +1507,8 @@ try {
         );
         return res.sendStatus(200);
       }
-      const monthly = calcEmiSimple(loanAmt, rate, months);
-      const total   = monthly * months;
+      const monthly  = calcEmiSimple(loanAmt, rate, months);
+      const total    = monthly * months;
       const interest = total - loanAmt;
       const lines = [
         '🔸 EMI Calculation',
@@ -1654,8 +1526,8 @@ try {
       await waSendText(from, lines.join('\n'));
       return res.sendStatus(200);
     }
-	
-    // numeric reply after used-car list (safe behaviour)
+
+    // ---------------- NUMERIC REPLY AFTER USED LIST ----------------
     if (type === 'text' && msgText) {
       const trimmed = msgText.trim();
       const lastSvc = getLastService(from);
@@ -1668,49 +1540,33 @@ try {
       }
     }
 
-    /* ADDED: Advisory logging + Signature GPT handler */
+    // ---------------- ADVISORY FLOW (SIGNATURE BRAIN + BROCHURES) ----------------
     if (type === 'text' && msgText && isAdvisory(msgText)) {
       try {
-        // ---- (A) Log advisory query locally ----
-        try {
-          const logPath = path.resolve(__dirname, '.crm_data', 'advisory_queries.json');
-          const dir = path.dirname(logPath);
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-          const existing = fs.existsSync(logPath)
-            ? JSON.parse(fs.readFileSync(logPath, 'utf8') || '[]')
-            : [];
-
-          existing.unshift({
-            ts: Date.now(),
+        // (A) Quick helplines from brochure index if present
+        const index = loadBrochureIndex();
+        const relevant = findRelevantBrochures(index, msgText);
+        const phones = findPhonesInBrochures(relevant);
+        if (phones && phones.length) {
+          const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0, 5);
+          await waSendText(
             from,
-            name,
-            text: msgText.slice(0, 1000)
-          });
-
-          fs.writeFileSync(logPath, JSON.stringify(existing.slice(0, 5000), null, 2), 'utf8');
-          if (DEBUG) console.log(`🧠 ADVISORY LOGGED: ${from} -> ${msgText.slice(0,60)}`);
-        } catch (e) {
-          if (DEBUG) console.warn('advisory log failed', e && e.message ? e.message : e);
+            `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`
+          );
         }
 
-        // ---- (B) quick helplines from brochure index if present ----
-        try {
-          const index = loadBrochureIndex();
-          const relevant = findRelevantBrochures(index, msgText);
-          const phones = findPhonesInBrochures(relevant);
-          if (phones && phones.length) {
-            const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
-            await waSendText(from, `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`);
-          }
-        } catch (e) {
-          if (DEBUG) console.warn('advisory quick-phones failed', e && e.message ? e.message : e);
-        }
+        // (B) Call Signature GPT (with RAG context if any)
+        const sigReply = await callSignatureBrain({
+          from,
+          name,
+          msgText,
+          lastService: getLastService(from),
+          ragHits
+        });
 
-        // ---- (C) Call Signature GPT ----
-        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from) });
         if (sigReply) {
           await waSendText(from, sigReply);
+
           // Log to CRM with advisory tag (non-blocking)
           try {
             await postLeadToCRM({
@@ -1721,22 +1577,22 @@ try {
               lastMessage: msgText,
               service: 'ADVISORY',
               tags: ['SIGNATURE_ADVISORY'],
-              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
+              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0, 300) },
               createdAt: Date.now()
             });
           } catch (e) {
             if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
           }
+
           return res.sendStatus(200);
         }
       } catch (e) {
         if (DEBUG) console.warn('Advisory handler error', e && e.message ? e.message : e);
-        // allow flow to continue to normal handlers if GPT failed
+        // fall through to normal flows on failure
       }
     }
-    /* END ADDED: Advisory logging + Signature GPT handler */
 
-    // USED CAR detection
+    // ---------------- USED CAR FLOW ----------------
     if (type === 'text' && msgText) {
       const textLower = msgText.toLowerCase();
       const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
@@ -1754,7 +1610,22 @@ try {
       }
     }
 
-    // NEW CAR quick quote
+    // ---------------- RAG-ASSISTED ADVISORY FALLBACK ----------------
+    if (type === 'text' && msgText && ragHits.length > 0) {
+      const sig = await callSignatureBrain({
+        from,
+        name,
+        msgText,
+        lastService: getLastService(from),
+        ragHits
+      });
+      if (sig) {
+        await waSendText(from, sig);
+        return res.sendStatus(200);
+      }
+    }
+
+    // ---------------- NEW CAR QUICK QUOTE ----------------
     if (type === 'text' && msgText) {
       const served = await tryQuickNewCarQuote(msgText, from);
       if (served) {
@@ -1762,7 +1633,7 @@ try {
       }
     }
 
-    // CRM fallback
+    // ---------------- CRM FALLBACK ----------------
     try {
       const crmReply = await fetchCRMReply({ from, msgText });
       if (crmReply) {
@@ -1773,7 +1644,7 @@ try {
       console.warn('CRM reply failed', e && e.message ? e.message : e);
     }
 
-    // default fallback
+    // ---------------- DEFAULT FALLBACK ----------------
     await waSendText(
       from,
       'Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.'
@@ -1795,6 +1666,7 @@ try {
 
 // ---------------- start server ----------------
 app.listen(PORT, () => {
+  console.log("==== MR.CAR BUILD TAG: 2025-11-24-USED-YEAR-V1 ====");
   console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
   console.log('ENV summary:', {
     SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL,
