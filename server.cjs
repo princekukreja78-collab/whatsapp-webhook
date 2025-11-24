@@ -6,7 +6,17 @@
 // - Loan menu: EMI Calculator, Loan Documents, Loan Eligibility.
 // - Central CRM core: /crm/leads (GET), /crm/ingest (POST) for all bots.
 
-require('dotenv').config();
+require('dotenv').config();   
+
+const OpenAI = require("openai");
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY
+});
+
+const { findRelevantChunks } = require("./vector_search.cjs");
+const { getRAG } = require("./rag_loader.cjs");
+
+
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
@@ -679,15 +689,25 @@ const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
 function shouldGreetNow(from, msgText) {
   try {
     if (ADMIN_WA && from === ADMIN_WA) return false;
-    const now = Date.now();
+
+    const now  = Date.now();
     const prev = lastGreeting.get(from) || 0;
+
     const text = (msgText || '').trim().toLowerCase();
+
+    // Strict greeting detection
     const looksLikeGreeting =
-      /^(hi|hello|hey|namaste|enquiry|inquiry|help|start)\b/.test(text) || prev === 0;
+      /^(hi|hello|hey|namaste)\b/.test(text);
+
     if (!looksLikeGreeting) return false;
-    if (now - prev < GREETING_WINDOW_MS) return false;
+
+    // Prevent double greeting for 24 hours per user
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    if (now - prev < ONE_DAY_MS) return false;
+
     lastGreeting.set(from, now);
     return true;
+
   } catch (e) {
     console.warn('shouldGreetNow failed', e);
     return false;
@@ -708,6 +728,207 @@ try {
 } catch (e) {
   if (DEBUG) console.log('crm_helpers.cjs not loaded (ok for dev).');
 }
+
+/* =======================================================================
+   ADDED: Signature GPT & Brochure helpers
+   - callSignatureBrain: safe OpenAI chat call
+   - isAdvisory: heuristic advisory intent detection
+   - loadBrochureIndex/findRelevantBrochures/findPhonesInBrochures: optional
+   ======================================================================= */
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || '';
+const SIGNATURE_MODEL = process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || 'gpt-4o-mini';
+const BROCHURE_INDEX_PATH = process.env.BROCHURE_INDEX_PATH || './brochures/index.json';
+
+function isAdvisory(msgText) {
+  const t = (msgText || '').toLowerCase();
+
+  // quick phrase checks (expanded)
+  const advisoryPhrases = [
+    'which is better', 'which is the better', 'is better', 'better than',
+    'which to buy', 'which to choose', 'which is best', 'compare', 'pros and cons',
+    'pros & cons', 'pros/cons', 'vs ', ' v ', ' vs. ', 'warranty', 'extended warranty',
+    'service cost', 'maintenance', 'rsa', 'roadside', 'helpline', 'features', 'variant',
+    'buy used', 'used vs new', 'which to buy', 'insurance', 'addon', 'coverage',  'ground clearance', 'boot space', 'dimensions', 'mileage', 'power', 'torque',
+  'bhp', 'nm', 'fuel tank', 'wheelbase', 'height', 'width', 'length'
+  ];
+  for (const p of advisoryPhrases) {
+    if (t.includes(p)) return true;
+  }
+
+  // normalize some common typos / alternate spellings for key models we often care about
+  const modelTyposMap = {
+    hycross: ['hcyross','hycros','hycoss','hiycross'],
+    hyryder: ['hyrydar','hyrider','hyrydr','hyrydar'],
+    fortuner: ['fortuner','fotuner','fortuner'],
+    innova: ['innova','innova crysta','innova crysta','innova']
+  };
+
+  // build set of normalized tokens present in the message
+  const toks = t.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const tokSet = new Set(toks);
+
+  // check for 2+ model mentions (simple heuristic)
+  let modelMentions = 0;
+  for (const [canonical, typos] of Object.entries(modelTyposMap)) {
+    if (tokSet.has(canonical)) modelMentions++;
+    else {
+      for (const s of typos) {
+        if (t.includes(s)) { modelMentions++; break; }
+      }
+    }
+  }
+  // also check for common brand words
+  const brands = ['toyota','hyundai','bmw','mercedes','kia','tata','honda','mahindra','audi','skoda'];
+  for (const b of brands) if (t.includes(b)) {
+    // presence of brand + 'compare' or 'is better' likely advisory
+    if (t.includes('compare') || t.includes('is better') || t.includes('vs ')) return true;
+  }
+
+  if (modelMentions >= 2) return true;
+
+  // fallback: short comparative sentences like "is better or" or "better or"
+  if (/\bis\s+better\b/.test(t) || /\bbetter\b.*\bor\b/.test(t)) return true;
+
+  return false;
+}
+
+// brochure index loader (optional — non-fatal)
+function loadBrochureIndex() {
+  try {
+    const p = path.resolve(__dirname, BROCHURE_INDEX_PATH || './brochures/index.json');
+    if (!fs.existsSync(p)) return [];
+    const txt = fs.readFileSync(p, 'utf8') || '[]';
+    const j = JSON.parse(txt);
+    return Array.isArray(j) ? j : [];
+  } catch (e) {
+    if (DEBUG) console.warn('loadBrochureIndex failed', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+function findRelevantBrochures(index, msgText) {
+  try {
+    if (!Array.isArray(index) || !index.length) return [];
+    const q = (msgText || '').toLowerCase();
+    // simple scoring
+    const scored = index.map(b => {
+      const title = (b.title || b.id || '').toString().toLowerCase();
+      const brand = (b.brand || '').toString().toLowerCase();
+      const variants = (b.variants || []).map(v => v.toString().toLowerCase());
+      let score = 0;
+      if (title && q.includes(title)) score += 30;
+      if (brand && q.includes(brand)) score += 25;
+      for (const v of variants) if (v && q.includes(v)) score += 18;
+      // keywords in summary
+      if (b.summary && b.summary.toLowerCase().includes(q)) score += 15;
+      return { b, score };
+    }).filter(x => x.score > 0);
+    scored.sort((a,b) => b.score - a.score);
+    return scored.slice(0,3).map(x => x.b);
+  } catch (e) {
+    if (DEBUG) console.warn('findRelevantBrochures fail', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+const PHONE_RE = /(?:(?:\+?\d{1,3}[\s\-\.])?(?:\(?\d{2,4}\)?[\s\-\.])?\d{3,4}[\s\-\.]\d{3,4})(?:\s*(?:ext|x|ext.)\s*\d{1,5})?/g;
+function extractPhonesFromText(text) {
+  try {
+    if (!text) return [];
+    const found = (String(text).match(PHONE_RE) || []).map(s => s.trim());
+    const norm = found.map(s => s.replace(/[\s\-\.\(\)]+/g, ''));
+    const unique = [];
+    const seen = new Set();
+    for (let i = 0; i < norm.length; i++) {
+      if (!seen.has(norm[i])) {
+        seen.add(norm[i]);
+        unique.push(found[i]);
+      }
+    }
+    return unique;
+  } catch (e) {
+    if (DEBUG) console.warn('extractPhonesFromText fail', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+function findPhonesInBrochures(entries) {
+  const matches = [];
+  try {
+    for (const b of (entries || [])) {
+      const srcId = b.id || b.title || b.url || 'unknown';
+      const candidates = [];
+      if (b.summary) candidates.push(b.summary);
+      if (b.title) candidates.push(b.title);
+      if (b.helpline) candidates.push(String(b.helpline));
+      const joined = candidates.join(' \n ');
+      const phones = extractPhonesFromText(joined);
+      for (const p of phones) {
+        const low = joined.toLowerCase();
+        let label = '';
+        if (low.includes('rsa') || low.includes('roadside')) label = 'RSA helpline';
+        else if (low.includes('service') || low.includes('service center') || low.includes('service helpline')) label = 'Service helpline';
+        else if (low.includes('warranty')) label = 'Warranty helpline';
+        else if (low.includes('customer') || low.includes('care')) label = 'Customer care';
+        else label = 'Helpline';
+        matches.push({ label, phone: p, sourceId: srcId });
+      }
+    }
+    // dedupe
+    const uniq = [];
+    const seen = new Set();
+    for (const m of matches) {
+      const k = (m.phone || '').replace(/[\s\-\.\(\)]+/g, '');
+      if (!seen.has(k)) {
+        seen.add(k);
+        uniq.push(m);
+      }
+    }
+    return uniq;
+  } catch (e) {
+    if (DEBUG) console.warn('findPhonesInBrochures fail', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+// === SIGNATURE BRAIN (REBUILT CLEAN) ===
+async function callSignatureBrain({ from, name, msgText, lastService, ragHits = [] } = {}) {
+  try {
+    const sys = `You are SIGNATURE SAVINGS — a crisp dealership advisory assistant for MR.CAR.
+Answer concisely, with dealership-level accuracy.
+Always end with: "Reply 'Talk to agent' to request a human."`;
+
+    let context = "";
+    if (Array.isArray(ragHits) && ragHits.length > 0) {
+      context = ragHits.map(x => x.text).join("\n\n---\n\n");
+    }
+
+    const promptMessages = [
+      { role: "system", content: sys },
+      { role: "user", content: `User question: ${msgText}\n\nRelevant Data:\n${context}` }
+    ];
+
+    const resp = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: promptMessages,
+      max_tokens: 600,
+      temperature: 0.25
+    });
+
+    return resp?.choices?.[0]?.message?.content || null;
+
+  } catch (err) {
+    console.error("SignatureBrain error:", err?.message || err);
+    return null;
+  }
+}
+// === SIGNATURE BRAIN END ===
+
+
+/* =======================================================================
+   END ADDED: Signature GPT & Brochure helpers
+   ======================================================================= */
 
 // ---------------- tryQuickNewCarQuote ----------------
 async function tryQuickNewCarQuote(msgText, to) {
@@ -1037,24 +1258,51 @@ app.post('/webhook', async (req, res) => {
     const name = (contact?.profile?.name || 'Unknown').toString().toUpperCase();
 
     let msgText = '';
-    let selectedId = null;
+if (type === 'text') msgText = msg.text?.body || '';
 
-    if (type === 'text') {
-      msgText = msg.text?.body || '';
-    } else if (type === 'interactive') {
-      selectedId =
-        msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id || null;
-      msgText =
-        msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '';
-    } else {
-      msgText = JSON.stringify(msg);
+// ---- EXTRACT selectedId (interactive replies) ----
+let selectedId = null;
+try {
+  if (msg.type === "interactive") {
+    const interactive = msg.interactive || {};
+    if (interactive.list_reply && interactive.list_reply.id) {
+      selectedId = interactive.list_reply.id;
     }
-
-    if (DEBUG) console.log('INBOUND', { from, type, sample: (msgText || '').slice(0, 300) });
-
-    if (from !== ADMIN_WA) {
-      sendAdminAlert({ from, name, text: msgText }).catch(() => {});
+    if (interactive.button_reply && interactive.button_reply.id) {
+      selectedId = interactive.button_reply.id;
     }
+  }
+} catch (e) {
+  console.warn("selectedId parse fail:", e);
+}
+
+// ---- RAG EMBEDDING + VECTOR SEARCH BLOCK ----
+let queryEmbedding = null;
+try {
+  if (msgText) {
+    const embedResp = await openai.embeddings.create({
+      model: "text-embedding-3-large",
+      input: msgText
+    });
+    queryEmbedding = embedResp.data?.[0]?.embedding || null;
+  }
+} catch (e) {
+  console.error("Embedding error:", e);
+}
+
+let ragHits = [];
+try {
+  if (queryEmbedding && typeof findRelevantChunks === 'function') {
+    const ragData = await (getRAG ? getRAG() : Promise.resolve(null));
+    if (ragData) {
+      ragHits = findRelevantChunks(queryEmbedding, ragData, 5) || [];
+    }
+  }
+} catch (e) {
+  if (DEBUG) console.warn('RAG search failed', e && e.message ? e.message : e);
+  ragHits = [];
+}
+// ---- END RAG BLOCK ----
 
     // save lead locally + CRM (non-blocking)
     try {
@@ -1194,6 +1442,47 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
+    /* ADDED: Advisory auto-detect - run AFTER greeting and BEFORE pricing/quote logic */
+    if (type === 'text' && msgText && isAdvisory(msgText)) {
+      try {
+        // quick: check brochure index for helplines and send quick phone list
+        const index = loadBrochureIndex();
+        const relevant = findRelevantBrochures(index, msgText);
+        const phones = findPhonesInBrochures(relevant);
+        if (phones && phones.length) {
+          const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
+          await waSendText(from, `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`);
+        }
+
+        // call the Signature brain
+        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
+        if (sigReply) {
+          await waSendText(from, sigReply);
+          // log to CRM with advisory tag
+          try {
+            await postLeadToCRM({
+              bot: 'SIGNATURE_ADVISORY',
+              channel: 'whatsapp',
+              from,
+              name,
+              lastMessage: msgText,
+              service: 'ADVISORY',
+              tags: ['SIGNATURE_ADVISORY'],
+              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
+              createdAt: Date.now()
+            });
+          } catch (e) {
+            if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
+          }
+          return res.sendStatus(200);
+        }
+      } catch (e) {
+        if (DEBUG) console.warn('Advisory flow failed', e && e.message ? e.message : e);
+        // fallthrough to normal flows
+      }
+    }
+    /* END ADDED: Advisory auto-detect */
+
     // bullet command
     const bulletCmd = (msgText || '').trim().match(/^bullet\s+([\d,]+)\s*([\d\.]+)?\s*(\d+)?/i);
     if (bulletCmd) {
@@ -1271,7 +1560,7 @@ app.post('/webhook', async (req, res) => {
       await waSendText(from, lines.join('\n'));
       return res.sendStatus(200);
     }
-
+	
     // numeric reply after used-car list (safe behaviour)
     if (type === 'text' && msgText) {
       const trimmed = msgText.trim();
@@ -1284,6 +1573,74 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
     }
+
+    /* ADDED: Advisory logging + Signature GPT handler */
+    if (type === 'text' && msgText && isAdvisory(msgText)) {
+      try {
+        // ---- (A) Log advisory query locally ----
+        try {
+          const logPath = path.resolve(__dirname, '.crm_data', 'advisory_queries.json');
+          const dir = path.dirname(logPath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+          const existing = fs.existsSync(logPath)
+            ? JSON.parse(fs.readFileSync(logPath, 'utf8') || '[]')
+            : [];
+
+          existing.unshift({
+            ts: Date.now(),
+            from,
+            name,
+            text: msgText.slice(0, 1000)
+          });
+
+          fs.writeFileSync(logPath, JSON.stringify(existing.slice(0, 5000), null, 2), 'utf8');
+          if (DEBUG) console.log(`🧠 ADVISORY LOGGED: ${from} -> ${msgText.slice(0,60)}`);
+        } catch (e) {
+          if (DEBUG) console.warn('advisory log failed', e && e.message ? e.message : e);
+        }
+
+        // ---- (B) quick helplines from brochure index if present ----
+        try {
+          const index = loadBrochureIndex();
+          const relevant = findRelevantBrochures(index, msgText);
+          const phones = findPhonesInBrochures(relevant);
+          if (phones && phones.length) {
+            const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
+            await waSendText(from, `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`);
+          }
+        } catch (e) {
+          if (DEBUG) console.warn('advisory quick-phones failed', e && e.message ? e.message : e);
+        }
+
+        // ---- (C) Call Signature GPT ----
+        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from) });
+        if (sigReply) {
+          await waSendText(from, sigReply);
+          // Log to CRM with advisory tag (non-blocking)
+          try {
+            await postLeadToCRM({
+              bot: 'SIGNATURE_ADVISORY',
+              channel: 'whatsapp',
+              from,
+              name,
+              lastMessage: msgText,
+              service: 'ADVISORY',
+              tags: ['SIGNATURE_ADVISORY'],
+              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
+              createdAt: Date.now()
+            });
+          } catch (e) {
+            if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
+          }
+          return res.sendStatus(200);
+        }
+      } catch (e) {
+        if (DEBUG) console.warn('Advisory handler error', e && e.message ? e.message : e);
+        // allow flow to continue to normal handlers if GPT failed
+      }
+    }
+    /* END ADDED: Advisory logging + Signature GPT handler */
 
     // USED CAR detection
     if (type === 'text' && msgText) {
