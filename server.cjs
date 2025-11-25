@@ -957,44 +957,61 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
 // helper: when user says only "Innova / Hycross / Fortuner / Creta" → show variant list
 async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, to }) {
   if (!tables) return false;
-
   const lowerRaw = (raw || '').toLowerCase().trim();
   if (!lowerRaw) return false;
 
-  const modelKeywords = ['innova','hycross','fortuner','hyryder','glanza','camry','rumion','creta','i20','verna','venue','x1','a6','seltos'];
+  // tokens & quick heuristics
   const tokens = lowerRaw.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0 || tokens.length > 4) return false;
+  const genericWords = new Set([
+    'used', 'preowned', 'pre-owned', 'pre', 'owned', 'second', 'secondhand', 'second-hand',
+    'car', 'cars', 'individual', 'company', 'corporate', 'firm', 'personal'
+  ]);
+  const cityWords = new Set(['delhi','dilli','haryana','hr','chandigarh','chd','up','uttar','pradesh','himachal','hp','mumbai','bangalore','bengaluru','bangalore','chennai']);
+  const hasNumberOrDigit = /\d/.test(lowerRaw);
 
-  // detect base model token from input (fallback to first token)
+  // If user included city/profile/numbers or multiple meaningful tokens -> DO NOT show the generic variant list.
+  const nonGeneric = tokens.filter(t => !genericWords.has(t) && !cityWords.has(t));
+  if (hasNumberOrDigit || nonGeneric.length > 1) {
+    // This looks like a specific request (model + suffix/year/profile/budget) — let main flow handle it.
+    return false;
+  }
+
+  // Accept only very short/generic queries for variant list: 1 token (e.g., "innova", "creta") or possibly brand+model
+  if (tokens.length > 2) return false;
+
+  const modelKeywords = ['innova','hycross','fortuner','hyryder','glanza','camry','rumion','creta','i20','verna','venue','x1','a6','seltos'];
   let baseModelToken = null;
   for (const kw of modelKeywords) {
     if (lowerRaw.includes(kw)) { baseModelToken = kw; break; }
   }
-  if (!baseModelToken) baseModelToken = tokens[0];
+  // if no standard keyword found, but user gave two tokens like "Hyundai Creta" -- allow that
+  if (!baseModelToken && tokens.length === 2) {
+    baseModelToken = tokens[tokens.length - 1]; // treat last token as model
+  }
+  if (!baseModelToken) {
+    // not something we can confidently show variants for
+    return false;
+  }
 
   const cityToken = (city || 'delhi').split(' ')[0].toUpperCase();
   const variants = [];
 
-  // helper moved here and used below
+  // helper to find price column
   function findPriceColumnForCity(idxMap, cityToken, row) {
     const keys = Object.keys(idxMap || {});
     const cityLower = String(cityToken || '').toLowerCase();
-
-    // 1) exact 'on road' + city substring
     for (const k of keys) {
       const kl = k.toLowerCase();
       if ((kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad')) && kl.includes(cityLower)) {
         return idxMap[k];
       }
     }
-    // 2) header contains city name (looser) with 'on' or 'road' or 'price'
     for (const k of keys) {
       const kl = k.toLowerCase();
       if (kl.includes(cityLower) && (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
         return idxMap[k];
       }
     }
-    // 3) header contains state/city common abbreviations
     for (const k of keys) {
       const kl = k.toLowerCase();
       if ((kl.includes('chd') || kl.includes('chandigarh') || kl.includes('up') || kl.includes('delhi') || kl.includes('dl') || kl.includes('hr')) &&
@@ -1002,14 +1019,12 @@ async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, 
         return idxMap[k];
       }
     }
-    // 4) any header that looks like price/on-road or ex-showroom
     for (const k of keys) {
       const kl = k.toLowerCase();
       if (kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad') || kl.includes('price') || kl.includes('ex-showroom') || kl.includes('ex showroom')) {
         return idxMap[k];
       }
     }
-    // 5) fallback: first numeric column in row
     for (let i = 0; i < (row || []).length; i++) {
       const v = String(row[i] || '').replace(/[,₹\s]/g, '');
       if (v && /^\d+$/.test(v)) return i;
@@ -1017,6 +1032,7 @@ async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, 
     return -1;
   }
 
+  // collect variants
   for (const [brand, tab] of Object.entries(tables)) {
     if (!tab || !tab.data) continue;
     const header = tab.header.map(h => String(h || '').toUpperCase());
@@ -1025,19 +1041,17 @@ async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, 
     const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
     if (idxModel < 0 || idxVariant < 0) continue;
 
-    // OPTIONAL: debug header keys
     if (DEBUG) console.log(`Variant-search header keys for ${brand}:`, Object.keys(idxMap).slice(0,20));
 
     for (const row of tab.data) {
       const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
       if (!modelCell) continue;
-      // loosen matching: model contains base token OR base token contains model short
-      if (!(modelCell.includes(baseModelToken) || baseModelToken.includes(modelCell) || modelCell.includes(tokens[0]))) continue;
+      // only pick rows where model strongly matches base token (avoid partial/generic matches)
+      if (!modelCell.includes(baseModelToken)) continue;
 
       const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toUpperCase() : '';
       if (!variantCell) continue;
 
-      // use the helper to find proper price column for this row/header
       const priceIdx = findPriceColumnForCity(idxMap, cityToken, row);
       const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
       const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
@@ -1056,15 +1070,13 @@ async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, 
 
   if (!variants.length) return false;
 
-  // dedupe by variant string (brand+model+variant)
+  // dedupe & sort
   const seen = new Set();
   const uniq = [];
   for (const v of variants) {
     const k = `${v.brand}||${v.model}||${v.variant}`;
     if (!seen.has(k)) { seen.add(k); uniq.push(v); }
   }
-
-  // sort by price asc
   uniq.sort((a,b) => (a.exShow || a.onroad || 0) - (b.exShow || b.onroad || 0));
 
   const titleModel = baseModelToken.toUpperCase();
