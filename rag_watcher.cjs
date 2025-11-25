@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { processPDF } = require("./rag_process");
+const ragProcess = require('./rag_process.cjs');
 
 const uploadsDir = path.join(__dirname, ".rag_uploads");
 const dataDir = path.join(__dirname, ".rag_data");
