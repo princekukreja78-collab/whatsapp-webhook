@@ -6,7 +6,7 @@
 // - Loan menu: EMI Calculator, Loan Documents, Loan Eligibility.
 // - Central CRM core: /crm/leads (GET), /crm/ingest (POST) for all bots.
 
-require('dotenv').config();   
+require('dotenv').config();
 
 const OpenAI = require("openai");
 const openai = new OpenAI({
@@ -51,8 +51,8 @@ const NEW_CAR_ROI             = Number(process.env.NEW_CAR_ROI || 8.10);
 const USED_CAR_ROI_VISIBLE    = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL   = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
 
-// NOTE: hard-wired to true so you see logs; you can change to || false to reduce noise.
-const DEBUG = (process.env.DEBUG_VARIANT === 'true') || true;
+// keep DEBUG false by default unless env enables it explicitly
+const DEBUG = (process.env.DEBUG_VARIANT === 'true') || false;
 
 // ---------------- file helpers ----------------
 function safeJsonRead(filename) {
@@ -574,7 +574,7 @@ async function buildUsedCarQuoteFreeText({ query }) {
         const subDisp   = subModelIdx >= 0 && row[subModelIdx]
           ? row[subModelIdx].toString().toUpperCase()
           : '';
-        const yearDispB  = yearIdx >= 0 && row[yearIdx] ? String(row[yearIdx]) : '';
+        const yearDisp  = yearIdx >= 0 && row[yearIdx] ? String(row[yearIdx]) : '';
         const regPlace  = regIdx >= 0 && row[regIdx] ? String(row[regIdx]) : '';
 
         let expectedVal = 0;
@@ -587,7 +587,7 @@ async function buildUsedCarQuoteFreeText({ query }) {
         if (makeDisp)  titleParts.push(makeDisp);
         if (modelDisp) titleParts.push(modelDisp);
         if (subDisp)   titleParts.push(subDisp);
-        if (yearDispB) titleParts.push(yearDispB);
+        if (yearDisp)  titleParts.push(yearDisp);
         const title = titleParts.join(' ');
 
         let line = `${i + 1}) *${title}*`;
@@ -609,8 +609,8 @@ async function buildUsedCarQuoteFreeText({ query }) {
   const model = (selRow[modelIdx] || '').toString().toUpperCase();
   const sub   = subModelIdx >= 0 && selRow[subModelIdx] ? selRow[subModelIdx].toString().toUpperCase() : '';
   const colour = colourIdx >= 0 && selRow[colourIdx] ? selRow[colourIdx].toString().toUpperCase() : '';
+  const year   = yearIdx >= 0 && selRow[yearIdx] ? String(selRow[yearIdx]) : '';
   const regPlace = regIdx >= 0 && selRow[regIdx] ? String(selRow[regIdx]) : '';
-  const yearDisp  = yearIdx >= 0 && selRow[yearIdx] ? String(selRow[yearIdx]) : '';
 
   const expectedStr = expectedIdx >= 0 ? String(selRow[expectedIdx] || '') : '';
   let expected = Number(expectedStr.replace(/[,₹\s]/g, '')) || 0;
@@ -650,18 +650,15 @@ async function buildUsedCarQuoteFreeText({ query }) {
         picLink = s.trim();
         break;
       }
-    } 
+    }
   }
 
   const lines = [];
   lines.push('*PRE-OWNED CAR QUOTE*');
   lines.push(`Make/Model: *${make} ${model}${sub ? ' - ' + sub : ''}*`);
-
-  // ✅ FIX: show manufacturing year in quote
-  if (yearDisp)  lines.push(`Manufacturing Year: ${yearDisp}`);
-  if (colour)    lines.push(`Colour: ${colour}`);
-  if (regPlace)  lines.push(`Registration Place: ${regPlace}`);
-
+  if (year)     lines.push(`Manufacturing Year: ${year}`);
+  if (colour)   lines.push(`Colour: ${colour}`);
+  if (regPlace) lines.push(`Registration Place: ${regPlace}`);
   lines.push('');
   lines.push(`Expected Price: ₹ *${fmtMoney(expected)}*`);
   lines.push(`Loan up to *${LTV_PCT}% LTV*: ₹ *${fmtMoney(loanAmt)}*`);
@@ -694,25 +691,15 @@ const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
 function shouldGreetNow(from, msgText) {
   try {
     if (ADMIN_WA && from === ADMIN_WA) return false;
-
-    const now  = Date.now();
+    const now = Date.now();
     const prev = lastGreeting.get(from) || 0;
-
     const text = (msgText || '').trim().toLowerCase();
-
-    // Strict greeting detection
     const looksLikeGreeting =
-      /^(hi|hello|hey|namaste)\b/.test(text);
-
+      /^(hi|hello|hey|namaste|enquiry|inquiry|help|start)\b/.test(text) || prev === 0;
     if (!looksLikeGreeting) return false;
-
-    // Prevent double greeting for 24 hours per user
-    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-    if (now - prev < ONE_DAY_MS) return false;
-
+    if (now - prev < GREETING_WINDOW_MS) return false;
     lastGreeting.set(from, now);
     return true;
-
   } catch (e) {
     console.warn('shouldGreetNow failed', e);
     return false;
@@ -735,68 +722,58 @@ try {
 }
 
 /* =======================================================================
-   ADDED: Signature GPT & Brochure helpers
-   - callSignatureBrain: safe OpenAI chat call
-   - isAdvisory: heuristic advisory intent detection
-   - loadBrochureIndex/findRelevantBrochures/findPhonesInBrochures: optional
+   Signature GPT & Brochure helpers
    ======================================================================= */
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || '';
 const SIGNATURE_MODEL = process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || 'gpt-4o-mini';
 const BROCHURE_INDEX_PATH = process.env.BROCHURE_INDEX_PATH || './brochures/index.json';
 
+// advisory intent detector
 function isAdvisory(msgText) {
   const t = (msgText || '').toLowerCase();
+  if (!t) return false;
 
   const advisoryPhrases = [
-    'which is better','better than','which to buy','which to choose','compare','pros and cons',
-    'pros & cons','vs ',' v ','features','variant','warranty','extended warranty','service cost',
-    'maintenance','rsa','roadside','helpline','insurance','addon','coverage','ground clearance',
-    'boot space','dimensions','mileage','power','torque','bhp','nm','fuel tank','wheelbase',
-    'height','width','length'
+    'which is better',
+    'better than',
+    'which to buy',
+    'which to choose',
+    'compare',
+    'comparison',
+    'pros and cons',
+    'pros & cons',
+    'features',
+    'feature wise',
+    'variant wise',
+    'warranty',
+    'extended warranty',
+    'service cost',
+    'maintenance',
+    'ground clearance',
+    'boot space',
+    'dimensions',
+    'mileage',
+    'average',
+    'kitna deti',
+    'bhp',
+    'torque',
+    'safety rating',
+    'global ncap'
   ];
 
   for (const p of advisoryPhrases) {
     if (t.includes(p)) return true;
   }
 
-  const modelTyposMap = {
-    hycross: ['hcyross','hycros','hycoss','hiycross'],
-    hyryder: ['hyrydar','hyrider','hyrydr','hyrydar'],
-    fortuner: ['fortuner','fotuner','forttuner'],
-    innova: ['innova','innova crysta','crysta innova']
-  };
-
-  const toks = t.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
-  const tokSet = new Set(toks);
-
-  let modelMentions = 0;
-  for (const [canonical, typos] of Object.entries(modelTyposMap)) {
-    if (tokSet.has(canonical)) modelMentions++;
-    else {
-      for (const s of typos) {
-        if (t.includes(s)) { modelMentions++; break; }
-      }
-    }
-  }
-  if (modelMentions >= 2) return true;
-
-  const brands = ['toyota','hyundai','bmw','mercedes','kia','tata','honda','mahindra','audi','skoda'];
-  for (const b of brands) {
-    if (t.includes(b)) {
-      if (t.includes('compare') || t.includes('is better') || t.includes('vs ')) return true;
-    }
-  }
-
-  if (/\bis\s+better\b/.test(t) || /\bbetter\b.*\bor\b/.test(t)) return true;
+  // simple "A vs B" detector
+  if (t.includes(' vs ') || t.includes(' v/s ') || /\bvs\b/.test(t)) return true;
 
   return false;
 }
 
-// brochure index loader (optional — non-fatal)
+// brochure index loader
 function loadBrochureIndex() {
   try {
-    const p = path.resolve(__dirname, BROCHURE_INDEX_PATH || './brochures/index.json');
+    const p = path.resolve(__dirname, BROCHURE_INDEX_PATH);
     if (!fs.existsSync(p)) return [];
     const txt = fs.readFileSync(p, 'utf8') || '[]';
     const j = JSON.parse(txt);
@@ -811,7 +788,6 @@ function findRelevantBrochures(index, msgText) {
   try {
     if (!Array.isArray(index) || !index.length) return [];
     const q = (msgText || '').toLowerCase();
-    // simple scoring
     const scored = index.map(b => {
       const title = (b.title || b.id || '').toString().toLowerCase();
       const brand = (b.brand || '').toString().toLowerCase();
@@ -820,12 +796,11 @@ function findRelevantBrochures(index, msgText) {
       if (title && q.includes(title)) score += 30;
       if (brand && q.includes(brand)) score += 25;
       for (const v of variants) if (v && q.includes(v)) score += 18;
-      // keywords in summary
       if (b.summary && b.summary.toLowerCase().includes(q)) score += 15;
       return { b, score };
     }).filter(x => x.score > 0);
-    scored.sort((a,b) => b.score - a.score);
-    return scored.slice(0,3).map(x => x.b);
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 3).map(x => x.b);
   } catch (e) {
     if (DEBUG) console.warn('findRelevantBrochures fail', e && e.message ? e.message : e);
     return [];
@@ -833,6 +808,7 @@ function findRelevantBrochures(index, msgText) {
 }
 
 const PHONE_RE = /(?:(?:\+?\d{1,3}[\s\-\.])?(?:\(?\d{2,4}\)?[\s\-\.])?\d{3,4}[\s\-\.]\d{3,4})(?:\s*(?:ext|x|ext.)\s*\d{1,5})?/g;
+
 function extractPhonesFromText(text) {
   try {
     if (!text) return [];
@@ -868,14 +844,13 @@ function findPhonesInBrochures(entries) {
         const low = joined.toLowerCase();
         let label = '';
         if (low.includes('rsa') || low.includes('roadside')) label = 'RSA helpline';
-        else if (low.includes('service') || low.includes('service center') || low.includes('service helpline')) label = 'Service helpline';
+        else if (low.includes('service')) label = 'Service helpline';
         else if (low.includes('warranty')) label = 'Warranty helpline';
         else if (low.includes('customer') || low.includes('care')) label = 'Customer care';
         else label = 'Helpline';
         matches.push({ label, phone: p, sourceId: srcId });
       }
     }
-    // dedupe
     const uniq = [];
     const seen = new Set();
     for (const m of matches) {
@@ -887,14 +862,16 @@ function findPhonesInBrochures(entries) {
     }
     return uniq;
   } catch (e) {
-    if (DEBUG) console.warn('findPhonesFromBrochures fail', e && e.message ? e.message : e);
+    if (DEBUG) console.warn('findPhonesInBrochures fail', e && e.message ? e.message : e);
     return [];
   }
 }
 
-// === SIGNATURE BRAIN (REBUILT CLEAN) ===
+// Signature Brain wrapper
 async function callSignatureBrain({ from, name, msgText, lastService, ragHits = [] } = {}) {
   try {
+    if (!msgText) return null;
+
     const sys = `You are SIGNATURE SAVINGS — a crisp dealership advisory assistant for MR.CAR.
 Answer concisely, with dealership-level accuracy.
 Always end with: "Reply 'Talk to agent' to request a human."`;
@@ -910,7 +887,7 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
     ];
 
     const resp = await openai.chat.completions.create({
-      model: SIGNATURE_MODEL || "gpt-4o-mini",
+      model: SIGNATURE_MODEL,
       messages: promptMessages,
       max_tokens: 600,
       temperature: 0.25
@@ -923,15 +900,10 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
     return null;
   }
 }
-// === SIGNATURE BRAIN END ===
-
-/* =======================================================================
-   END ADDED: Signature GPT & Brochure helpers
-   ======================================================================= */
 
 // ---------------- tryQuickNewCarQuote ----------------
 async function tryQuickNewCarQuote(msgText, to) {
-  try { 
+  try {
     if (!msgText || !msgText.trim()) return false;
 
     if (!canSendQuote(to)) {
@@ -944,7 +916,7 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     const tables = await loadPricingFromSheets();
     if (!tables || Object.keys(tables).length === 0) return false;
-        
+
     const t = String(msgText || '').toLowerCase();
     const tUpper = t.toUpperCase();
 
@@ -1126,7 +1098,7 @@ async function tryQuickNewCarQuote(msgText, to) {
     return false;
   }
 }
-            
+
 // ---------------- webhook verify & health ----------------
 app.get('/healthz', (req, res) => {
   res.json({ ok: true, t: Date.now(), debug: DEBUG });
@@ -1183,10 +1155,10 @@ app.post('/crm/ingest', async (req, res) => {
 app.post('/admin/reset_greetings', (req, res) => {
   try {
     lastGreeting.clear();
+    res.json({ ok: true, message: 'Greeting counters reset' });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
   }
-  res.json({ ok: true, message: 'Greeting counters reset' });
 });
 
 // ---------- ADMIN TEST ALERT ----------
@@ -1256,23 +1228,32 @@ app.post('/webhook', async (req, res) => {
     const type = msg.type;
     const name = (contact?.profile?.name || 'Unknown').toString().toUpperCase();
 
+    // Extract selectedId (buttons/list) and msgText depending on incoming message type
     let msgText = '';
-    if (type === 'text') msgText = msg.text?.body || '';
-
-    // ---- EXTRACT selectedId (interactive replies) ----
     let selectedId = null;
+
     try {
-      if (msg.type === "interactive") {
-        const interactive = msg.interactive || {};
-        if (interactive.list_reply && interactive.list_reply.id) {
-          selectedId = interactive.list_reply.id;
+      if (type === 'text' && msg.text && typeof msg.text.body === 'string') {
+        msgText = String(msg.text.body || '').trim();
+      } else if (type === 'interactive' && msg.interactive) {
+        const inter = msg.interactive;
+        if (inter.type === 'button_reply' && inter.button_reply) {
+          selectedId = inter.button_reply.id || inter.button_reply.title || null;
+          msgText = inter.button_reply.title || '';
+        } else if (inter.type === 'list_reply' && inter.list_reply) {
+          selectedId = inter.list_reply.id || inter.list_reply.title || null;
+          msgText = inter.list_reply.title || '';
+        } else {
+          msgText = (inter.body || inter.header || '') || '';
         }
-        if (interactive.button_reply && interactive.button_reply.id) {
-          selectedId = interactive.button_reply.id;
-        }
+      } else if (type === 'image' || type === 'document' || type === 'video' || type === 'audio') {
+        msgText = (msg?.image?.caption || msg?.document?.caption || msg?.video?.caption || '') || '';
+      } else {
+        msgText = '';
       }
     } catch (e) {
-      console.warn("selectedId parse fail:", e);
+      if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
+      msgText = '';
     }
 
     // ---- RAG EMBEDDING + VECTOR SEARCH BLOCK ----
@@ -1332,7 +1313,7 @@ app.post('/webhook', async (req, res) => {
       console.warn('lead save failed', e && e.message ? e.message : e);
     }
 
-    // ---------------- INTERACTIVE LIST / BUTTON HANDLER ----------------
+    // interactive choices
     if (selectedId) {
       switch (selectedId) {
         case 'SRV_NEW_CAR':
@@ -1431,7 +1412,7 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ---------------- GREETING HANDLER ----------------
+    // Greeting first – ONLY service menu (no quick buttons now)
     if (shouldGreetNow(from, msgText)) {
       await waSendText(
         from,
@@ -1441,7 +1422,7 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ---------------- COMMANDS: BULLET / EMI ----------------
+    // bullet command
     const bulletCmd = (msgText || '').trim().match(/^bullet\s+([\d,]+)\s*([\d\.]+)?\s*(\d+)?/i);
     if (bulletCmd) {
       const loanRaw = String(bulletCmd[1] || '').replace(/[,₹\s]/g, '');
@@ -1480,20 +1461,12 @@ app.post('/webhook', async (req, res) => {
       lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*');
       await waSendText(from, lines.join('\n'));
       try {
-        postLeadToCRM({
-          bot: 'MR_CAR_AUTO',
-          channel: 'whatsapp',
-          from,
-          name,
-          lastMessage: `BULLET_CALC ${loanAmt} ${months}`,
-          service: 'LOAN',
-          tags: ['BULLET_EMI'],
-          meta: {}
-        });
+        postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `BULLET_CALC ${loanAmt} ${months}`, service: 'LOAN', tags: ['BULLET_EMI'], meta: {} });
       } catch (_) {}
       return res.sendStatus(200);
     }
 
+    // emi command
     const emiCmd = (msgText || '').trim().match(/^emi\s+([\d,]+)(?:\s+([\d\.]+)%?)?\s*(\d+)?/i);
     if (emiCmd) {
       const loanRaw = String(emiCmd[1] || '').replace(/[,₹\s]/g, '');
@@ -1507,8 +1480,8 @@ app.post('/webhook', async (req, res) => {
         );
         return res.sendStatus(200);
       }
-      const monthly  = calcEmiSimple(loanAmt, rate, months);
-      const total    = monthly * months;
+      const monthly = calcEmiSimple(loanAmt, rate, months);
+      const total   = monthly * months;
       const interest = total - loanAmt;
       const lines = [
         '🔸 EMI Calculation',
@@ -1527,7 +1500,7 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ---------------- NUMERIC REPLY AFTER USED LIST ----------------
+    // numeric reply after used-car list (safe behaviour)
     if (type === 'text' && msgText) {
       const trimmed = msgText.trim();
       const lastSvc = getLastService(from);
@@ -1540,59 +1513,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // ---------------- ADVISORY FLOW (SIGNATURE BRAIN + BROCHURES) ----------------
-    if (type === 'text' && msgText && isAdvisory(msgText)) {
-      try {
-        // (A) Quick helplines from brochure index if present
-        const index = loadBrochureIndex();
-        const relevant = findRelevantBrochures(index, msgText);
-        const phones = findPhonesInBrochures(relevant);
-        if (phones && phones.length) {
-          const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0, 5);
-          await waSendText(
-            from,
-            `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`
-          );
-        }
-
-        // (B) Call Signature GPT (with RAG context if any)
-        const sigReply = await callSignatureBrain({
-          from,
-          name,
-          msgText,
-          lastService: getLastService(from),
-          ragHits
-        });
-
-        if (sigReply) {
-          await waSendText(from, sigReply);
-
-          // Log to CRM with advisory tag (non-blocking)
-          try {
-            await postLeadToCRM({
-              bot: 'SIGNATURE_ADVISORY',
-              channel: 'whatsapp',
-              from,
-              name,
-              lastMessage: msgText,
-              service: 'ADVISORY',
-              tags: ['SIGNATURE_ADVISORY'],
-              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0, 300) },
-              createdAt: Date.now()
-            });
-          } catch (e) {
-            if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
-          }
-
-          return res.sendStatus(200);
-        }
-      } catch (e) {
-        if (DEBUG) console.warn('Advisory handler error', e && e.message ? e.message : e);
-        // fall through to normal flows on failure
-      }
-    }
-
-    // ---------------- USED CAR FLOW ----------------
+    // USED CAR detection
     if (type === 'text' && msgText) {
       const textLower = msgText.toLowerCase();
       const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
@@ -1610,30 +1531,80 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // ---------------- RAG-ASSISTED ADVISORY FALLBACK ----------------
-    if (type === 'text' && msgText && ragHits.length > 0) {
-      const sig = await callSignatureBrain({
-        from,
-        name,
-        msgText,
-        lastService: getLastService(from),
-        ragHits
-      });
-      if (sig) {
-        await waSendText(from, sig);
-        return res.sendStatus(200);
-      }
-    }
-
-    // ---------------- NEW CAR QUICK QUOTE ----------------
-    if (type === 'text' && msgText) {
+    // NEW CAR quick quote (only if NOT advisory-style)
+    if (type === 'text' && msgText && !isAdvisory(msgText)) {
       const served = await tryQuickNewCarQuote(msgText, from);
       if (served) {
         return res.sendStatus(200);
       }
     }
 
-    // ---------------- CRM FALLBACK ----------------
+    // Advisory handler (Signature GPT + brochures) — AFTER pricing
+    if (type === 'text' && msgText && isAdvisory(msgText)) {
+      try {
+        // Log advisory queries locally
+        try {
+          const logPath = path.resolve(__dirname, '.crm_data', 'advisory_queries.json');
+          const dir = path.dirname(logPath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+          const existing = fs.existsSync(logPath)
+            ? JSON.parse(fs.readFileSync(logPath, 'utf8') || '[]')
+            : [];
+
+          existing.unshift({
+            ts: Date.now(),
+            from,
+            name,
+            text: msgText.slice(0, 1000)
+          });
+
+          fs.writeFileSync(logPath, JSON.stringify(existing.slice(0, 5000), null, 2), 'utf8');
+          if (DEBUG) console.log(`🧠 ADVISORY LOGGED: ${from} -> ${msgText.slice(0,60)}`);
+        } catch (e) {
+          if (DEBUG) console.warn('advisory log failed', e && e.message ? e.message : e);
+        }
+
+        // quick helplines from brochure index
+        try {
+          const index = loadBrochureIndex();
+          const relevant = findRelevantBrochures(index, msgText);
+          const phones = findPhonesInBrochures(relevant);
+          if (phones && phones.length) {
+            const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
+            await waSendText(from, `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`);
+          }
+        } catch (e) {
+          if (DEBUG) console.warn('advisory quick-phones failed', e && e.message ? e.message : e);
+        }
+
+        // Call Signature GPT
+        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
+        if (sigReply) {
+          await waSendText(from, sigReply);
+          try {
+            await postLeadToCRM({
+              bot: 'SIGNATURE_ADVISORY',
+              channel: 'whatsapp',
+              from,
+              name,
+              lastMessage: msgText,
+              service: 'ADVISORY',
+              tags: ['SIGNATURE_ADVISORY'],
+              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
+              createdAt: Date.now()
+            });
+          } catch (e) {
+            if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
+          }
+          return res.sendStatus(200);
+        }
+      } catch (e) {
+        if (DEBUG) console.warn('Advisory handler error', e && e.message ? e.message : e);
+      }
+    }
+
+    // CRM fallback
     try {
       const crmReply = await fetchCRMReply({ from, msgText });
       if (crmReply) {
@@ -1644,7 +1615,7 @@ app.post('/webhook', async (req, res) => {
       console.warn('CRM reply failed', e && e.message ? e.message : e);
     }
 
-    // ---------------- DEFAULT FALLBACK ----------------
+    // default fallback
     await waSendText(
       from,
       'Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.'
@@ -1666,7 +1637,7 @@ app.post('/webhook', async (req, res) => {
 
 // ---------------- start server ----------------
 app.listen(PORT, () => {
-  console.log("==== MR.CAR BUILD TAG: 2025-11-24-USED-YEAR-V1 ====");
+  console.log('==== MR.CAR BUILD TAG: 2025-11-25-NEWCAR-ADVISORY-FIX ====');
   console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
   console.log('ENV summary:', {
     SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL,
