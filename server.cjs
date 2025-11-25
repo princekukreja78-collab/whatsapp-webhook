@@ -955,95 +955,129 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
 
 // ---------------- tryQuickNewCarQuote ----------------
 
-// helper: when user says only "Innova / Hycross / Fortuner" → show variant list instead of single pick
+// helper: when user says only "Innova / Hycross / Fortuner / Creta" → show variant list
 async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, to }) {
-  if (!brandGuess || !tables || !tables[brandGuess]) return false;
+  if (!tables) return false;
 
-  const lowerRaw = raw.toLowerCase();
-  const modelKeywords = ['innova', 'hycross', 'fortuner', 'hyryder', 'glanza', 'camry', 'rumion'];
+  const lowerRaw = (raw || '').toLowerCase().trim();
+  if (!lowerRaw) return false;
+
+  const modelKeywords = ['innova','hycross','fortuner','hyryder','glanza','camry','rumion','creta','i20','verna','venue','x1','a6','seltos'];
   const tokens = lowerRaw.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 4) return false;
 
-  if (tokens.length === 0 || tokens.length > 3) return false;
-
+  // detect base model token from input (fallback to first token)
   let baseModelToken = null;
   for (const kw of modelKeywords) {
-    if (lowerRaw.includes(kw)) {
-      baseModelToken = kw;
-      break;
-    }
+    if (lowerRaw.includes(kw)) { baseModelToken = kw; break; }
   }
-  if (!baseModelToken) return false;
+  if (!baseModelToken) baseModelToken = tokens[0];
 
-  const tab = tables[brandGuess];
-  const header = tab.header.map(h => String(h || '').toUpperCase());
-  const idxMap = tab.idxMap || toHeaderIndexMap(header);
-  const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
-  const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
-  if (idxModel < 0 || idxVariant < 0) return false;
-
+  const cityToken = (city || 'delhi').split(' ')[0].toUpperCase();
   const variants = [];
 
-  const cityToken = city.split(' ')[0].toUpperCase();
-  for (const row of tab.data) {
-    const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
-    if (!modelCell.includes(baseModelToken)) continue;
+  for (const [brand, tab] of Object.entries(tables)) {
+    if (!tab || !tab.data) continue;
+    const header = tab.header.map(h => String(h || '').toUpperCase());
+    const idxMap = tab.idxMap || toHeaderIndexMap(header);
+    const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+    const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+    if (idxModel < 0 || idxVariant < 0) continue;
 
-    const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toUpperCase() : '';
-    if (!variantCell) continue;
+    // OPTIONAL: debug header keys
+    if (DEBUG) console.log(`Variant-search header keys for ${brand}:`, Object.keys(idxMap).slice(0,20));
 
-    // pick on-road
-    let priceIdx = -1;
-    for (const k of Object.keys(idxMap)) {
-      if (k.includes('ON ROAD') && k.includes(cityToken)) {
-        priceIdx = idxMap[k];
-        break;
-      }
+    for (const row of tab.data) {
+      const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
+      if (!modelCell) continue;
+      // loosen matching: model contains base token OR base token contains model short
+      if (!(modelCell.includes(baseModelToken) || baseModelToken.includes(modelCell) || modelCell.includes(tokens[0]))) continue;
+
+      const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toUpperCase() : '';
+      if (!variantCell) continue;
+
+      // Robust price column detection (cityToken is uppercase short city)
+function findPriceColumnForCity(idxMap, cityToken, row) {
+  const keys = Object.keys(idxMap || {});
+  const cityLower = String(cityToken || '').toLowerCase();
+
+  // 1) exact 'on road' + city substring
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if ((kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad')) && kl.includes(cityLower)) {
+      return idxMap[k];
     }
-    if (priceIdx < 0) {
-      for (let i = 0; i < row.length; i++) {
-        const v = String(row[i] || '').replace(/[,₹\s]/g, '');
-        if (v && /^\d+$/.test(v)) {
-          priceIdx = i;
-          break;
-        }
-      }
+  }
+  // 2) header contains city name (looser) with 'on' or 'road' or 'price'
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if (kl.includes(cityLower) && (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
+      return idxMap[k];
     }
-    const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
-    const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
+  }
+  // 3) header contains state/city common abbreviations
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if ((kl.includes('chd') || kl.includes('chandigarh') || kl.includes('up') || kl.includes('delhi') || kl.includes('dl') || kl.includes('hr')) &&
+        (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
+      return idxMap[k];
+    }
+  }
+  // 4) any header that looks like price/on-road or ex-showroom
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if (kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad') || kl.includes('price') || kl.includes('ex-showroom') || kl.includes('ex showroom')) {
+      return idxMap[k];
+    }
+  }
+  // 5) fallback: first numeric column in row
+  for (let i = 0; i < (row || []).length; i++) {
+    const v = String(row[i] || '').replace(/[,₹\s]/g, '');
+    if (v && /^\d+$/.test(v)) return i;
+  }
+  return -1;
+}
+      const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
+      const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
+      const exIdx = detectExShowIdx(idxMap);
+      const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
 
-    const exIdx = detectExShowIdx(idxMap);
-    const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
-
-    variants.push({
-      variant: variantCell,
-      model: String(row[idxModel] || '').toUpperCase(),
-      onroad,
-      exShow
-    });
+      variants.push({
+        brand,
+        model: String(row[idxModel] || '').toUpperCase(),
+        variant: variantCell,
+        exShow,
+        onroad
+      });
+    }
   }
 
   if (!variants.length) return false;
 
-  // sort by ex-showroom or onroad
-  variants.sort((a,b) => (a.exShow || a.onroad) - (b.exShow || b.onroad));
+  // dedupe by variant string (brand+model+variant)
+  const seen = new Set();
+  const uniq = [];
+  for (const v of variants) {
+    const k = `${v.brand}||${v.model}||${v.variant}`;
+    if (!seen.has(k)) { seen.add(k); uniq.push(v); }
+  }
+
+  // sort by price asc
+  uniq.sort((a,b) => (a.exShow || a.onroad || 0) - (b.exShow || b.onroad || 0));
 
   const titleModel = baseModelToken.toUpperCase();
   const lines = [];
-  lines.push(`*${brandGuess} ${titleModel} – Key Variants (${city.toUpperCase()}, ${profile.toUpperCase()})*`);
-
-  const top = variants.slice(0, 10);
+  lines.push(`*Available variants for* "${raw}" (${titleModel}) — top ${Math.min(10, uniq.length)} results`);
+  const top = uniq.slice(0, 10);
   top.forEach((v, i) => {
-    let line = `${i + 1}) *${v.model} ${v.variant}*`;
-    if (v.exShow) line += `\n   Ex-Showroom: ₹ ${fmtMoney(v.exShow)}`;
-    if (v.onroad) line += `\n   On-Road: ₹ ${fmtMoney(v.onroad)}`;
+    let line = `${i+1}) *${v.brand} ${v.model} ${v.variant}*`;
+    if (v.exShow) line += `\n   Ex-showroom: ₹ ${fmtMoney(v.exShow)}`;
+    if (v.onroad) line += `\n   On-road (${cityToken}): ₹ ${fmtMoney(v.onroad)}`;
     lines.push(line);
   });
-
   lines.push('');
-  lines.push(`Reply with your full details like:`);
-  lines.push(`*${city} ${titleModel} ${top[0].variant} individual*`);
-  lines.push(`to get an exact quote with loan & EMI.`);
-
+  lines.push('Reply with exact variant (example):');
+  lines.push(`${city} ${top[0].brand} ${top[0].model} ${top[0].variant} individual`);
   await waSendText(to, lines.join('\n'));
   setLastService(to, 'NEW');
   return true;
@@ -1407,32 +1441,44 @@ app.post('/webhook', async (req, res) => {
       msgText = '';
     }
 
-    // ---- RAG EMBEDDING + VECTOR SEARCH BLOCK ----
-    let queryEmbedding = null;
-    try {
-      if (msgText) {
-        const embedResp = await openai.embeddings.create({
-          model: "text-embedding-3-large",
-          input: msgText
-        });
-        queryEmbedding = embedResp.data?.[0]?.embedding || null;
-      }
-    } catch (e) {
-      console.error("Embedding error:", e);
-    }
+// ---- RAG EMBEDDING + VECTOR SEARCH BLOCK ----
+let queryEmbedding = null;
+try {
+  if (msgText) {
+    const embedResp = await openai.embeddings.create({
+      model: "text-embedding-3-large",
+      input: msgText
+    });
+    queryEmbedding = embedResp.data?.[0]?.embedding || null;
+  }
+} catch (e) {
+  console.error("Embedding error:", e);
+}
 
-    let ragHits = [];
-    try {
-      if (queryEmbedding && typeof findRelevantChunks === 'function') {
-        const ragData = await (getRAG ? getRAG() : Promise.resolve(null));
-        if (ragData) {
-          ragHits = findRelevantChunks(queryEmbedding, ragData, 5) || [];
-        }
-      }
-    } catch (e) {
-      if (DEBUG) console.warn('RAG search failed', e && e.message ? e.message : e);
-      ragHits = [];
+let ragHits = [];
+try {
+  if (queryEmbedding && typeof findRelevantChunks === 'function') {
+    const ragData = await (getRAG ? getRAG() : Promise.resolve(null));
+    if (ragData) {
+      ragHits = findRelevantChunks(queryEmbedding, ragData, 5) || [];
     }
+  }
+} catch (e) {
+  if (DEBUG) console.warn('RAG search failed', e && e.message ? e.message : e);
+  ragHits = [];
+}
+
+// DEBUG: show whether rag hits were found (short)
+try {
+  if (DEBUG) {
+    console.log(`RAG debug: ragHits.length=${ragHits.length}`);
+    if (ragHits.length) {
+      // print short ids or snippet
+      console.log('RAG debug snippets:', ragHits.slice(0,3).map(h => ({ id: h.id || '-', text: (h.text || '').slice(0,120) })));
+    }
+  }
+} catch (e) { /* ignore */ }
+
     // ---- END RAG BLOCK ----
 
     // save lead locally + CRM (non-blocking)
