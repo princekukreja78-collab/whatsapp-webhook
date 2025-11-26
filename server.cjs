@@ -1046,6 +1046,153 @@ async function tryQuickNewCarQuote(msgText, to) {
 try {
   if (DEBUG) console.log('➡️ tryVariantListForModel called', { raw: String(raw).slice(0,120), tokens: (userNorm||'').split(' ').filter(Boolean) });
 try {
+// --- tryVariantListForModel (inserted)
+async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, to }) {
+  try {
+    if (!tables) return false;
+
+    const lowerRaw = (raw || '').toLowerCase().trim();
+    if (!lowerRaw) return false;
+
+    const modelKeywords = ['innova','hycross','fortuner','hyryder','glanza','camry','rumion','creta','i20','verna','venue','x1','a6','seltos'];
+    const tokens = lowerRaw.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0 || tokens.length > 6) return false;
+
+    let baseModelToken = tokens.find(t => modelKeywords.includes(t)) || tokens[0];
+    const cityToken = (city || 'delhi').split(' ')[0].toUpperCase();
+
+    function n(s) { return normForMatch(String(s || '')); }
+
+    function findPriceColumnForCity(idxMap, cityToken, row) {
+      const keys = Object.keys(idxMap || {});
+      const cityLower = String(cityToken || '').toLowerCase();
+      // 1) exact "on road" + city
+      for (const k of keys) {
+        const kl = k.toLowerCase();
+        if ((kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad')) && kl.includes(cityLower)) {
+          return idxMap[k];
+        }
+      }
+      // 2) city + (on/price/road)
+      for (const k of keys) {
+        const kl = k.toLowerCase();
+        if (kl.includes(cityLower) && (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
+          return idxMap[k];
+        }
+      }
+      // 3) known abbreviations
+      for (const k of keys) {
+        const kl = k.toLowerCase();
+        if ((kl.includes('chd') || kl.includes('chandigarh') || kl.includes('up') || kl.includes('delhi') || kl.includes('dl') || kl.includes('hr')) &&
+            (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
+          return idxMap[k];
+        }
+      }
+      // 4) generic price/onroad/ex-showroom headers
+      for (const k of keys) {
+        const kl = k.toLowerCase();
+        if (kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad') || kl.includes('price') || kl.includes('ex-showroom') || kl.includes('ex showroom') || kl.includes('exshowroom')) {
+          return idxMap[k];
+        }
+      }
+      // 5) fallback: first numeric column in row
+      for (let i = 0; i < (row || []).length; i++) {
+        const v = String(row[i] || '').replace(/[,₹\s]/g, '');
+        if (v && /^\d+$/.test(v)) return i;
+      }
+      return -1;
+    }
+
+    const variants = [];
+
+    for (const [brand, tab] of Object.entries(tables)) {
+      if (!tab || !tab.data) continue;
+      if (brandGuess && brand !== brandGuess) continue;
+
+      const header = tab.header.map(h => String(h || '').toUpperCase());
+      const idxMap = tab.idxMap || toHeaderIndexMap(header);
+      const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+      const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX') || h.includes('TRIM'));
+      if (idxModel < 0 && idxVariant < 0) continue;
+
+      for (let r = 0; r < tab.data.length; r++) {
+        const row = tab.data[r];
+        const modelCell = idxModel >= 0 ? String(row[idxModel] || '') : '';
+        const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '') : '';
+        const modelNorm = n(modelCell);
+        const variantNorm = n(variantCell);
+        let score = 0;
+
+        if (modelNorm.includes(baseModelToken)) score += 40;
+        if (variantNorm.includes(baseModelToken)) score += 45;
+
+        for (const tok of tokens) {
+          if (!tok) continue;
+          if (modelNorm && modelNorm.includes(tok)) score += 8;
+          if (variantNorm && variantNorm.includes(tok)) score += 12;
+        }
+
+        if ((raw || '').toLowerCase().includes(brand.toLowerCase())) score += 10;
+
+        if (score <= 0) continue;
+
+        const priceIdx = findPriceColumnForCity(idxMap, cityToken, row);
+        const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
+        const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
+        const exIdx = detectExShowIdx(idxMap);
+        const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
+
+        variants.push({
+          brand,
+          r,
+          model: String(modelCell || '').toUpperCase(),
+          variant: String(variantCell || '').toUpperCase(),
+          score,
+          exShow,
+          onroad,
+          row
+        });
+      }
+    }
+
+    if (!variants.length) return false;
+
+    const seen = new Set();
+    const uniq = [];
+    for (const v of variants) {
+      const key = `${v.brand}||${v.model}||${v.variant}`;
+      if (!seen.has(key)) { seen.add(key); uniq.push(v); }
+    }
+
+    uniq.sort((a,b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const pa = (a.exShow || a.onroad || Number.MAX_SAFE_INTEGER);
+      const pb = (b.exShow || b.onroad || Number.MAX_SAFE_INTEGER);
+      return (pa - pb);
+    });
+
+    const top = uniq.slice(0, Math.min(10, uniq.length));
+    const lines = [];
+    lines.push(`*Available variants for* "${raw}" — top ${top.length} results`);
+    top.forEach((v, i) => {
+      let line = `${i+1}) *${v.brand} ${v.model}${v.variant ? ' ' + v.variant : ''}*`;
+      if (v.exShow) line += `\n   Ex-showroom: ₹ ${fmtMoney(v.exShow)}`;
+      if (v.onroad) line += `\n   On-road (${cityToken}): ₹ ${fmtMoney(v.onroad)}`;
+      lines.push(line);
+    });
+    lines.push('');
+    lines.push('Reply with exact variant (example):');
+    const first = top[0];
+    lines.push(`${city} ${first.brand} ${first.model} ${first.variant} individual`);
+    await waSendText(to, lines.join('\n'));
+    setLastService(to, 'NEW');
+    return true;
+  } catch (e) {
+    if (DEBUG) console.warn('tryVariantListForModel failed', e && e.message ? e.message : e);
+    return false;
+  }
+}
+// --- end tryVariantListForModel
   const variantListDone = await tryVariantListForModel({ tables, brandGuess, city, profile, raw, to });
   if (DEBUG) console.log('⬅️ tryVariantListForModel returned', { variantListDone });
   if (variantListDone) return true;
