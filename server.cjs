@@ -475,6 +475,7 @@ async function loadUsedSheetRows() {
 
 // ---------------- Bullet EMI simulation (USED) ----------------
 
+
 function simulateBulletPlan({ loanAmount, months, internalRatePct, bulletPct = 0.25 }) {
   const L = Number(loanAmount || 0);
   const N = Number(months || 0);
@@ -486,61 +487,127 @@ function simulateBulletPlan({ loanAmount, months, internalRatePct, bulletPct = 0
   const bullet_each = Math.round(bullet_total / num_bullets);
 
   const principal_for_emi = L - bullet_total;
-  const monthly_emi = calcEmiSimple(principal_for_emi, annual, N);
 
-  const r = Number(annual) / 12 / 100;
-  let outstanding = L;
-  let remaining_amort_principal = principal_for_emi;
+  // helper to perform amortisation given an EMI
+  function runSim(monthly_emi) {
+    const r = Number(annual) / 12 / 100;
+    let outstanding = L;
+    let remaining_amort_principal = principal_for_emi;
+    let total_interest = 0;
+    let total_emi_paid = 0;
+    let total_bullets_paid = 0;
+    const rows = [];
 
-  let total_interest = 0;
-  let total_emi_paid = 0;
-  let total_bullets_paid = 0;
+    for (let m = 1; m <= N; m++) {
+      const start_out = outstanding;
+      const interest = Math.round(start_out * r);
+      const emi = monthly_emi;
+      let principal_paid_by_emi = Math.max(0, emi - interest);
 
-  for (let m = 1; m <= N; m++) {
-    const interest = Math.round(outstanding * r);
-
-    const emi = monthly_emi;
-    let principal_paid_by_emi = Math.max(0, emi - interest);
-
-    if (remaining_amort_principal <= 0) {
-      principal_paid_by_emi = 0;
-    } else if (principal_paid_by_emi > remaining_amort_principal) {
-      principal_paid_by_emi = remaining_amort_principal;
-    }
-
-    outstanding = Math.max(0, outstanding - principal_paid_by_emi);
-    remaining_amort_principal = Math.max(0, remaining_amort_principal - principal_paid_by_emi);
-
-    total_interest += interest;
-    total_emi_paid += emi;
-
-    if (m % 12 === 0) {
-      const remaining_bullets = Math.max(0, bullet_total - total_bullets_paid);
-      const bullet_paid = Math.max(0, Math.min(bullet_each, remaining_bullets));
-      if (bullet_paid > 0) {
-        total_bullets_paid += bullet_paid;
-        outstanding = Math.max(0, outstanding - bullet_paid);
+      if (remaining_amort_principal <= 0) {
+        principal_paid_by_emi = 0;
+      } else if (principal_paid_by_emi > remaining_amort_principal) {
+        principal_paid_by_emi = remaining_amort_principal;
       }
+
+      outstanding = Math.max(0, outstanding - principal_paid_by_emi);
+      remaining_amort_principal = Math.max(0, remaining_amort_principal - principal_paid_by_emi);
+
+      total_interest += interest;
+      total_emi_paid += emi;
+
+      let bullet_paid = 0;
+      if (m % 12 === 0) {
+        const remaining_bullets = Math.max(0, bullet_total - total_bullets_paid);
+        bullet_paid = Math.max(0, Math.min(bullet_each, remaining_bullets));
+        if (bullet_paid > 0) {
+          total_bullets_paid += bullet_paid;
+          outstanding = Math.max(0, outstanding - bullet_paid);
+        }
+      }
+
+      rows.push({
+        month: m,
+        start_out,
+        interest,
+        emi,
+        principal_paid_by_emi,
+        bullet_paid,
+        end_outstanding: outstanding
+      });
     }
+
+    return {
+      total_interest,
+      total_emi_paid,
+      total_bullets_paid,
+      outstanding,
+      rows
+    };
   }
 
-  const total_payable = total_emi_paid + total_bullets_paid;
+  // initial EMI calculated on principal_for_emi
+  const monthly_emi_initial = calcEmiSimple(principal_for_emi, annual, N);
+
+  // run initial sim to find leftover outstanding
+  const initial = runSim(monthly_emi_initial);
+  let leftover = initial.outstanding;
+
+  // If leftover is 0, return initial results
+  if (!leftover) {
+    return {
+      loan: L,
+      months: N,
+      internalRatePct: annual,
+      monthly_emi: monthly_emi_initial,
+      bullet_total,
+      num_bullets,
+      bullet_each,
+      total_interest: initial.total_interest,
+      total_emi_paid: initial.total_emi_paid,
+      total_bullets_paid: initial.total_bullets_paid,
+      total_payable: initial.total_emi_paid + initial.total_bullets_paid,
+      outstanding_remaining: initial.outstanding,
+      schedule: initial.rows
+    };
+  }
+
+  // Adjust amortising principal by adding leftover so EMI amortises fully
+  const adjusted_principal = principal_for_emi + leftover;
+
+  // compute corrected EMI to clear outstanding (uses same rounding as calcEmiSimple)
+  const monthly_emi_corrected = calcEmiSimple(adjusted_principal, annual, N);
+
+  // run corrected sim
+  const corrected = runSim(monthly_emi_corrected);
+
+  // If corrected still has a tiny leftover due to rounding, adjust last payment to clear it
+  if (corrected.outstanding > 0) {
+    const rem = corrected.outstanding;
+    const last = corrected.rows[corrected.rows.length - 1];
+    last.principal_paid_by_emi = last.principal_paid_by_emi + rem;
+    last.end_outstanding = Math.max(0, last.end_outstanding - rem);
+    corrected.total_emi_paid += rem; // treat as extra payment on last EMI
+    corrected.outstanding = 0;
+  }
 
   return {
     loan: L,
     months: N,
     internalRatePct: annual,
-    monthly_emi,
+    monthly_emi: monthly_emi_corrected,
     bullet_total,
     num_bullets,
     bullet_each,
-    total_interest,
-    total_emi_paid,
-    total_bullets_paid,
-    total_payable,
-    outstanding_remaining: outstanding
+    total_interest: corrected.total_interest,
+    total_emi_paid: corrected.total_emi_paid,
+    total_bullets_paid: corrected.total_bullets_paid,
+    total_payable: corrected.total_emi_paid + corrected.total_bullets_paid,
+    outstanding_remaining: corrected.outstanding,
+    schedule: corrected.rows
   };
 }
+
 
 
 // ---------------- Build used car quote ----------------
