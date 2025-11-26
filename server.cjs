@@ -981,10 +981,17 @@ try {
   if (DEBUG) console.log('crm_helpers.cjs not loaded (ok for dev).');
 }
 
-// ---------------- tryQuickNewCarQuote ----------------
+
+/* ---------------- tryQuickNewCarQuote (REPLACED - year treated as USED; variant list up to 12) ---------------- */
 async function tryQuickNewCarQuote(msgText, to) {
-  try { 
+  try {
     if (!msgText || !msgText.trim()) return false;
+
+    // If user mentions a year (e.g., 2019, 2024), treat as used-car intent -> let USED handler handle it.
+    if (/\b(19|20)\d{2}\b/.test(msgText)) {
+      if (DEBUG) console.log('User query contains year -> treat as USED:', msgText);
+      return false;
+    }
 
     if (!canSendQuote(to)) {
       await waSendText(
@@ -996,9 +1003,8 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     const tables = await loadPricingFromSheets();
     if (!tables || Object.keys(tables).length === 0) return false;
-        
+
     const t = String(msgText || '').toLowerCase();
-    const tUpper = t.toUpperCase();
 
     // brand guess from free text — only used to narrow search
     let brandGuess = null;
@@ -1012,6 +1018,7 @@ async function tryQuickNewCarQuote(msgText, to) {
       brandGuess = 'TOYOTA';
     }
 
+    // city & profile
     let cityMatch =
       (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bangalore|bengaluru|chennai)\b/) || [])[1] ||
       null;
@@ -1038,180 +1045,20 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     if (!raw) return false;
 
-    const modelGuess = raw.split(' ').slice(0, 3).join(' ');
     const userNorm = normForMatch(raw);
     const tokens = userNorm.split(' ').filter(Boolean);
 
-// If user only typed the model name (or a short phrase), show a variant list first
-try {
-  if (DEBUG) console.log('➡️ tryVariantListForModel called', { raw: String(raw).slice(0,120), tokens: (userNorm||'').split(' ').filter(Boolean) });
-try {
-// --- tryVariantListForModel (inserted)
-async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, to }) {
-  try {
-    if (!tables) return false;
+    // Detect explicit variant suffix in user text (strict mode)
+    const specialSuffixes = ['zxo','gxo','vxo','zx','vx','gx'];
+    const userSuffix = specialSuffixes.find(sfx => userNorm.includes(sfx)) || null;
+    const askedWithSuffix = Boolean(userSuffix);
 
-    const lowerRaw = (raw || '').toLowerCase().trim();
-    if (!lowerRaw) return false;
+    const isSingleTokenQuery = tokens.length === 1;
 
-    const modelKeywords = ['innova','hycross','fortuner','hyryder','glanza','camry','rumion','creta','i20','verna','venue','x1','a6','seltos'];
-    const tokens = lowerRaw.split(/\s+/).filter(Boolean);
-    if (tokens.length === 0 || tokens.length > 6) return false;
-
-    let baseModelToken = tokens.find(t => modelKeywords.includes(t)) || tokens[0];
-    const cityToken = (city || 'delhi').split(' ')[0].toUpperCase();
-
-    function n(s) { return normForMatch(String(s || '')); }
-
-    function findPriceColumnForCity(idxMap, cityToken, row) {
-      const keys = Object.keys(idxMap || {});
-      const cityLower = String(cityToken || '').toLowerCase();
-      // 1) exact "on road" + city
-      for (const k of keys) {
-        const kl = k.toLowerCase();
-        if ((kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad')) && kl.includes(cityLower)) {
-          return idxMap[k];
-        }
-      }
-      // 2) city + (on/price/road)
-      for (const k of keys) {
-        const kl = k.toLowerCase();
-        if (kl.includes(cityLower) && (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
-          return idxMap[k];
-        }
-      }
-      // 3) known abbreviations
-      for (const k of keys) {
-        const kl = k.toLowerCase();
-        if ((kl.includes('chd') || kl.includes('chandigarh') || kl.includes('up') || kl.includes('delhi') || kl.includes('dl') || kl.includes('hr')) &&
-            (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
-          return idxMap[k];
-        }
-      }
-      // 4) generic price/onroad/ex-showroom headers
-      for (const k of keys) {
-        const kl = k.toLowerCase();
-        if (kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad') || kl.includes('price') || kl.includes('ex-showroom') || kl.includes('ex showroom') || kl.includes('exshowroom')) {
-          return idxMap[k];
-        }
-      }
-      // 5) fallback: first numeric column in row
-      for (let i = 0; i < (row || []).length; i++) {
-        const v = String(row[i] || '').replace(/[,₹\s]/g, '');
-        if (v && /^\d+$/.test(v)) return i;
-      }
-      return -1;
-    }
-
-    const variants = [];
+    const candidates = [];
 
     for (const [brand, tab] of Object.entries(tables)) {
       if (!tab || !tab.data) continue;
-      if (brandGuess && brand !== brandGuess) continue;
-
-      const header = tab.header.map(h => String(h || '').toUpperCase());
-      const idxMap = tab.idxMap || toHeaderIndexMap(header);
-      const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
-      const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX') || h.includes('TRIM'));
-      if (idxModel < 0 && idxVariant < 0) continue;
-
-      for (let r = 0; r < tab.data.length; r++) {
-        const row = tab.data[r];
-        const modelCell = idxModel >= 0 ? String(row[idxModel] || '') : '';
-        const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '') : '';
-        const modelNorm = n(modelCell);
-        const variantNorm = n(variantCell);
-        let score = 0;
-
-        if (modelNorm.includes(baseModelToken)) score += 40;
-        if (variantNorm.includes(baseModelToken)) score += 45;
-
-        for (const tok of tokens) {
-          if (!tok) continue;
-          if (modelNorm && modelNorm.includes(tok)) score += 8;
-          if (variantNorm && variantNorm.includes(tok)) score += 12;
-        }
-
-        if ((raw || '').toLowerCase().includes(brand.toLowerCase())) score += 10;
-
-        if (score <= 0) continue;
-
-        const priceIdx = findPriceColumnForCity(idxMap, cityToken, row);
-        const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
-        const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
-        const exIdx = detectExShowIdx(idxMap);
-        const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
-
-        variants.push({
-          brand,
-          r,
-          model: String(modelCell || '').toUpperCase(),
-          variant: String(variantCell || '').toUpperCase(),
-          score,
-          exShow,
-          onroad,
-          row
-        });
-      }
-    }
-
-    if (!variants.length) return false;
-
-    const seen = new Set();
-    const uniq = [];
-    for (const v of variants) {
-      const key = `${v.brand}||${v.model}||${v.variant}`;
-      if (!seen.has(key)) { seen.add(key); uniq.push(v); }
-    }
-
-    uniq.sort((a,b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const pa = (a.exShow || a.onroad || Number.MAX_SAFE_INTEGER);
-      const pb = (b.exShow || b.onroad || Number.MAX_SAFE_INTEGER);
-      return (pa - pb);
-    });
-
-    const top = uniq.slice(0, Math.min(10, uniq.length));
-    const lines = [];
-    lines.push(`*Available variants for* "${raw}" — top ${top.length} results`);
-    top.forEach((v, i) => {
-      let line = `${i+1}) *${v.brand} ${v.model}${v.variant ? ' ' + v.variant : ''}*`;
-      if (v.exShow) line += `\n   Ex-showroom: ₹ ${fmtMoney(v.exShow)}`;
-      if (v.onroad) line += `\n   On-road (${cityToken}): ₹ ${fmtMoney(v.onroad)}`;
-      lines.push(line);
-    });
-    lines.push('');
-    lines.push('Reply with exact variant (example):');
-    const first = top[0];
-    lines.push(`${city} ${first.brand} ${first.model} ${first.variant} individual`);
-    await waSendText(to, lines.join('\n'));
-    setLastService(to, 'NEW');
-    return true;
-  } catch (e) {
-    if (DEBUG) console.warn('tryVariantListForModel failed', e && e.message ? e.message : e);
-    return false;
-  }
-}
-// --- end tryVariantListForModel
-  const variantListDone = await tryVariantListForModel({ tables, brandGuess, city, profile, raw, to });
-  if (DEBUG) console.log('⬅️ tryVariantListForModel returned', { variantListDone });
-  if (variantListDone) return true;
-} catch (err) {
-  if (DEBUG) console.warn('tryVariantListForModel failed', err && err.message ? err.message : err);
-}
-
-  if (variantListDone) return true;
-} catch (err) {
-  if (DEBUG) console.warn('tryVariantListForModel failed', err && err.message ? err.message : err);
-}
-
-    let best = null; // {brand, row, idxModel, idxVariant, idxMap, onroad, exShow}
-
-    const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
-
-    for (const [brand, tab] of Object.entries(tables)) {
-      if (!tab || !tab.data) continue;
-      // if we have a brand guess, only search that brand
       if (brandGuess && brand !== brandGuess) continue;
 
       const header = tab.header.map(h => String(h || '').toUpperCase());
@@ -1224,99 +1071,49 @@ async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, 
       for (const row of tab.data) {
         const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
         const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
-        const modelNorm = normForMatch(modelCell);
-        const variantNorm = normForMatch(variantCell);
+        const modelNorm = normForMatch(modelCell || '');
+        const variantNorm = normForMatch(variantCell || '');
 
         let score = 0;
 
-        if (modelCell && modelCell.includes(modelGuess)) score += 40;
-        if (variantCell && variantCell.includes(modelGuess)) score += 45;
-        if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
+        if (modelCell && modelCell.includes(raw)) score += 60;
+        if (variantCell && variantCell.includes(raw)) score += 70;
 
-        if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) {
-          score += 35;
-        }
-        if (userNorm && variantNorm && (variantNorm.includes(userNorm) || userNorm.includes(variantNorm))) {
-          score += 35;
-        }
+        if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) score += 35;
+        if (userNorm && variantNorm && (variantNorm.includes(userNorm) || userNorm.includes(variantNorm))) score += 40;
 
         let varKwNorm = '';
         let suffixNorm = '';
-        if (idxVarKw >= 0 && row[idxVarKw] != null) {
-          varKwNorm = normForMatch(row[idxVarKw]);
-        }
-        if (idxSuffixCol >= 0 && row[idxSuffixCol] != null) {
-          suffixNorm = normForMatch(row[idxSuffixCol]);
-        }
+        if (idxVarKw >= 0 && row[idxVarKw] != null) varKwNorm = normForMatch(row[idxVarKw]);
+        if (idxSuffixCol >= 0 && row[idxSuffixCol] != null) suffixNorm = normForMatch(row[idxSuffixCol]);
 
         for (const tok of tokens) {
           if (!tok) continue;
           if (modelNorm && modelNorm.includes(tok)) score += 5;
           if (variantNorm && variantNorm.includes(tok)) score += 8;
           if (suffixNorm && suffixNorm.includes(tok)) score += 10;
-          if (varKwNorm && varKwNorm.includes(tok)) score += 15;
+          if (varKwNorm && varKwNorm.includes(tok)) score += 12;
         }
 
-        // suffix detection: ZXO / VXO / GXO and optional ZX / VX / GX
-        const specialSuffixes = ['zxo', 'gxo', 'vxo', 'zx', 'vx', 'gx'];
-        const userSuffix = specialSuffixes.find(sfx => userNorm.includes(sfx));
-        if (userSuffix) {
-          const inVariant = variantNorm.includes(userSuffix);
-          const inSuffix  = suffixNorm.includes(userSuffix);
-          const inKw      = varKwNorm.includes(userSuffix);
+        const hasSuffixInRow = specialSuffixes.some(sfx => (variantNorm || suffixNorm || varKwNorm).includes(sfx));
 
-          if (inVariant || inSuffix || inKw) score += 80;
-          else score -= 20;
-        }
-
-        const variantUpper = String(variantCell || '').toUpperCase();
-        const varKwUpper = String(varKwNorm || '').toUpperCase();
-        for (const sw of SPECIAL_WORDS) {
-          if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw.toLowerCase())) {
-            score -= 25;
+        let priceIdx = -1;
+        const cityToken = city.split(' ')[0].toUpperCase();
+        for (const k of Object.keys(idxMap)) {
+          if (k.includes('ON ROAD') && k.includes(cityToken)) {
+            priceIdx = idxMap[k];
+            break;
           }
         }
-
-        if (score <= 0) continue;
-
-       // pick price — improved city-aware detection
-let priceIdx = -1;
-try {
-  // try to use helper if present
-  if (typeof findPriceColumnForCity === 'function') {
-    priceIdx = findPriceColumnForCity(idxMap, city.split(' ')[0].toUpperCase(), row);
-  }
-} catch (e) {
-  if (DEBUG) console.warn('findPriceColumnForCity failed', e && e.message ? e.message : e);
-}
-if (priceIdx < 0) {
-  // fallback: header keys containing ON ROAD + city token
-  const cityToken = city.split(' ')[0].toUpperCase();
-  for (const k of Object.keys(idxMap)) {
-    if (k.toUpperCase().includes('ON ROAD') && k.toUpperCase().includes(cityToken)) {
-      priceIdx = idxMap[k];
-      break;
-    }
-  }
-}
-if (priceIdx < 0) {
-  // 2nd fallback: header contains city name loosely with 'price' or 'road'
-  const cityLower = city.split(' ')[0].toLowerCase();
-  for (const k of Object.keys(idxMap)) {
-    const kl = k.toLowerCase();
-    if (kl.includes(cityLower) && (kl.includes('price') || kl.includes('road') || kl.includes('on'))) {
-      priceIdx = idxMap[k];
-      break;
-    }
-  }
-}
-if (priceIdx < 0) {
-  // final fallback: any numeric column in row
-  for (let i = 0; i < row.length; i++) {
-    const v = String(row[i] || '').replace(/[,₹\s]/g, '');
-    if (v && /^\d+$/.test(v)) { priceIdx = i; break; }
-  }
-}
+        if (priceIdx < 0) {
+          for (let i = 0; i < row.length; i++) {
+            const v = String(row[i] || '').replace(/[,₹\s]/g, '');
+            if (v && /^\d+$/.test(v)) {
+              priceIdx = i;
+              break;
+            }
+          }
+        }
 
         const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
         const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
@@ -1325,19 +1122,113 @@ if (priceIdx < 0) {
         const exIdx = detectExShowIdx(idxMap);
         const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
 
-        if (!best || score > best.score) {
-          best = { brand, row, idxModel, idxVariant, idxMap, onroad, exShow, score };
-        }
+        if (score <= 0) continue;
+
+        candidates.push({
+          brand,
+          row,
+          score,
+          modelNorm,
+          variantNorm,
+          varKwNorm,
+          suffixNorm,
+          hasSuffixInRow,
+          idxMap,
+          onroad,
+          exShow,
+          idxModel,
+          idxVariant
+        });
       }
     }
 
-    if (!best) return false;
+    if (!candidates.length) return false;
 
-    const loanAmt = best.exShow || best.onroad || 0;
-    const emi60 = loanAmt ? calcEmiSimple(loanAmt, NEW_CAR_ROI, 60) : 0;
+    if (askedWithSuffix) {
+      const strictMatches = candidates.filter(c => c.hasSuffixInRow || (c.variantNorm && c.variantNorm.includes(userSuffix)));
+      if (strictMatches.length === 0) {
+        await waSendText(
+          to,
+          `I could not find *${msgText}* exactly in my pricing sheets. Could you confirm the spelling (e.g., "Hycross ZXO") or share city + profile?`
+        );
+        return true;
+      }
+      strictMatches.sort((a, b) => b.score - a.score);
+      const best = strictMatches[0];
 
+      const modelName = best.idxModel >= 0 ? String(best.row[best.idxModel] || '').toUpperCase() : '';
+      const variantStr = best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
+      const loanAmt = best.exShow || best.onroad || 0;
+      const emi60 = loanAmt ? calcEmiSimple(loanAmt, NEW_CAR_ROI, 60) : 0;
+
+      const lines = [];
+      lines.push(`*${best.brand}* ${modelName} ${variantStr}`);
+      lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
+      if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
+      if (best.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(best.onroad)}`);
+      if (loanAmt) {
+        lines.push(
+          `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
+        );
+      }
+      lines.push('\n*Terms & Conditions Apply ✅*');
+
+      await waSendText(to, lines.join('\n'));
+      await sendNewCarButtons(to);
+      incrementQuoteUsage(to);
+      setLastService(to, 'NEW');
+      return true;
+    }
+
+    const byModel = {};
+    for (const c of candidates) {
+      const key = c.modelNorm || (c.variantNorm || 'unknown');
+      if (!byModel[key] || c.score > byModel[key].score) {
+        byModel[key] = c;
+      }
+    }
+    const models = Object.values(byModel);
+    if (isSingleTokenQuery || models.length > 1) {
+      candidates.sort((a, b) => b.score - a.score);
+      const top = [];
+      const seenTitles = new Set();
+      for (const c of candidates) {
+        const modelDisp  = c.idxModel >= 0 ? String(c.row[c.idxModel] || '').toUpperCase() : '';
+        const variantDisp = c.idxVariant >= 0 ? String(c.row[c.idxVariant] || '').toUpperCase() : '';
+        const titleParts = [];
+        if (modelDisp) titleParts.push(modelDisp);
+        if (variantDisp) titleParts.push(variantDisp);
+        const title = titleParts.join(' ').trim();
+        if (!title) continue;
+        if (seenTitles.has(title)) continue;
+        seenTitles.add(title);
+        top.push({ title, onroad: c.onroad, reg: '' });
+        if (top.length >= 12) break; // <-- increased limit
+      }
+
+      if (top.length > 1) {
+        const lines = [];
+        lines.push(`I found multiple variants. Please reply with the *exact car* you want (e.g., "Hycross ZXO"):\n`);
+        for (let i = 0; i < top.length; i++) {
+          const entry = top[i];
+          let line = `${i + 1}) *${entry.title}*`;
+          if (entry.onroad) line += ` – ₹ ${fmtMoney(entry.onroad)}`;
+          lines.push(line);
+        }
+        lines.push('');
+        lines.push('Reply with the exact car name for a detailed quote.');
+        await waSendText(to, lines.join('\n'));
+        setLastService(to, 'NEW');
+        return true;
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates[0];
     const modelName  = best.idxModel   >= 0 ? String(best.row[best.idxModel]   || '').toUpperCase() : '';
     const variantStr = best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
+    const loanAmt = best.exShow || best.onroad || 0;
+    const emi60 = loanAmt ? calcEmiSimple(loanAmt, NEW_CAR_ROI, 60) : 0;
 
     const lines = [];
     lines.push(`*${best.brand}* ${modelName} ${variantStr}`);
@@ -1361,7 +1252,7 @@ if (priceIdx < 0) {
     return false;
   }
 }
-            
+
 // ---------------- webhook verify & health ----------------
 app.get('/healthz', (req, res) => {
   res.json({ ok: true, t: Date.now(), debug: DEBUG });
@@ -1750,6 +1641,27 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
+// --- YEAR DETECTION: treat messages with a year (e.g., "2024") as USED-car intent ---
+try {
+  if (type === 'text' && msgText && /\b(19|20)\d{2}\b/.test(String(msgText))) {
+    if (DEBUG) console.log('Routing to USED flow because year detected in message:', msgText);
+    try {
+      const usedRes = await buildUsedCarQuoteFreeText({ query: msgText });
+      await waSendText(from, usedRes.text || 'Used car quote failed.');
+      if (usedRes.picLink) {
+        await waSendText(from, `Photos: ${usedRes.picLink}`);
+      }
+      await sendUsedCarButtons(from);
+      setLastService(from, 'USED');
+      return res.sendStatus(200);
+    } catch (err) {
+      if (DEBUG) console.warn('year-routing -> buildUsedCarQuoteFreeText failed', err && err.message ? err.message : err);
+      // fallthrough to normal flow if used-quote generation fails
+    }
+  }
+} catch (e) {
+  if (DEBUG) console.warn('year-routing block failed', e && e.message ? e.message : e);
+}
     // USED CAR detection
     if (type === 'text' && msgText) {
       const textLower = msgText.toLowerCase();
