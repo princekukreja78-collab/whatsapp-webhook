@@ -450,6 +450,47 @@ function detectExShowIdx(idxMap) {
   if (i >= 0) return idxMap[keys[i]];
   return -1;
 }
+function findPriceColumnForCity(idxMap, cityToken, row) {
+  const keys = Object.keys(idxMap || {});
+  const cityLower = String(cityToken || '').toLowerCase();
+
+  // 1) exact 'on road' + city substring
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if ((kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad')) && kl.includes(cityLower)) {
+      return idxMap[k];
+    }
+  }
+  // 2) header contains city name (looser) with 'on' or 'road' or 'price'
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if (kl.includes(cityLower) && (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
+      return idxMap[k];
+    }
+  }
+  // 3) header contains state/city common abbreviations
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if ((kl.includes('chd') || kl.includes('chandigarh') || kl.includes('up') || kl.includes('delhi') || kl.includes('dl') || kl.includes('hr')) &&
+        (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
+      return idxMap[k];
+    }
+  }
+  // 4) any header that looks like price/on-road or ex-showroom
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if (kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad') || kl.includes('price') || kl.includes('ex-showroom') || kl.includes('ex showroom') || kl.includes('exshowroom')) {
+      return idxMap[k];
+    }
+  }
+  // 5) fallback: first numeric column in row
+  for (let i = 0; i < (row || []).length; i++) {
+    const v = String(row[i] || '').replace(/[,₹\\s]/g, '');
+    if (v && /^\\d+$/.test(v)) return i;
+  }
+  return -1;
+}
+
 
 // ---------------- USED sheet loader ----------------
 async function loadUsedSheetRows() {
@@ -1001,6 +1042,22 @@ async function tryQuickNewCarQuote(msgText, to) {
     const userNorm = normForMatch(raw);
     const tokens = userNorm.split(' ').filter(Boolean);
 
+// If user only typed the model name (or a short phrase), show a variant list first
+try {
+  if (DEBUG) console.log('➡️ tryVariantListForModel called', { raw: String(raw).slice(0,120), tokens: (userNorm||'').split(' ').filter(Boolean) });
+try {
+  const variantListDone = await tryVariantListForModel({ tables, brandGuess, city, profile, raw, to });
+  if (DEBUG) console.log('⬅️ tryVariantListForModel returned', { variantListDone });
+  if (variantListDone) return true;
+} catch (err) {
+  if (DEBUG) console.warn('tryVariantListForModel failed', err && err.message ? err.message : err);
+}
+
+  if (variantListDone) return true;
+} catch (err) {
+  if (DEBUG) console.warn('tryVariantListForModel failed', err && err.message ? err.message : err);
+}
+
     let best = null; // {brand, row, idxModel, idxVariant, idxMap, onroad, exShow}
 
     const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
@@ -1075,24 +1132,44 @@ async function tryQuickNewCarQuote(msgText, to) {
 
         if (score <= 0) continue;
 
-        // pick price
-        let priceIdx = -1;
-        const cityToken = city.split(' ')[0].toUpperCase();
-        for (const k of Object.keys(idxMap)) {
-          if (k.includes('ON ROAD') && k.includes(cityToken)) {
-            priceIdx = idxMap[k];
-            break;
-          }
-        }
-        if (priceIdx < 0) {
-          for (let i = 0; i < row.length; i++) {
-            const v = String(row[i] || '').replace(/[,₹\s]/g, '');
-            if (v && /^\d+$/.test(v)) {
-              priceIdx = i;
-              break;
-            }
-          }
-        }
+       // pick price — improved city-aware detection
+let priceIdx = -1;
+try {
+  // try to use helper if present
+  if (typeof findPriceColumnForCity === 'function') {
+    priceIdx = findPriceColumnForCity(idxMap, city.split(' ')[0].toUpperCase(), row);
+  }
+} catch (e) {
+  if (DEBUG) console.warn('findPriceColumnForCity failed', e && e.message ? e.message : e);
+}
+if (priceIdx < 0) {
+  // fallback: header keys containing ON ROAD + city token
+  const cityToken = city.split(' ')[0].toUpperCase();
+  for (const k of Object.keys(idxMap)) {
+    if (k.toUpperCase().includes('ON ROAD') && k.toUpperCase().includes(cityToken)) {
+      priceIdx = idxMap[k];
+      break;
+    }
+  }
+}
+if (priceIdx < 0) {
+  // 2nd fallback: header contains city name loosely with 'price' or 'road'
+  const cityLower = city.split(' ')[0].toLowerCase();
+  for (const k of Object.keys(idxMap)) {
+    const kl = k.toLowerCase();
+    if (kl.includes(cityLower) && (kl.includes('price') || kl.includes('road') || kl.includes('on'))) {
+      priceIdx = idxMap[k];
+      break;
+    }
+  }
+}
+if (priceIdx < 0) {
+  // final fallback: any numeric column in row
+  for (let i = 0; i < row.length; i++) {
+    const v = String(row[i] || '').replace(/[,₹\s]/g, '');
+    if (v && /^\d+$/.test(v)) { priceIdx = i; break; }
+  }
+}
 
         const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
         const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
