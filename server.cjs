@@ -7,51 +7,6 @@
 // - Central CRM core: /crm/leads (GET), /crm/ingest (POST) for all bots.
 
 require('dotenv').config();
-
-const OpenAI = require("openai");
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY
-});
-
-// ---- RAG modules (optional; won't crash if missing) ----
-let findRelevantChunks = () => [];
-let getRAG = null;
-
-try {
-  // try different filenames: vector_search(.cjs/.js)
-  ({ findRelevantChunks } = require('./vector_search'));
-} catch (e1) {
-  try {
-    ({ findRelevantChunks } = require('./vector_search.cjs'));
-  } catch (e2) {
-    try {
-      ({ findRelevantChunks } = require('./vector_search.js'));
-    } catch (e3) {
-      console.warn(
-        'vector_search module not found, continuing without vector search:',
-        (e3 && e3.message) || e3
-      );
-    }
-  }
-}
-
-try {
-  ({ getRAG } = require('./rag_loader'));
-} catch (e1) {
-  try {
-    ({ getRAG } = require('./rag_loader.cjs'));
-  } catch (e2) {
-    try {
-      ({ getRAG } = require('./rag_loader.js'));
-    } catch (e3) {
-      console.warn(
-        'rag_loader module not found, continuing without RAG loader:',
-        (e3 && e3.message) || e3
-      );
-    }
-  }
-}
-
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
@@ -60,6 +15,78 @@ app.use(express.json());
 
 // fetch compatibility
 const fetch = (global.fetch) ? global.fetch : require('node-fetch');
+
+// -------- Signature Savings GPT Config --------
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const SIGNATURE_BRAIN_MODEL = process.env.SIGNATURE_BRAIN_MODEL || "gpt-4o-mini";
+
+async function callSignatureBrain({ from, name, msgText }) {
+  try {
+    const apiKey = (process.env.OPENAI_API_KEY || "").trim();
+    if (!apiKey) {
+      if (DEBUG) console.warn("Signature brain: OPENAI_API_KEY missing");
+      return null;
+    }
+
+    // Prefer SIGNATURE_BRAIN_MODEL, else fall back to OPENAI_MODEL, else default
+    const model =
+      (process.env.SIGNATURE_BRAIN_MODEL ||
+       process.env.OPENAI_MODEL ||
+       "gpt-4o-mini").trim();
+
+    const systemPrompt = `
+You are *Signature Savings*, the advisory brain for the *MR.CAR* WhatsApp bot.
+
+You ONLY answer about:
+- Car selection advice (which model/variant is better for the user).
+- New and used car advisory (what to check, practical guidance).
+- Loan/finance concepts (EMI, bullet EMI, down payment, eligibility) – no fake guarantees.
+- Insurance concepts (IDV, NCB, add-ons, claim basics).
+- Warranty & RSA (standard vs extended, coverage, exclusions, when it makes sense).
+- Service, maintenance and repair advisory.
+- Emergency / helpline style guidance (what steps to follow if breakdown/accident).
+
+Rules:
+- Reply in clear WhatsApp style with short paragraphs and bullet points.
+- Use *bold* for key terms or numbers.
+- Do NOT invent exact prices or interest rates; give ranges or generic logic only.
+- If the question is outside cars/loans/insurance/warranty/service, politely say you are MR.CAR assistant and steer back to car-related topics.
+    `.trim();
+
+    const payload = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user",   content: msgText }
+      ],
+      temperature: 0.4
+    };
+
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      console.warn("Signature brain HTTP error", resp.status, txt.slice(0, 400));
+      return null;
+    }
+
+    const data = await resp.json().catch(() => null);
+    const reply = data?.choices?.[0]?.message?.content || "";
+    const clean = reply.trim();
+    if (!clean) return null;
+    return clean;
+  } catch (e) {
+    console.error("Signature brain exception:", e && e.message ? e.message : e);
+    return null;
+  }
+}
 
 // ---------------- ENV ----------------
 const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
@@ -76,7 +103,7 @@ const SHEET_USED_CSV_URL      = (process.env.SHEET_USED_CSV_URL || process.env.U
 
 const LOCAL_USED_CSV_PATH = path.resolve(__dirname, 'PRE OWNED CAR PRICING - USED CAR.csv');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 // ---------------- Configs ----------------
 const MAX_QUOTE_PER_DAY       = Number(process.env.MAX_QUOTE_PER_DAY || 10);
@@ -87,8 +114,7 @@ const NEW_CAR_ROI             = Number(process.env.NEW_CAR_ROI || 8.10);
 const USED_CAR_ROI_VISIBLE    = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL   = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
 
-// keep DEBUG false by default unless env enables it explicitly
-const DEBUG = (process.env.DEBUG_VARIANT === 'true') || false;
+const DEBUG = (process.env.DEBUG_VARIANT === 'true') || true;
 
 // ---------------- file helpers ----------------
 function safeJsonRead(filename) {
@@ -514,8 +540,6 @@ async function buildUsedCarQuoteFreeText({ query }) {
   const subModelIdx = idxMap['SUB MODEL'] ?? idxMap['SUBMODEL'] ?? header.findIndex(h => h.includes('SUB MODEL') || h.includes('SUBMODEL') || h.includes('VARIANT'));
   const colourIdx = idxMap['COLOUR'] ?? idxMap['COLOR'] ?? header.findIndex(h => h.includes('COLOUR') || h.includes('COLOR'));
   const yearIdx = idxMap['MANUFACTURING YEAR'] ?? idxMap['YEAR'] ?? header.findIndex(h => h.includes('MANUFACTURING') && h.includes('YEAR'));
-  const fuelIdx = idxMap['FUEL'] ?? idxMap['FUEL TYPE'] ?? idxMap['FUELTYPE'] ??
-    header.findIndex(h => h.includes('FUEL'));
   const regIdx = (() => {
     const keys = Object.keys(idxMap);
     for (const k of keys) {
@@ -614,7 +638,6 @@ async function buildUsedCarQuoteFreeText({ query }) {
           : '';
         const yearDisp  = yearIdx >= 0 && row[yearIdx] ? String(row[yearIdx]) : '';
         const regPlace  = regIdx >= 0 && row[regIdx] ? String(row[regIdx]) : '';
-        const fuelDisp  = fuelIdx >= 0 && row[fuelIdx] ? String(row[fuelIdx]).toUpperCase() : '';
 
         let expectedVal = 0;
         if (expectedIdx >= 0) {
@@ -630,7 +653,6 @@ async function buildUsedCarQuoteFreeText({ query }) {
         const title = titleParts.join(' ');
 
         let line = `${i + 1}) *${title}*`;
-        if (fuelDisp)  line += ` – ${fuelDisp}`;
         if (expectedVal) line += ` – ₹ ${fmtMoney(expectedVal)}`;
         if (regPlace)   line += ` – Reg: ${regPlace}`;
         lines.push(line);
@@ -650,8 +672,6 @@ async function buildUsedCarQuoteFreeText({ query }) {
   const sub   = subModelIdx >= 0 && selRow[subModelIdx] ? selRow[subModelIdx].toString().toUpperCase() : '';
   const colour = colourIdx >= 0 && selRow[colourIdx] ? selRow[colourIdx].toString().toUpperCase() : '';
   const regPlace = regIdx >= 0 && selRow[regIdx] ? String(selRow[regIdx]) : '';
-  const yearDisp = yearIdx >= 0 && selRow[yearIdx] ? String(selRow[yearIdx]) : '';
-  const fuelDisp = fuelIdx >= 0 && selRow[fuelIdx] ? String(selRow[fuelIdx]).toUpperCase() : '';
 
   const expectedStr = expectedIdx >= 0 ? String(selRow[expectedIdx] || '') : '';
   let expected = Number(expectedStr.replace(/[,₹\s]/g, '')) || 0;
@@ -697,10 +717,8 @@ async function buildUsedCarQuoteFreeText({ query }) {
   const lines = [];
   lines.push('*PRE-OWNED CAR QUOTE*');
   lines.push(`Make/Model: *${make} ${model}${sub ? ' - ' + sub : ''}*`);
-  if (yearDisp) lines.push(`Manufacturing Year: ${yearDisp}`);
-  if (fuelDisp) lines.push(`Fuel Type: ${fuelDisp}`);
-  if (colour)   lines.push(`Colour: ${colour}`);
-  if (regPlace) lines.push(`Registration Place: ${regPlace}`);
+  if (colour)    lines.push(`Colour: ${colour}`);
+  if (regPlace)  lines.push(`Registration Place: ${regPlace}`);
   lines.push('');
   lines.push(`Expected Price: ₹ *${fmtMoney(expected)}*`);
   lines.push(`Loan up to *${LTV_PCT}% LTV*: ₹ *${fmtMoney(loanAmt)}*`);
@@ -753,6 +771,79 @@ let postLeadToCRM = async () => {};
 let fetchCRMReply = async () => null;
 let getAllLeads   = async () => [];
 
+async function logConversationToCRM(conv) {
+  try {
+    if (!crmBaseUrl) return;
+    const url = crmBaseUrl.replace(/\/+$/, '') + '/conversations';
+
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(conv)
+    });
+
+    if (!r.ok && DEBUG) {
+      const txt = await r.text().catch(() => '');
+      console.warn('CRM /conversations log failed', r.status, txt.slice(0, 500));
+    }
+  } catch (e) {
+    if (DEBUG) console.warn('logConversationToCRM error', e && e.message ? e.message : e);
+  }
+}
+
+// Signature Savings brain helper
+async function callSignatureBrain({ from, name, msgText }) {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    const model  = process.env.SIGNATURE_MODEL || "gpt-4o-mini";
+    const endpoint = "https://api.openai.com/v1/chat/completions";
+
+    const sys = `
+You are SIGNATURE SAVINGS — the master advisory brain for Mr.Car.
+Give crisp, dealership-level advisory on:
+• car maintenance
+• repair estimates
+• warranty / extended warranty
+• insurance / IDV / NCB
+• roadside assistance
+• documents (RTO, RC, loan, insurance)
+• safety ratings
+• variant comparison
+• fuel efficiency
+• best choice based on usage
+
+Never give prices for new/used cars — that is handled by pricing CSV.
+
+If user asks for brochures or PDFs, answer from knowledge.
+If unknown, say "please upload and I will learn".
+    `;
+
+    const body = {
+      model,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user",   content: msgText }
+      ]
+    };
+
+    const r = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    const j = await r.json();
+    const reply = j?.choices?.[0]?.message?.content || null;
+    return reply;
+  } catch (e) {
+    console.error("Signature Brain error:", e);
+    return null;
+  }
+}
+
 try {
   const crmHelpers = require('./crm_helpers.cjs');
   postLeadToCRM = crmHelpers.postLeadToCRM || postLeadToCRM;
@@ -763,342 +854,9 @@ try {
   if (DEBUG) console.log('crm_helpers.cjs not loaded (ok for dev).');
 }
 
-/* =======================================================================
-   Signature GPT & Brochure helpers (Advisory)
-   ======================================================================= */
-
-const SIGNATURE_MODEL = process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || 'gpt-4o-mini';
-const BROCHURE_INDEX_PATH = process.env.BROCHURE_INDEX_PATH || './brochures/index.json';
-
-function isAdvisory(msgText) {
-  const t = (msgText || '').toLowerCase();
-
-  const advisoryPhrases = [
-    'which is better','better than','which to buy','which to choose','compare','comparison',
-    'pros and cons','pros & cons','vs ',' v ',
-    'spec','specs','specifications','features','variant details',
-    'warranty','extended warranty','service cost','maintenance','amc',
-    'ground clearance','boot space','dimensions','length','width','height','wheelbase',
-    'mileage','average','fuel economy',
-    'power','torque','bhp','nm',
-    'safety rating','airbags','abs','esp',
-    'rsa','roadside','helpline','service interval','service schedule'
-  ];
-
-  for (const p of advisoryPhrases) {
-    if (t.includes(p)) return true;
-  }
-
-  const modelTyposMap = {
-    hycross: ['hcyross','hycros','hycoss','hiycross'],
-    hyryder: ['hyrydar','hyrider','hyrydr','hyrydar'],
-    fortuner: ['fotuner','forutner'],
-    innova: ['innova crysta','innova']
-  };
-
-  const toks = t.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
-  const tokSet = new Set(toks);
-
-  let modelMentions = 0;
-  for (const [canonical, typos] of Object.entries(modelTyposMap)) {
-    if (tokSet.has(canonical)) modelMentions++;
-    else {
-      for (const s of typos) {
-        if (t.includes(s)) { modelMentions++; break; }
-      }
-    }
-  }
-  if (modelMentions >= 2) return true;
-
-  const brands = ['toyota','hyundai','bmw','mercedes','kia','tata','honda','mahindra','audi','skoda'];
-  for (const b of brands) {
-    if (t.includes(b)) {
-      if (t.includes('compare') || t.includes('is better') || t.includes('vs ')) return true;
-    }
-  }
-
-  if (/\bis\s+better\b/.test(t) || /\bbetter\b.*\bor\b/.test(t)) return true;
-
-  return false;
-}
-
-function loadBrochureIndex() {
-  try {
-    const p = path.resolve(__dirname, BROCHURE_INDEX_PATH || './brochures/index.json');
-    if (!fs.existsSync(p)) return [];
-    const txt = fs.readFileSync(p, 'utf8') || '[]';
-    const j = JSON.parse(txt);
-    return Array.isArray(j) ? j : [];
-  } catch (e) {
-    if (DEBUG) console.warn('loadBrochureIndex failed', e && e.message ? e.message : e);
-    return [];
-  }
-}
-
-function findRelevantBrochures(index, msgText) {
-  try {
-    if (!Array.isArray(index) || !index.length) return [];
-    const q = (msgText || '').toLowerCase();
-    const scored = index.map(b => {
-      const title = (b.title || b.id || '').toString().toLowerCase();
-      const brand = (b.brand || '').toString().toLowerCase();
-      const variants = (b.variants || []).map(v => v.toString().toLowerCase());
-      let score = 0;
-      if (title && q.includes(title)) score += 30;
-      if (brand && q.includes(brand)) score += 25;
-      for (const v of variants) if (v && q.includes(v)) score += 18;
-      if (b.summary && b.summary.toLowerCase().includes(q)) score += 15;
-      return { b, score };
-    }).filter(x => x.score > 0);
-    scored.sort((a,b) => b.score - a.score);
-    return scored.slice(0,3).map(x => x.b);
-  } catch (e) {
-    if (DEBUG) console.warn('findRelevantBrochures fail', e && e.message ? e.message : e);
-    return [];
-  }
-}
-
-const PHONE_RE = /(?:(?:\+?\d{1,3}[\s\-\.])?(?:\(?\d{2,4}\)?[\s\-\.])?\d{3,4}[\s\-\.]\d{3,4})(?:\s*(?:ext|x|ext.)\s*\d{1,5})?/g;
-function extractPhonesFromText(text) {
-  try {
-    if (!text) return [];
-    const found = (String(text).match(PHONE_RE) || []).map(s => s.trim());
-    const norm = found.map(s => s.replace(/[\s\-\.\(\)]+/g, ''));
-    const unique = [];
-    const seen = new Set();
-    for (let i = 0; i < norm.length; i++) {
-      if (!seen.has(norm[i])) {
-        seen.add(norm[i]);
-        unique.push(found[i]);
-      }
-    }
-    return unique;
-  } catch (e) {
-    if (DEBUG) console.warn('extractPhonesFromText fail', e && e.message ? e.message : e);
-    return [];
-  }
-}
-
-function findPhonesInBrochures(entries) {
-  const matches = [];
-  try {
-    for (const b of (entries || [])) {
-      const srcId = b.id || b.title || b.url || 'unknown';
-      const candidates = [];
-      if (b.summary) candidates.push(b.summary);
-      if (b.title) candidates.push(b.title);
-      if (b.helpline) candidates.push(String(b.helpline));
-      const joined = candidates.join(' \n ');
-      const phones = extractPhonesFromText(joined);
-      for (const p of phones) {
-        const low = joined.toLowerCase();
-        let label = '';
-        if (low.includes('rsa') || low.includes('roadside')) label = 'RSA helpline';
-        else if (low.includes('service') || low.includes('service center') || low.includes('service helpline')) label = 'Service helpline';
-        else if (low.includes('warranty')) label = 'Warranty helpline';
-        else if (low.includes('customer') || low.includes('care')) label = 'Customer care';
-        else label = 'Helpline';
-        matches.push({ label, phone: p, sourceId: srcId });
-      }
-    }
-    const uniq = [];
-    const seen = new Set();
-    for (const m of matches) {
-      const k = (m.phone || '').replace(/[\s\-\.\(\)]+/g, '');
-      if (!seen.has(k)) {
-        seen.add(k);
-        uniq.push(m);
-      }
-    }
-    return uniq;
-  } catch (e) {
-    if (DEBUG) console.warn('findPhonesInBrochures fail', e && e.message ? e.message : e);
-    return [];
-  }
-}
-
-// updated signature function to accept an object (used elsewhere in code)
-async function callSignatureBrain({ from, name, msgText, lastService, ragHits = [] } = {}) {
-  try {
-    if (!msgText) return null;
-
-    const sys = `You are SIGNATURE SAVINGS — a crisp dealership advisory assistant for MR.CAR.
-Focus on *advisory, comparison, features and specifications* for cars (new & used).
-Use only the data given in "Relevant Data" and brochure-like knowledge; do not invent exact prices.
-You may mention approximate price bands only if clearly present in the context.
-Always end with: "Reply 'Talk to agent' to request a human."`;
-
-    let context = "";
-    if (Array.isArray(ragHits) && ragHits.length > 0) {
-      context = ragHits.map(x => x.text).join("\n\n---\n\n");
-    }
-
-    const promptMessages = [
-      { role: "system", content: sys },
-      { role: "user", content: `User question: ${msgText}\n\nRelevant Data:\n${context}` }
-    ];
-
-    const resp = await openai.chat.completions.create({
-      model: SIGNATURE_MODEL,
-      messages: promptMessages,
-      max_tokens: 700,
-      temperature: 0.25
-    });
-
-    return resp?.choices?.[0]?.message?.content || null;
-
-  } catch (err) {
-    console.error("SignatureBrain error:", err?.message || err);
-    return null;
-  }
-}
-
 // ---------------- tryQuickNewCarQuote ----------------
-// helper: when user says only "Innova / Hycross / Fortuner / Creta" → show variant list
-async function tryVariantListForModel({ tables, brandGuess, city, profile, raw, to }) {
-  if (!tables) return false;
-  const lowerRaw = (raw || '').toLowerCase().trim();
-  if (!lowerRaw) return false;
-
-  // tokens & quick heuristics
-  const tokens = lowerRaw.split(/\s+/).filter(Boolean);
-  const genericWords = new Set([
-    'used', 'preowned', 'pre-owned', 'pre', 'owned', 'second', 'secondhand', 'second-hand',
-    'car', 'cars', 'individual', 'company', 'corporate', 'firm', 'personal'
-  ]);
-  const cityWords = new Set(['delhi','dilli','haryana','hr','chandigarh','chd','up','uttar','pradesh','himachal','hp','mumbai','bangalore','bengaluru','bangalore','chennai']);
-  const hasNumberOrDigit = /\d/.test(lowerRaw);
-
-  // If user included city/profile/numbers or multiple meaningful tokens -> DO NOT show the generic variant list.
-  const nonGeneric = tokens.filter(t => !genericWords.has(t) && !cityWords.has(t));
-  if (hasNumberOrDigit || nonGeneric.length > 1) {
-    // This looks like a specific request (model + suffix/year/profile/budget) — let main flow handle it.
-    return false;
-  }
-
-  // Accept only very short/generic queries for variant list: 1 token (e.g., "innova", "creta") or possibly brand+model
-  if (tokens.length > 2) return false;
-
-  const modelKeywords = ['innova','hycross','fortuner','hyryder','glanza','camry','rumion','creta','i20','verna','venue','x1','a6','seltos'];
-  let baseModelToken = null;
-  for (const kw of modelKeywords) {
-    if (lowerRaw.includes(kw)) { baseModelToken = kw; break; }
-  }
-  // if no standard keyword found, but user gave two tokens like "Hyundai Creta" -- allow that
-  if (!baseModelToken && tokens.length === 2) {
-    baseModelToken = tokens[tokens.length - 1]; // treat last token as model
-  }
-  if (!baseModelToken) {
-    // not something we can confidently show variants for
-    return false;
-  }
-
-  const cityToken = (city || 'delhi').split(' ')[0].toUpperCase();
-  const variants = [];
-
-  // helper to find price column
-  function findPriceColumnForCity(idxMap, cityToken, row) {
-    const keys = Object.keys(idxMap || {});
-    const cityLower = String(cityToken || '').toLowerCase();
-    for (const k of keys) {
-      const kl = k.toLowerCase();
-      if ((kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad')) && kl.includes(cityLower)) {
-        return idxMap[k];
-      }
-    }
-    for (const k of keys) {
-      const kl = k.toLowerCase();
-      if (kl.includes(cityLower) && (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
-        return idxMap[k];
-      }
-    }
-    for (const k of keys) {
-      const kl = k.toLowerCase();
-      if ((kl.includes('chd') || kl.includes('chandigarh') || kl.includes('up') || kl.includes('delhi') || kl.includes('dl') || kl.includes('hr')) &&
-          (kl.includes('on') || kl.includes('price') || kl.includes('road'))) {
-        return idxMap[k];
-      }
-    }
-    for (const k of keys) {
-      const kl = k.toLowerCase();
-      if (kl.includes('on road') || kl.includes('on-road') || kl.includes('onroad') || kl.includes('price') || kl.includes('ex-showroom') || kl.includes('ex showroom')) {
-        return idxMap[k];
-      }
-    }
-    for (let i = 0; i < (row || []).length; i++) {
-      const v = String(row[i] || '').replace(/[,₹\s]/g, '');
-      if (v && /^\d+$/.test(v)) return i;
-    }
-    return -1;
-  }
-
-  // collect variants
-  for (const [brand, tab] of Object.entries(tables)) {
-    if (!tab || !tab.data) continue;
-    const header = tab.header.map(h => String(h || '').toUpperCase());
-    const idxMap = tab.idxMap || toHeaderIndexMap(header);
-    const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
-    const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
-    if (idxModel < 0 || idxVariant < 0) continue;
-
-    if (DEBUG) console.log(`Variant-search header keys for ${brand}:`, Object.keys(idxMap).slice(0,20));
-
-    for (const row of tab.data) {
-      const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
-      if (!modelCell) continue;
-      // only pick rows where model strongly matches base token (avoid partial/generic matches)
-      if (!modelCell.includes(baseModelToken)) continue;
-
-      const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toUpperCase() : '';
-      if (!variantCell) continue;
-
-      const priceIdx = findPriceColumnForCity(idxMap, cityToken, row);
-      const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
-      const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
-      const exIdx = detectExShowIdx(idxMap);
-      const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
-
-      variants.push({
-        brand,
-        model: String(row[idxModel] || '').toUpperCase(),
-        variant: variantCell,
-        exShow,
-        onroad
-      });
-    }
-  }
-
-  if (!variants.length) return false;
-
-  // dedupe & sort
-  const seen = new Set();
-  const uniq = [];
-  for (const v of variants) {
-    const k = `${v.brand}||${v.model}||${v.variant}`;
-    if (!seen.has(k)) { seen.add(k); uniq.push(v); }
-  }
-  uniq.sort((a,b) => (a.exShow || a.onroad || 0) - (b.exShow || b.onroad || 0));
-
-  const titleModel = baseModelToken.toUpperCase();
-  const lines = [];
-  lines.push(`*Available variants for* "${raw}" (${titleModel}) — top ${Math.min(10, uniq.length)} results`);
-  const top = uniq.slice(0, 10);
-  top.forEach((v, i) => {
-    let line = `${i+1}) *${v.brand} ${v.model} ${v.variant}*`;
-    if (v.exShow) line += `\n   Ex-showroom: ₹ ${fmtMoney(v.exShow)}`;
-    if (v.onroad) line += `\n   On-road (${cityToken}): ₹ ${fmtMoney(v.onroad)}`;
-    lines.push(line);
-  });
-  lines.push('');
-  lines.push('Reply with exact variant (example):');
-  lines.push(`${city} ${top[0].brand} ${top[0].model} ${top[0].variant} individual`);
-  await waSendText(to, lines.join('\n'));
-  setLastService(to, 'NEW');
-  return true;
-}
-
 async function tryQuickNewCarQuote(msgText, to) {
-  try {
+  try { 
     if (!msgText || !msgText.trim()) return false;
 
     if (!canSendQuote(to)) {
@@ -1156,10 +914,6 @@ async function tryQuickNewCarQuote(msgText, to) {
     const modelGuess = raw.split(' ').slice(0, 3).join(' ');
     const userNorm = normForMatch(raw);
     const tokens = userNorm.split(' ').filter(Boolean);
-
-    // 🔹 NEW: if user only gave "Innova/Hycross/Fortuner..." → show variant list first
-    const variantListDone = await tryVariantListForModel({ tables, brandGuess, city, profile, raw, to });
-    if (variantListDone) return true;
 
     let best = null; // {brand, row, idxModel, idxVariant, idxMap, onroad, exShow}
 
@@ -1427,73 +1181,25 @@ app.post('/webhook', async (req, res) => {
     const type = msg.type;
     const name = (contact?.profile?.name || 'Unknown').toString().toUpperCase();
 
-    // Extract selectedId (buttons/list) and msgText depending on incoming message type
     let msgText = '';
     let selectedId = null;
 
-    try {
-      if (type === 'text' && msg.text && typeof msg.text.body === 'string') {
-        msgText = String(msg.text.body || '').trim();
-      } else if (type === 'interactive' && msg.interactive) {
-        const inter = msg.interactive;
-        if (inter.type === 'button_reply' && inter.button_reply) {
-          selectedId = inter.button_reply.id || inter.button_reply.title || null;
-          msgText = inter.button_reply.title || '';
-        } else if (inter.type === 'list_reply' && inter.list_reply) {
-          selectedId = inter.list_reply.id || inter.list_reply.title || null;
-          msgText = inter.list_reply.title || '';
-        } else {
-          msgText = (inter.body || inter.header || '') || '';
-        }
-      } else if (type === 'image' || type === 'document' || type === 'video' || type === 'audio') {
-        msgText = (msg?.image?.caption || msg?.document?.caption || msg?.video?.caption || '') || '';
-      } else {
-        msgText = '';
-      }
-    } catch (e) {
-      if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
-      msgText = '';
+    if (type === 'text') {
+      msgText = msg.text?.body || '';
+    } else if (type === 'interactive') {
+      selectedId =
+        msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id || null;
+      msgText =
+        msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '';
+    } else {
+      msgText = JSON.stringify(msg);
     }
 
-// ---- RAG EMBEDDING + VECTOR SEARCH BLOCK ----
-let queryEmbedding = null;
-try {
-  if (msgText) {
-    const embedResp = await openai.embeddings.create({
-      model: "text-embedding-3-large",
-      input: msgText
-    });
-    queryEmbedding = embedResp.data?.[0]?.embedding || null;
-  }
-} catch (e) {
-  console.error("Embedding error:", e);
-}
+    if (DEBUG) console.log('INBOUND', { from, type, sample: (msgText || '').slice(0, 300) });
 
-let ragHits = [];
-try {
-  if (queryEmbedding && typeof findRelevantChunks === 'function') {
-    const ragData = await (getRAG ? getRAG() : Promise.resolve(null));
-    if (ragData) {
-      ragHits = findRelevantChunks(queryEmbedding, ragData, 5) || [];
+    if (from !== ADMIN_WA) {
+      sendAdminAlert({ from, name, text: msgText }).catch(() => {});
     }
-  }
-} catch (e) {
-  if (DEBUG) console.warn('RAG search failed', e && e.message ? e.message : e);
-  ragHits = [];
-}
-
-// DEBUG: show whether rag hits were found (short)
-try {
-  if (DEBUG) {
-    console.log(`RAG debug: ragHits.length=${ragHits.length}`);
-    if (ragHits.length) {
-      // print short ids or snippet
-      console.log('RAG debug snippets:', ragHits.slice(0,3).map(h => ({ id: h.id || '-', text: (h.text || '').slice(0,120) })));
-    }
-  }
-} catch (e) { /* ignore */ }
-
-    // ---- END RAG BLOCK ----
 
     // save lead locally + CRM (non-blocking)
     try {
@@ -1523,6 +1229,16 @@ try {
     } catch (e) {
       console.warn('lead save failed', e && e.message ? e.message : e);
     }
+
+    // log conversation to new CRM backend (basic)
+    logConversationToCRM({
+      sourceBot: 'MR_CAR',
+      from,
+      name,
+      message: msgText,
+      service: getLastService(from) || null,
+      ts: new Date().toISOString()
+    }).catch(() => {});
 
     // interactive choices
     if (selectedId) {
@@ -1633,9 +1349,6 @@ try {
       return res.sendStatus(200);
     }
 
-    // pre-compute advisory intent ONCE
-    const advisoryIntent = (type === 'text' && msgText && isAdvisory(msgText));
-
     // bullet command
     const bulletCmd = (msgText || '').trim().match(/^bullet\s+([\d,]+)\s*([\d\.]+)?\s*(\d+)?/i);
     if (bulletCmd) {
@@ -1713,7 +1426,7 @@ try {
       await waSendText(from, lines.join('\n'));
       return res.sendStatus(200);
     }
-	
+
     // numeric reply after used-car list (safe behaviour)
     if (type === 'text' && msgText) {
       const trimmed = msgText.trim();
@@ -1724,73 +1437,6 @@ try {
           'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.'
         );
         return res.sendStatus(200);
-      }
-    }
-
-    // 🔹 Advisory handler (runs BEFORE any pricing when advisoryIntent = true)
-    if (advisoryIntent) {
-      try {
-        // Log advisory query locally
-        try {
-          const logPath = path.resolve(__dirname, '.crm_data', 'advisory_queries.json');
-          const dir = path.dirname(logPath);
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-          const existing = fs.existsSync(logPath)
-            ? JSON.parse(fs.readFileSync(logPath, 'utf8') || '[]')
-            : [];
-
-          existing.unshift({
-            ts: Date.now(),
-            from,
-            name,
-            text: msgText.slice(0, 1000)
-          });
-
-          fs.writeFileSync(logPath, JSON.stringify(existing.slice(0, 5000), null, 2), 'utf8');
-          if (DEBUG) console.log(`🧠 ADVISORY LOGGED: ${from} -> ${msgText.slice(0,60)}`);
-        } catch (e) {
-          if (DEBUG) console.warn('advisory log failed', e && e.message ? e.message : e);
-        }
-
-        // quick helplines from brochure index if present
-        try {
-          const index = loadBrochureIndex();
-          const relevant = findRelevantBrochures(index, msgText);
-          const phones = findPhonesInBrochures(relevant);
-          if (phones && phones.length) {
-            const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
-            await waSendText(from, `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`);
-          }
-        } catch (e) {
-          if (DEBUG) console.warn('advisory quick-phones failed', e && e.message ? e.message : e);
-        }
-
-        // Call Signature GPT with RAG
-        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
-        if (sigReply) {
-          await waSendText(from, sigReply);
-          // Log to CRM with advisory tag (non-blocking)
-          try {
-            await postLeadToCRM({
-              bot: 'SIGNATURE_ADVISORY',
-              channel: 'whatsapp',
-              from,
-              name,
-              lastMessage: msgText,
-              service: 'ADVISORY',
-              tags: ['SIGNATURE_ADVISORY'],
-              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
-              createdAt: Date.now()
-            });
-          } catch (e) {
-            if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
-          }
-          return res.sendStatus(200);
-        }
-      } catch (e) {
-        if (DEBUG) console.warn('Advisory handler error', e && e.message ? e.message : e);
-        // allow flow to continue if GPT failed
       }
     }
 
@@ -1812,6 +1458,63 @@ try {
       }
     }
 
+    // General advisory / help questions → go to Signature Savings brain (skip price quote)
+    if (type === 'text' && msgText) {
+      const lower = msgText.toLowerCase();
+
+      const advisoryKeywords = [
+        'explain',
+        'advice',
+        'advise',
+        'suggest',
+        'which is better',
+        'better option',
+        'vs ',
+        'versus',
+        'problem',
+        'issue',
+        'repair',
+        'service center',
+        'service centre',
+        'maintenance',
+        'service schedule',
+        'warranty',
+        'extended warranty',
+        'guarantee',
+        'insurance',
+        'claim',
+        'ncb',
+        'idv',
+        'helpline',
+        'rsa',
+        'roadside',
+        'breakdown',
+        'accident',
+        'rto',
+        'documents',
+        'paper',
+        'closing loan',
+        'prepayment',
+        'foreclosure',
+        'part payment',
+        'eligibility',
+        'emi kya hota',
+        'what is emi'
+      ];
+
+      const looksLikeAdvisory = advisoryKeywords.some((kw) =>
+        lower.includes(kw)
+      );
+
+      if (looksLikeAdvisory) {
+        const smart = await callSignatureBrain({ from, name, msgText });
+        if (smart) {
+          await waSendText(from, smart);
+          return res.sendStatus(200);
+        }
+      }
+    }
+
     // NEW CAR quick quote
     if (type === 'text' && msgText) {
       const served = await tryQuickNewCarQuote(msgText, from);
@@ -1820,36 +1523,37 @@ try {
       }
     }
 
-    // If RAG has something but we didn't classify as advisory/price, we can still try Signature as generic help
-    if (type === 'text' && msgText && ragHits.length > 0 && !advisoryIntent) {
-      try {
-        const sig = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
-        if (sig) {
-          await waSendText(from, sig);
-          return res.sendStatus(200);
-        }
-      } catch (e) {
-        if (DEBUG) console.warn('Fallback RAG+Signature failed', e && e.message ? e.message : e);
-      }
-    }
+    // CRM + Signature Savings brain fallback
+    let finalReply = null;
 
-    // CRM fallback
+    // 1) Try existing CRM helper first (if any)
     try {
       const crmReply = await fetchCRMReply({ from, msgText });
-      if (crmReply) {
-        await waSendText(from, crmReply);
-        return res.sendStatus(200);
+      if (crmReply && String(crmReply).trim()) {
+        finalReply = String(crmReply).trim();
       }
     } catch (e) {
       console.warn('CRM reply failed', e && e.message ? e.message : e);
     }
 
-    // default fallback
+    // 2) If CRM had no answer, ask Signature Savings brain
+    if (!finalReply) {
+      finalReply = await callSignatureBrain({ from, name, msgText });
+    }
+
+    // 3) If either CRM or Signature gave an answer, send it
+    if (finalReply) {
+      await waSendText(from, finalReply);
+      return res.sendStatus(200);
+    }
+
+    // 4) Last-resort fallback if absolutely nothing worked
     await waSendText(
       from,
       'Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.'
     );
     return res.sendStatus(200);
+
   } catch (err) {
     console.error('Webhook error:', err && err.stack ? err.stack : err);
     try {
@@ -1866,7 +1570,6 @@ try {
 
 // ---------------- start server ----------------
 app.listen(PORT, () => {
-  console.log('==== MR.CAR BUILD TAG: 2025-11-25-NEWCAR-ADVISORY-FIX-V2 ====');
   console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
   console.log('ENV summary:', {
     SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL,
@@ -1877,3 +1580,4 @@ app.listen(PORT, () => {
     DEBUG
   });
 });
+
