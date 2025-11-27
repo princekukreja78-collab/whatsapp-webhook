@@ -1,0 +1,7 @@
+services:
+  - type: cron
+    name: build-synonyms
+    env: node
+    branch: main
+    schedule: "30 8 * * *"   # runs at 14:00 IST every day
+    command: "npm run build:synonyms"
