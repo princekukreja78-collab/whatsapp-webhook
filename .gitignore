@@ -9,3 +9,22 @@ yarn-error.log*
 .DS_Store
 server_backup_*.cjs
 crm_leads*.json
+
+# local backups and runtime
+/backups/
+cleanup_backups/
+cleanup_archive_*
+*.bak
+*.orig
+*.save
+*.corrupt.bak*
+*.log
+.env
+.env.*
+.rag_uploads/
+.backups_rag_logs/
+.crm_data/*.json
+node_modules/
+dashboard/node_modules/
+dist/
+.vite/
