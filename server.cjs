@@ -1,3 +1,48 @@
+/* ===== SUFFIX MATCH PATCH (ZXO / VXO / GXO with loose matching) ===== */
+
+// canonical list – longest-first will be applied below
+const SPECIAL_SUFFIXES_RAW = ['zxo','vxo','gxo','zx','vx','gx'];
+
+function _makeLoosePat(s) {
+  const clean = String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const parts = clean.split("").map(ch => ch.replace(/[-\/\\^$*+?.()|[\]{}]/g,"\\$&") + "[\\s\\-\\.]*");
+  return new RegExp("\\b" + parts.join("") + "\\b");
+}
+
+// override userSuffix detection
+function detectUserSuffix(userNorm) {
+  const specialSuffixes = SPECIAL_SUFFIXES_RAW.slice().sort((a,b)=>b.length - a.length);
+  for (const sfx of specialSuffixes) {
+    try {
+      const pat = _makeLoosePat(sfx);
+      if (pat.test(userNorm)) return sfx;
+    } catch(e) {
+      if (userNorm.includes(sfx)) return sfx;
+    }
+  }
+  return null;
+}
+
+// override row suffix detection
+function rowHasSuffix(variantNorm, suffixNorm, varKwNorm) {
+  const specialSuffixes = SPECIAL_SUFFIXES_RAW.slice().sort((a,b)=>b.length - a.length);
+  try {
+    for (const sfx of specialSuffixes) {
+      const pat = _makeLoosePat(sfx);
+      if (pat.test(variantNorm||"") || pat.test(suffixNorm||"") || pat.test(varKwNorm||"")) {
+        return true;
+      }
+    }
+  } catch(e) {
+    for (const sfx of specialSuffixes) {
+      if ((variantNorm||"").includes(sfx) || (suffixNorm||"").includes(sfx) || (varKwNorm||"").includes(sfx))
+        return true;
+    }
+  }
+  return false;
+}
+
+/* ===== END SUFFIX MATCH PATCH ===== */
 // server.cjs — MR.CAR webhook (New + Used, multi-bot CRM core)
 // - Greeting => service list (no quick buttons).
 // - New-car quote => New-car buttons only.
@@ -688,16 +733,36 @@ async function buildUsedCarQuoteFreeText({ query }) {
 const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
 const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
 
+/**
+ * shouldGreetNow(from, msgText)
+ *
+ * Purpose:
+ * - Return true only when the incoming message clearly looks like a greeting.
+ * - Avoid treating longer queries (e.g. "Hycross ZXO Delhi individual" or "Hycross 2024")
+ *   as greetings so they proceed to the pricing/advisory flows.
+ *
+ * Logic:
+ * - Ignore admin number.
+ * - Message must start with a greeting keyword (hi/hello/hey/namaste/enquiry/inquiry/help/start).
+ * - Message must be short (<= 4 words) to avoid matching model/variant queries.
+ * - Respect the GREETING_WINDOW_MS throttle to avoid repeated greetings.
+ */
 function shouldGreetNow(from, msgText) {
   try {
     if (ADMIN_WA && from === ADMIN_WA) return false;
     const now = Date.now();
     const prev = lastGreeting.get(from) || 0;
     const text = (msgText || '').trim().toLowerCase();
+
+    // Simple greeting keyword match (anchored at start) and short message check.
     const looksLikeGreeting =
-      /^(hi|hello|hey|namaste|enquiry|inquiry|help|start)\b/.test(text) || prev === 0;
+      /^(hi|hello|hey|namaste|enquiry|inquiry|help|start)\b/.test(text) &&
+      // keep it short to avoid false positives: max 4 words
+      (text.length === 0 || text.split(/\s+/).filter(Boolean).length <= 4);
+
     if (!looksLikeGreeting) return false;
     if (now - prev < GREETING_WINDOW_MS) return false;
+
     lastGreeting.set(from, now);
     return true;
   } catch (e) {
@@ -906,6 +971,17 @@ async function tryQuickNewCarQuote(msgText, to) {
   try {
     if (!msgText || !msgText.trim()) return false;
 
+    // If user included a year (e.g. "2024"), treat as USED -> do not serve new-car flow here
+    const yearMatch = (String(msgText).match(/\b(19|20)\d{2}\b/) || [])[0];
+    if (yearMatch) {
+      const y = Number(yearMatch);
+      const nowYear = new Date().getFullYear();
+      if (y >= 1990 && y <= nowYear) {
+        if (DEBUG) console.log('User query contains year -> treat as USED:', msgText);
+        return false;
+      }
+    }
+
     if (!canSendQuote(to)) {
       await waSendText(
         to,
@@ -933,7 +1009,7 @@ async function tryQuickNewCarQuote(msgText, to) {
     }
 
     let cityMatch =
-      (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bangalore|bengaluru|chennai)\b/) || [])[1] ||
+      (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/) || [])[1] ||
       null;
     if (cityMatch) {
       if (cityMatch === 'dilli') cityMatch = 'delhi';
@@ -941,6 +1017,7 @@ async function tryQuickNewCarQuote(msgText, to) {
       if (cityMatch === 'chd') cityMatch = 'chandigarh';
       if (cityMatch === 'up') cityMatch = 'uttar pradesh';
       if (cityMatch === 'hp') cityMatch = 'himachal pradesh';
+      if (cityMatch === 'bombay') cityMatch = 'mumbai';
     } else {
       cityMatch = 'delhi';
     }
@@ -949,124 +1026,37 @@ async function tryQuickNewCarQuote(msgText, to) {
     const profile =
       (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
 
+    // broaden raw: normalize 'auto' / 'automatic' to 'at' to match your variant suffix scheme
     let raw = t
-      .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bangalore|bengaluru|chennai)\b/g, ' ')
+      .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/g, ' ')
       .replace(/\b(individual|company|corporate|firm|personal)\b/g, ' ')
+      .replace(/\b(automatic transmission|automatic|auto)\b/g, ' at ')
       .replace(/[^\w\s]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
     if (!raw) return false;
 
-    const modelGuess = raw.split(' ').slice(0, 3).join(' ');
+    const modelGuess = raw.split(' ').slice(0, 4).join(' ');
     const userNorm = normForMatch(raw);
     const tokens = userNorm.split(' ').filter(Boolean);
 
-    // -------- Suffix loose-matching helper (ZXO / VXO / GXO + short forms) --------
-    const SPECIAL_SUFFIXES = ['zxo', 'vxo', 'gxo', 'zx', 'vx', 'gx']; // longest-first not guaranteed here; we will check longest-first
-    function makeLoosePattern(sfx) {
-      // create pattern that accepts spacing/dashes/dots between chars: z x o, z-x-o, z.x.o, zxo
-      const clean = String(sfx || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const parts = clean.split('').map(ch => ch.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '[\\s\\-\\.]*');
-      return new RegExp('^' + parts.join('') + '$');
-    }
-    function looseContainsHaystack(hay, sfx) {
-      if (!hay || !sfx) return false;
-      const hayClean = String(hay || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const pat = makeLoosePattern(sfx);
-      return pat.test(hayClean);
-    }
-    // detect user suffix (longest-first)
-    let userSuffix = null;
-    const sortedSuffixes = SPECIAL_SUFFIXES.slice().sort((a,b)=>b.length - a.length);
-    for (const s of sortedSuffixes) {
-      try {
-        if (looseContainsHaystack(userNorm, s)) { userSuffix = s; break; }
-      } catch(_) {}
-    }
-    // -------------------------------------------------------------------------------
-
-    // If the user query looks like "Hycross 2024" or contains a year -> treat as USED (so used handler wins)
-    // Note: webhook also handles explicit used traffic; this is defensive so new-car flow won't capture year-requests
-    if (/\b(19|20)\d{2}\b/.test(t)) {
-      if (DEBUG) console.log('tryQuickNewCarQuote: user query contains year -> defer to USED flow:', t);
-      return false;
-    }
-
-    // If user only asked for a model/brand (short query) and no suffix specified -> show short variant list (up to 12)
-    // Criteria: tokens length <= 2 (e.g., "hycross", "toyota hycross", "fortuner") AND no explicit suffix in input
-    if ((!userSuffix) && tokens.length <= 2) {
-      const shortlist = [];
-      const queryToken = tokens[0] || userNorm; // primary token
-      for (const [brand, tab] of Object.entries(tables)) {
-        if (!tab || !tab.data) continue;
-        if (brandGuess && brand !== brandGuess) continue;
-        const header = tab.header.map(h => String(h || '').toUpperCase());
-        const idxMap = tab.idxMap || toHeaderIndexMap(header);
-        const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
-        const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
-        const exIdx = detectExShowIdx(idxMap);
-
-        for (const row of tab.data) {
-          const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
-          const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
-          const modelNorm = normForMatch(modelCell);
-          const variantNorm = normForMatch(variantCell);
-
-          // match model token loosely against modelNorm
-          if (modelNorm && (modelNorm === queryToken || modelNorm.includes(queryToken) || queryToken.includes(modelNorm))) {
-            let price = 0;
-            if (exIdx >= 0 && row[exIdx]) price = Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0;
-            if (!price) {
-              // fallback pick first numeric-looking cell as price
-              for (let i = 0; i < row.length; i++) {
-                const v = String(row[i] || '').replace(/[,₹\s]/g, '');
-                if (v && /^\d+$/.test(v) && Number(v) > 100000) { price = Number(v); break; }
-              }
-            }
-            shortlist.push({
-              brand,
-              model: modelCell || '',
-              variant: variantCell || '',
-              price
-            });
-          }
-        }
-      }
-
-      if (shortlist.length > 1) {
-        // limit to 12 as requested
-        const top = shortlist.slice(0, 12);
-        const lines = [];
-        const headerLine = `*${(tokens[0] || '').toString().toUpperCase()}* — short variant list (showing ${top.length})`;
-        lines.push(headerLine);
-        for (let i = 0; i < top.length; i++) {
-          const it = top[i];
-          const titleParts = [];
-          if (it.brand) titleParts.push(it.brand.toUpperCase());
-          if (it.model) titleParts.push(it.model.toUpperCase());
-          if (it.variant) titleParts.push(it.variant.toUpperCase());
-          const title = titleParts.join(' ').trim();
-          let line = `${i+1}) *${title || '<unknown>'}*`;
-          if (it.price) line += ` – ₹ ${fmtMoney(it.price)}`;
-          lines.push(line);
-        }
-        lines.push('');
-        lines.push('Reply with the *exact car* (e.g., "Hycross ZXO Delhi individual") for a detailed on-road quote.');
-        await waSendText(to, lines.join('\n'));
-        setLastService(to, 'NEW');
-        return true;
-      }
-      // else fallthrough to detailed matching attempts
-    }
-
-    let best = null; // {brand, row, idxModel, idxVariant, idxMap, onroad, exShow}
+    // variant list limit
+    const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 12);
 
     const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
 
+    // helper: create loose pattern for suffixes like "zxo", "z x o", "zx", "z xo"
+    function _makeLoosePat(sfx) {
+      const parts = (sfx || '').toString().toLowerCase().split('');
+      const escaped = parts.map(ch => ch.replace(/[^a-z0-9]/g, '\\$&'));
+      return new RegExp('\\b' + escaped.join('[\\s\\W_]*') + '\\b', 'i');
+    }
+
+    // iterate brands/tables
+    const allMatches = [];
     for (const [brand, tab] of Object.entries(tables)) {
       if (!tab || !tab.data) continue;
-      // if we have a brand guess, only search that brand
       if (brandGuess && brand !== brandGuess) continue;
 
       const header = tab.header.map(h => String(h || '').toUpperCase());
@@ -1084,10 +1074,12 @@ async function tryQuickNewCarQuote(msgText, to) {
 
         let score = 0;
 
+        // stronger signals for exact substring matches (keeps prior behaviour)
         if (modelCell && modelCell.includes(modelGuess)) score += 40;
         if (variantCell && variantCell.includes(modelGuess)) score += 45;
         if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
 
+        // normalized-match signals
         if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) {
           score += 35;
         }
@@ -1112,25 +1104,22 @@ async function tryQuickNewCarQuote(msgText, to) {
           if (varKwNorm && varKwNorm.includes(tok)) score += 15;
         }
 
-        // suffix detection: ZXO / VXO / GXO and optional ZX / VX / GX (loose matching)
-        if (userSuffix) {
-          // check whether the row also contains this suffix (loosely)
-          const sortedSfx = SPECIAL_SUFFIXES.slice().sort((a,b)=>b.length - a.length);
-          let inVariant = false;
-          for (const sfx of sortedSfx) {
-            try {
-              // use simple loose check: remove non-alnums and test substring equality patterns
-              const makeLoose = (s) => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
-              const vnorm = makeLoose(variantCell);
-              const snorm = makeLoose(suffixNorm);
-              const k = makeLoose(varKwNorm);
-              const sclean = makeLoose(sfx);
-              if ((vnorm && vnorm.indexOf(sclean) !== -1) || (snorm && snorm.indexOf(sclean) !== -1) || (k && k.indexOf(sclean) !== -1)) { inVariant = true; break; }
-            } catch(_) {}
+        // improved suffix detection for ZX/VX/GX/ZXO/VXO/GXO (loose)
+        const specialSuffixes = ['zxo', 'gxo', 'vxo', 'zx', 'vx', 'gx'];
+        const searchTargets = [variantNorm || '', suffixNorm || '', varKwNorm || '', modelNorm || ''].join(' ');
+        let userSuffix = null;
+        for (const sfx of specialSuffixes) {
+          const pat = _makeLoosePat(sfx);
+          if (pat.test(userNorm) || pat.test(searchTargets)) {
+            userSuffix = sfx;
+            break;
           }
-
-          if (inVariant) score += 80;
-          else score -= 20;
+        }
+        if (userSuffix) {
+          const sPat = _makeLoosePat(userSuffix);
+          const rowHasSuffix = sPat.test(variantNorm) || sPat.test(suffixNorm) || sPat.test(varKwNorm) || sPat.test(modelNorm);
+          if (rowHasSuffix) score += 80;
+          else score -= 15; // small penalty if row doesn't show suffix
         }
 
         const variantUpper = String(variantCell || '').toUpperCase();
@@ -1161,7 +1150,6 @@ async function tryQuickNewCarQuote(msgText, to) {
             }
           }
         }
-
         const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
         const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
         if (!onroad) continue;
@@ -1169,12 +1157,56 @@ async function tryQuickNewCarQuote(msgText, to) {
         const exIdx = detectExShowIdx(idxMap);
         const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
 
-        if (!best || score > best.score) {
-          best = { brand, row, idxModel, idxVariant, idxMap, onroad, exShow, score };
-        }
+        allMatches.push({ brand, row, idxModel, idxVariant, idxMap, onroad, exShow, score });
       }
     }
 
+    if (!allMatches.length) return false;
+
+    // sort by score desc
+    allMatches.sort((a, b) => b.score - a.score);
+
+    // if user asked only the brand/model (very short query) — show short variant list
+    const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
+    const coreTokens = tokens.filter(tk => tk && !genericWords.has(tk));
+    if (coreTokens.length === 1) {
+      // gather top distinct variants for that model/brand
+      const distinct = [];
+      const seenTitles = new Set();
+      for (const m of allMatches) {
+        const row = m.row;
+        const headerMap = m.idxMap || {};
+        const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
+        const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
+        const titleParts = [];
+        if (modelVal) titleParts.push(modelVal);
+        if (variantVal) titleParts.push(variantVal);
+        const title = titleParts.join(' ').trim();
+        if (!title) continue;
+        if (!seenTitles.has(title)) {
+          seenTitles.add(title);
+          distinct.push({ title, onroad: m.onroad, brand: m.brand });
+        }
+        if (distinct.length >= VARIANT_LIST_LIMIT) break;
+      }
+
+      if (distinct.length > 1) {
+        const lines = [];
+        lines.push(`*Available variants (${distinct.length}) — ${coreTokens[0].toUpperCase()}*`);
+        for (let i = 0; i < distinct.length; i++) {
+          const d = distinct[i];
+          lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
+        }
+        lines.push('');
+        lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
+        await waSendText(to, lines.join('\n'));
+        setLastService(to, 'NEW');
+        return true;
+      }
+    }
+
+    // Single best match: pick top
+    const best = allMatches[0];
     if (!best) return false;
 
     const loanAmt = best.exShow || best.onroad || 0;
@@ -1200,6 +1232,7 @@ async function tryQuickNewCarQuote(msgText, to) {
     incrementQuoteUsage(to);
     setLastService(to, 'NEW');
     return true;
+
   } catch (e) {
     console.error('tryQuickNewCarQuote error', e && e.stack ? e.stack : e);
     return false;
@@ -1254,7 +1287,7 @@ app.post('/crm/ingest', async (req, res) => {
     return res.json({ ok: true });
   } catch (e) {
     console.error('CRM /crm/ingest error:', e && e.message ? e.message : e);
-    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e);
+    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
   }
 });
 
