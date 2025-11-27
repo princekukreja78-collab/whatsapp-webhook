@@ -1,3 +1,15 @@
+require('dotenv').config({ debug: false });
+
+/* Small helper: log the RAG message only once (prevents duplicate printed lines) */
+function logOnceRag(msg) {
+  try {
+    if (global.__MR_CAR_RAG_LOGGED__) return;
+    global.__MR_CAR_RAG_LOGGED__ = true;
+  } catch(e) {
+    global.__MR_CAR_RAG_LOGGED__ = true;
+  }
+  console.log(msg);
+}
 /* ===== SUFFIX MATCH PATCH (ZXO / VXO / GXO with loose matching) ===== */
 
 // canonical list – longest-first will be applied below
