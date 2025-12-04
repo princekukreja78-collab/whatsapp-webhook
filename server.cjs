@@ -2462,13 +2462,13 @@ if (!CONTACT_POSTER_URL && DEBUG) {
     const contacts = await fetchContactsFromSheet();
     console.log("📄 Contacts fetched:", contacts.length);
 
-    // basic filter: Indian mobile numbers starting with 91 and at least 10 digits
-    const targets = contacts.filter(c => {
-    console.log("🎯 Valid targets:", targets.length);
+// basic filter: Indian mobile numbers starting with 91 and at least 10 digits
+const targets = contacts.filter(c => {
+  const p = String(c.phone || '').replace(/\s+/g, '');
+  return p && p.startsWith('91') && p.length >= 10;
+});
 
-      const p = String(c.phone || '').replace(/\s+/g, '');
-      return p && p.startsWith('91') && p.length >= 10;
-    });
+console.log("🎯 Valid targets:", targets.length);
 
     if (DEBUG) console.log(`Sheet broadcast: will send to ${targets.length} contacts`);
 
