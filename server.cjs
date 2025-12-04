@@ -1,3 +1,4 @@
+console.log("🚀 MR.CAR Webhook Server Booted (Verbose Logging ON)");
 
 /* Canonical SIGNATURE_MODEL wired from env */
 const SIGNATURE_MODEL = process.env.OPENAI_MODEL || process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || process.env.ENGINE_USED || 'gpt-4o-mini';
@@ -2372,11 +2373,12 @@ async function sendSheetWelcomeTemplate(to, name) {
   const caption = `WE ARE AT YOUR SERVICE\nJust say “Hi” to get started.`;
 
   // 1) Try to send poster image (if URL available)
-  if (CONTACT_POSTER_URL) {
+    if (CONTACT_POSTER_URL) {
     try {
       if (DEBUG) console.log('Sheet broadcast: sending poster image to', to, 'via', CONTACT_POSTER_URL);
       // assumes waSendImage(to, imageUrl, caption) helper exists
       await waSendImage(to, CONTACT_POSTER_URL, caption);
+      console.log("🖼 Poster send attempted for:", to);   // ← ADD THIS LINE HERE
     } catch (e) {
       console.warn(
         'Sheet broadcast: poster image failed for',
@@ -2447,6 +2449,10 @@ function delay(ms) {
 // --------------------------------------------------------------------------
 app.post('/tools/send-greeting-from-sheet', async (req, res) => {
   try {
+    console.log("🔥 GREETING ROUTE HIT");
+    console.log("CONTACT_SHEET_CSV_URL =", CONTACT_SHEET_CSV_URL);
+    console.log("CONTACT_POSTER_URL =", CONTACT_POSTER_URL);
+
     if (!CONTACT_SHEET_CSV_URL) {
   return res.status(500).json({ ok: false, error: 'CONTACT_SHEET_CSV_URL missing in env' });
 }
@@ -2454,9 +2460,12 @@ if (!CONTACT_POSTER_URL && DEBUG) {
   console.warn('Sheet broadcast: CONTACT_POSTER_URL missing, will send text-only template.');
 }
     const contacts = await fetchContactsFromSheet();
+    console.log("📄 Contacts fetched:", contacts.length);
 
     // basic filter: Indian mobile numbers starting with 91 and at least 10 digits
     const targets = contacts.filter(c => {
+    console.log("🎯 Valid targets:", targets.length);
+
       const p = String(c.phone || '').replace(/\s+/g, '');
       return p && p.startsWith('91') && p.length >= 10;
     });
@@ -2467,11 +2476,15 @@ if (!CONTACT_POSTER_URL && DEBUG) {
     const failed = [];
 
     for (const c of targets) {
+      console.log("➡️ Sending to:", phone, "Name:", name);
+
       const phone = String(c.phone || '').replace(/\s+/g, '');
       const name = c.name || 'Customer';
 
       try {
         const ok = await sendSheetWelcomeTemplate(phone, name);
+      console.log("📨 Template send status:", ok, "for", phone);
+
         if (ok) {
           sent++;
         } else {
@@ -2488,13 +2501,16 @@ if (!CONTACT_POSTER_URL && DEBUG) {
 
     if (DEBUG) console.log(`Sheet broadcast: done. Sent=${sent}, Failed=${failed.length}`);
 
-    return res.json({
-      ok: true,
-      total: targets.length,
-      sent,
-      failed: failed.length,
-      failedPhones: failed
-    });
+console.log("🏁 GREETING BROADCAST FINISHED — Sent:", sent, "Failed:", failed.length);
+
+return res.json({
+  ok: true,
+  total: targets.length,
+  sent,
+  failed: failed.length,
+  failedPhones: failed
+});
+
   } catch (err) {
     console.error('Sheet broadcast route failed:', err);
     return res.status(500).json({ ok: false, error: err && err.message ? err.message : String(err) });
@@ -2599,6 +2615,7 @@ app.get('/api/wa-delivery-log', (req, res) => {
 
 
 app.listen(PORT, () => {
+console.log("🟢 Server fully started — READY to receive greeting UI and webhook events");
   console.log('==== MR.CAR BUILD TAG: 2025-11-25-NEWCAR-ADVISORY-FIX ====');
   console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
   console.log('ENV summary:', {
