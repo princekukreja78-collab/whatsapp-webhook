@@ -5,7 +5,9 @@
   "main": "server.cjs",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.cjs"
+    "start": "node server.cjs",
+    "build:synonyms": "node scripts/build_synonyms.cjs",
+    "prestart": "mkdir -p ./public && ln -sfn ./public/uploads ./uploads || true"
   },
   "keywords": [],
   "author": "",
@@ -18,8 +20,12 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "fast-levenshtein": "^3.0.0",
+    "formdata-node": "^6.0.3",
+    "google-auth-library": "^9.15.1",
+    "googleapis": "^105.0.0",
+    "multer": "^2.0.2",
     "node-fetch": "^2.7.0",
-    "openai": "^6.9.1",
+    "openai": "^4.104.0",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.394"
   }
