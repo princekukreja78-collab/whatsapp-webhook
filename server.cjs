@@ -2474,16 +2474,32 @@ console.log("🎯 Valid targets:", targets.length);
 
     let sent = 0;
     const failed = [];
+for (const c of targets) {
+  const phone = String(c.phone || '').replace(/\s+/g, '');
+  const name = c.name || 'Customer';
 
-    for (const c of targets) {
-      console.log("➡️ Sending to:", phone, "Name:", name);
+  console.log("➡️ Sending to:", phone, "Name:", name);
 
-      const phone = String(c.phone || '').replace(/\s+/g, '');
-      const name = c.name || 'Customer';
+  try {
+    const ok = await sendSheetWelcomeTemplate(phone, name);
+    if (ok) {
+      sent++;
+    } else {
+      failed.push(phone);
+    }
+  } catch (err) {
+    console.warn(
+      'Sheet broadcast: error for',
+      phone,
+      err && err.message ? err.message : err
+    );
+    failed.push(phone);
+  }
 
-      try {
-        const ok = await sendSheetWelcomeTemplate(phone, name);
-      console.log("📨 Template send status:", ok, "for", phone);
+  // 0.8s pause between messages
+  await delay(800);
+}
+     console.log("📨 Template send status:", ok, "for", phone);
 
         if (ok) {
           sent++;
