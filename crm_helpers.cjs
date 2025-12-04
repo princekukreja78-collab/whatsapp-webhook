@@ -207,3 +207,33 @@ async function getAllLeads(limit = 100) {
 
 module.exports = { postLeadToCRM, fetchCRMReply, getAllLeads };
 
+
+// --- assistant-added fallback: postLeadToCRM ---
+module.exports.postLeadToCRM = async function postLeadToCRM(lead) {
+  const fs = require('fs');
+  const path = require('path');
+  try {
+    const leadsPath = path.join(__dirname, '..', 'crm_leads.json');
+    let arr = [];
+    if (fs.existsSync(leadsPath)) {
+      try { arr = JSON.parse(fs.readFileSync(leadsPath,'utf8') || '[]'); } catch(e){ arr = []; }
+    }
+    const now = new Date().toISOString();
+    const newLead = {
+      id: lead.from ? 'lead-' + lead.from + '-' + Date.now() : 'lead-' + Date.now(),
+      name: lead.name || lead.from || '',
+      phone: lead.from || '',
+      status: 'new',
+      created_at: now,
+      lastMessage: lead.lastMessage || ''
+    };
+    arr.push(newLead);
+    fs.writeFileSync(leadsPath, JSON.stringify(arr, null, 2), 'utf8');
+    console.log('postLeadToCRM: saved lead', newLead.phone);
+    return { ok: true, savedTo: 'crm_leads.json', lead: newLead };
+  } catch (err) {
+    console.error('postLeadToCRM error', err && err.stack ? err.stack : err);
+    throw err;
+  }
+};
+// --- end assistant-added block ---
