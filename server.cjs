@@ -919,12 +919,12 @@ async function buildUsedCarQuoteFreeText({ query }) {
   const tenure  = 60;
 
   const emiNormal = calcEmiSimple(loanAmt, USED_CAR_ROI_VISIBLE, tenure);
-  const bulletSim = simulateBulletPlan({
-    loanAmount: loanAmt,
-    months: tenure,
-    internalRatePct: USED_CAR_ROI_INTERNAL,
-    bulletPct: 0.25
-  });
+const bulletSim = simulateBulletPlan({
+  amount: loanAmt,                 // ✔ loan amount
+  rate:  USED_CAR_ROI_INTERNAL,    // ✔ your internal ROI (10%)
+  months: tenure,                  // ✔ same tenure as normal EMI
+  bulletPct: 0.25                  // ✔ 25% bullet
+});
 
   let picLink = null;
   if (pictureIdx >= 0 && selRow[pictureIdx]) {
