@@ -237,3 +237,60 @@ module.exports.postLeadToCRM = async function postLeadToCRM(lead) {
   }
 };
 // --- end assistant-added block ---
+// === WhatsApp delivery status logging ===
+const fs = require('fs');
+const path = require('path');
+
+const WA_STATUS_FILE = path.join(__dirname, 'data', 'wa_status_log.json');
+
+function loadStatusLog() {
+  try {
+    if (!fs.existsSync(WA_STATUS_FILE)) return {};
+    const raw = fs.readFileSync(WA_STATUS_FILE, 'utf8');
+    if (!raw.trim()) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    console.warn('Failed to load WA status log:', e && e.message ? e.message : e);
+    return {};
+  }
+}
+
+function saveStatusLog(log) {
+  try {
+    const dir = path.dirname(WA_STATUS_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(WA_STATUS_FILE, JSON.stringify(log, null, 2));
+  } catch (e) {
+    console.warn('Failed to save WA status log:', e && e.message ? e.message : e);
+  }
+}
+
+// Called from server.cjs status handler
+async function recordDeliveryStatusForPhone(phone, payload) {
+  if (!phone) return;
+
+  const normPhone = String(phone);
+  const log = loadStatusLog();
+
+  const entry = {
+    ts: new Date(payload.ts || Date.now()).toISOString(),
+    status: payload.status || null,           // sent / delivered / read / failed
+    messageId: payload.messageId || null,
+    errorCode: payload.errorCode || null,
+    errorTitle: payload.errorTitle || null,
+    errorDetail: payload.errorDetail || null
+  };
+
+  if (!log[normPhone]) {
+    log[normPhone] = { last: entry, history: [entry] };
+  } else {
+    log[normPhone].last = entry;
+    log[normPhone].history.push(entry);
+  }
+
+  saveStatusLog(log);
+}
+
+// expose helper without touching existing exports
+module.exports.recordDeliveryStatusForPhone = recordDeliveryStatusForPhone;
