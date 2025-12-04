@@ -659,89 +659,53 @@ async function loadUsedSheetRows() {
   return [];
 }
 
-// Simulate a bullet loan plan:
-// - bulletPct portion of loan is paid in "bullets" (e.g. yearly)
-// - EMI is calculated on (loan - bullet_total)
-// - interest is charged on both EMI principal and bullet principal,
-//   but tenure always ends at `months` (no extension).
-function simulateBulletPlan({ amount, rate, months, bulletPct }) {
-  const L   = Number(amount || 0);      // loan amount
-  const R   = Number(rate || 0);        // annual ROI % (e.g. 10)
-  const n   = Number(months || 0);      // tenure in months
-  const pct = Number(bulletPct || 0);   // e.g. 0.25 for 25%
+// ---------------- Bullet EMI simulation (USED) ----------------
+function simulateBulletPlan({ loanAmount, months, internalRatePct, bulletPct = 0.25 }) {
+  const L = Number(loanAmount || 0);
+  const N = Number(months || 0);
+  const r = Number(internalRatePct || USED_CAR_ROI_INTERNAL) / 12 / 100;
+  if (!L || !N || !isFinite(r)) return null;
 
-  if (!L || !R || !n || !pct) return null;
+  const bullet_total = Math.round(L * Number(bulletPct || 0.25));
+  const num_bullets  = Math.max(1, Math.floor(N / 12));
+  const bullet_each  = Math.round(bullet_total / num_bullets);
 
-  // Bullet principal (fixed % of loan)
-  const bullet_total = L * pct;
-
-  // Number of bullets inside tenure (yearly bullets: 12,24,...)
-  const num_bullets = Math.max(1, Math.floor(n / 12));
-  const bullet_each = bullet_total / num_bullets;
-
-  // EMI principal = loan - bullet principal
   const principal_for_emi = L - bullet_total;
+  const monthly_emi = calcEmiSimple(principal_for_emi, internalRatePct, N);
 
-  // Monthly interest rate
-  const r = R / 12 / 100;
-
-  // Base EMI on non-bullet principal over full tenure
-  let base_emi = 0;
-  if (principal_for_emi > 0 && r > 0) {
-    const pow = Math.pow(1 + r, n);
-    base_emi = (principal_for_emi * r * pow) / (pow - 1);
-  } else if (principal_for_emi > 0 && n > 0) {
-    base_emi = principal_for_emi / n;
-  }
-
-  // Now simulate month by month, adding interest on bullet principal
-  let remainingBullet     = bullet_total;
+  let principal           = principal_for_emi;
+  let total_interest      = 0;
   let total_emi_paid      = 0;
   let total_bullets_paid  = 0;
-  let monthly_emi_example = 0; // EMI in first month including bullet interest
 
-  for (let m = 1; m <= n; m++) {
-    // Interest on bullet principal this month (on whatever is still outstanding)
-    const bulletInterestThisMonth = remainingBullet * r;
+  for (let m = 1; m <= N; m++) {
+    const interest = Math.round(principal * r);
+    let principal_paid_by_emi = monthly_emi - interest;
+    if (principal_paid_by_emi < 0) principal_paid_by_emi = 0;
+    principal = Math.max(0, principal - principal_paid_by_emi);
+    total_interest += interest;
+    total_emi_paid += monthly_emi;
 
-    // Total EMI this month = base EMI + bullet interest
-    const paymentThisMonth = base_emi + bulletInterestThisMonth;
-
-    total_emi_paid += paymentThisMonth;
-
-    // At each year (12, 24, 36, ...) pay one bullet principal chunk
-    if (m % 12 === 0 && remainingBullet > 0) {
-      const pay = Math.min(bullet_each, remainingBullet);
-      remainingBullet    -= pay;
-      total_bullets_paid += pay;
-    }
-
-    // remember the "typical" monthly EMI including bullet interest for display
-    if (m === 1) {
-      monthly_emi_example = Math.round(paymentThisMonth);
+    if (m % 12 === 0) {
+      const remaining_bullets = bullet_total - total_bullets_paid;
+      const bullet_paid = Math.max(0, Math.min(bullet_each, remaining_bullets));
+      total_bullets_paid += bullet_paid;
+      principal = Math.max(0, principal - bullet_paid);
     }
   }
 
-  const total_payable = Math.round(total_emi_paid + total_bullets_paid);
-
+  const total_payable = total_emi_paid + total_bullets_paid;
   return {
-    loan: Math.round(L),
-    rate: R,
-    months: n,
-    bulletPct: pct,
-
-    principal_for_emi: Math.round(principal_for_emi),
-
-    // This is what you display as "Monthly EMI (approx)"
-    monthly_emi: monthly_emi_example,
-    base_emi: Math.round(base_emi),
-
-    bullet_total: Math.round(bullet_total),
+    loan: L,
+    months: N,
+    internalRatePct,
+    monthly_emi,
+    bullet_total,
     num_bullets,
-    bullet_each: Math.round(bullet_each),
-
-    total_emi_paid: Math.round(total_emi_paid),
-    total_bullets_paid: Math.round(total_bullets_paid),
+    bullet_each,
+    total_interest,
+    total_emi_paid,
+    total_bullets_paid,
     total_payable
   };
 }
