@@ -2362,16 +2362,34 @@ async function fetchContactsFromSheet() {
   return contacts;
 }
 
-// send the same mr_car_welcome Namaste template we used in curl,
-// but using CONTACT_POSTER_URL as the header image
+// send greeting: first poster image, then text-only mr_car_welcome template
 async function sendSheetWelcomeTemplate(to, name) {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
     throw new Error('META_TOKEN or PHONE_NUMBER_ID not set');
   }
-  if (!CONTACT_POSTER_URL) {
-    throw new Error('CONTACT_POSTER_URL not set in .env');
+
+  const displayName = name || 'Customer';
+  const caption = `WE ARE AT YOUR SERVICE\nJust say “Hi” to get started.`;
+
+  // 1) Try to send poster image (if URL available)
+  if (CONTACT_POSTER_URL) {
+    try {
+      if (DEBUG) console.log('Sheet broadcast: sending poster image to', to, 'via', CONTACT_POSTER_URL);
+      // assumes waSendImage(to, imageUrl, caption) helper exists
+      await waSendImage(to, CONTACT_POSTER_URL, caption);
+    } catch (e) {
+      console.warn(
+        'Sheet broadcast: poster image failed for',
+        to,
+        e && e.message ? e.message : e
+      );
+      // we do NOT fail the flow here; we still send the template text
+    }
+  } else if (DEBUG) {
+    console.log('Sheet broadcast: CONTACT_POSTER_URL not set, skipping image for', to);
   }
 
+  // 2) Send text-only mr_car_welcome template
   const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
 
   const payload = {
@@ -2379,24 +2397,13 @@ async function sendSheetWelcomeTemplate(to, name) {
     to,
     type: 'template',
     template: {
-      name: 'mr_car_welcome',          // your existing Namaste template
+      name: 'mr_car_welcome',          // same template name
       language: { code: 'en' },
       components: [
         {
-          type: 'header',
-          parameters: [
-            {
-              type: 'image',
-              image: {
-                link: CONTACT_POSTER_URL
-              }
-            }
-          ]
-        },
-        {
           type: 'body',
           parameters: [
-            { type: 'text', text: name || 'Customer' }
+            { type: 'text', text: displayName }
           ]
         }
       ]
@@ -2414,11 +2421,16 @@ async function sendSheetWelcomeTemplate(to, name) {
 
   const data = await resp.json();
   if (!resp.ok) {
-    console.error('WA sheet-broadcast error:', to, resp.status, JSON.stringify(data).slice(0, 300));
+    console.error(
+      'WA sheet-broadcast error (template send):',
+      to,
+      resp.status,
+      JSON.stringify(data).slice(0, 300)
+    );
     return false;
   }
 
-  if (DEBUG) console.log('WA sheet-broadcast sent:', to, JSON.stringify(data));
+  if (DEBUG) console.log('WA sheet-broadcast template sent:', to, JSON.stringify(data));
   return true;
 }
 
@@ -2436,12 +2448,11 @@ function delay(ms) {
 app.post('/tools/send-greeting-from-sheet', async (req, res) => {
   try {
     if (!CONTACT_SHEET_CSV_URL) {
-      return res.status(500).json({ ok: false, error: 'CONTACT_SHEET_CSV_URL missing in env' });
-    }
-    if (!CONTACT_POSTER_URL) {
-      return res.status(500).json({ ok: false, error: 'CONTACT_POSTER_URL missing in env' });
-    }
-
+  return res.status(500).json({ ok: false, error: 'CONTACT_SHEET_CSV_URL missing in env' });
+}
+if (!CONTACT_POSTER_URL && DEBUG) {
+  console.warn('Sheet broadcast: CONTACT_POSTER_URL missing, will send text-only template.');
+}
     const contacts = await fetchContactsFromSheet();
 
     // basic filter: Indian mobile numbers starting with 91 and at least 10 digits
