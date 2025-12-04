@@ -238,10 +238,8 @@ module.exports.postLeadToCRM = async function postLeadToCRM(lead) {
 };
 // --- end assistant-added block ---
 // === WhatsApp delivery status logging ===
-const fs = require('fs');
-const path = require('path');
-
-const WA_STATUS_FILE = path.join(__dirname, 'data', 'wa_status_log.json');
+// (fs and path already required at top of file)
+const WA_STATUS_FILE = path.join(DATA_DIR, 'wa_status_log.json');
 
 function loadStatusLog() {
   try {
