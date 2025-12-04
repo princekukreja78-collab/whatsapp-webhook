@@ -1,4 +1,66 @@
+
+/* Canonical SIGNATURE_MODEL wired from env */
+const SIGNATURE_MODEL = process.env.OPENAI_MODEL || process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || process.env.ENGINE_USED || 'gpt-4o-mini';
+console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
+/* Auto-insert: use OPENAI_MODEL or ENGINE_USED from env */
+console.log("MODEL SELECTED (SIGNATURE_MODEL)=", SIGNATURE_MODEL);
+console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 require('dotenv').config({ debug: false });
+// --- startup compatibility shim: ensure greeting & CRM helpers exist ---
+// Insert this *once* near top of server.cjs (after dotenv config)
+try {
+  // shouldGreetNow: keep the canonical behaviour if missing
+  if (typeof shouldGreetNow === 'undefined') {
+    global.shouldGreetNow = function(from, msgText) {
+      try {
+        if (!from && !msgText) return false;
+        const t = String(msgText || '').trim().toLowerCase();
+        if (!t) return false;
+        const looksLikeGreeting =
+          /^(hi|hello|hey|namaste|enquiry|inquiry|help|start)\b/.test(t) &&
+          (t.split(/\s+/).filter(Boolean).length <= 4);
+        return looksLikeGreeting;
+      } catch (e) {
+        return false;
+      }
+    };
+    // also create a local var in case code references it directly (non-global)
+    try { var shouldGreetNow = global.shouldGreetNow; } catch(e){}
+  }
+
+  // CRM helpers: try to require and bind real functions, otherwise fallbacks
+  let crm = null;
+  try { crm = require('./crm_helpers.cjs'); } catch(e) {
+    try { crm = require('./routes/crm_helpers.cjs'); } catch(e2) { crm = null; }
+  }
+
+  if (crm) {
+    // prefer real exports where present
+    if (typeof crm.postLeadToCRM === 'function') global.postLeadToCRM = crm.postLeadToCRM;
+    if (typeof crm.fetchCRMReply === 'function') global.fetchCRMReply = crm.fetchCRMReply;
+    if (typeof crm.getAllLeads === 'function') global.getAllLeads = crm.getAllLeads;
+  }
+
+  // create safe no-op fallbacks if still missing
+  if (typeof postLeadToCRM === 'undefined') {
+    global.postLeadToCRM = async function() { return false; };
+    try { var postLeadToCRM = global.postLeadToCRM; } catch(e) {}
+  }
+  if (typeof fetchCRMReply === 'undefined') {
+    global.fetchCRMReply = async function() { return null; };
+    try { var fetchCRMReply = global.fetchCRMReply; } catch(e) {}
+  }
+  if (typeof getAllLeads === 'undefined') {
+    global.getAllLeads = async function() { return []; };
+    try { var getAllLeads = global.getAllLeads; } catch(e) {}
+  }
+} catch(e) {
+  // if anything goes wrong here, keep running with the no-op fallbacks
+  if (typeof postLeadToCRM === 'undefined') global.postLeadToCRM = async () => false;
+  if (typeof fetchCRMReply === 'undefined') global.fetchCRMReply = async () => null;
+  if (typeof getAllLeads === 'undefined') global.getAllLeads = async () => [];
+  if (typeof shouldGreetNow === 'undefined') global.shouldGreetNow = () => false;
+}
 
 /* Small helper: log the RAG message only once (prevents duplicate printed lines) */
 function logOnceRag(msg) {
@@ -12,16 +74,6 @@ function logOnceRag(msg) {
 }
 require('dotenv').config({ debug: false });
 
-/* Small helper: log the RAG message only once (prevents duplicate printed lines) */
-function logOnceRag(msg) {
-  try {
-    if (global.__MR_CAR_RAG_LOGGED__) return;
-    global.__MR_CAR_RAG_LOGGED__ = true;
-  } catch(e) {
-    global.__MR_CAR_RAG_LOGGED__ = true;
-  }
-  console.log(msg);
-}
 /* ===== SUFFIX MATCH PATCH (ZXO / VXO / GXO with loose matching) ===== */
 
 // canonical list – longest-first will be applied below
@@ -89,7 +141,132 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const app = express();
+const FormData = require('form-data');
+
+// ---- Delivery status tracking (CRM + console) ----
+const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
+
+function loadCrmLeadsSafe() {
+  try {
+    const raw = fs.readFileSync(CRM_LEADS_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    // can be array or { leads: [...] }
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.leads)) return data.leads;
+    return [];
+  } catch (e) {
+    if (DEBUG) console.warn('loadCrmLeadsSafe failed, returning []:', e && e.message ? e.message : e);
+    return [];
+  }
+}
+
+function saveCrmLeadsSafe(leads) {
+  try {
+    const payload = Array.isArray(leads) ? leads : [];
+    fs.writeFileSync(CRM_LEADS_PATH, JSON.stringify(payload, null, 2), 'utf8');
+  } catch (e) {
+    console.error('saveCrmLeadsSafe failed:', e && e.message ? e.message : e);
+  }
+}
+
+/**
+ * Record a WhatsApp delivery status against a lead (by phone).
+ * Stores:
+ *  - lastDeliveryStatus: 'sent' | 'delivered' | 'read' | 'failed'
+ *  - lastDeliveryCode: error code if any (e.g. 131021)
+ *  - lastDeliveryReason: short text (e.g. 'not a WhatsApp user')
+ *  - lastDeliveryAt: ISO timestamp
+ *  - lastDeliveryMessageId: WA message id
+ */
+function recordDeliveryStatusForPhone(phone, statusPayload) {
+  if (!phone) return;
+
+  const leads = loadCrmLeadsSafe();
+  const phoneNorm = String(phone).replace(/\s+/g, '');
+
+  let hit = null;
+  for (const lead of leads) {
+    const lp = String(lead.Phone || lead.phone || '').replace(/\s+/g, '');
+    if (!lp) continue;
+    if (lp === phoneNorm) {
+      hit = lead;
+      break;
+    }
+  }
+
+  // if no existing lead, optionally create one so we still track
+  if (!hit) {
+    hit = {
+      ID: phoneNorm,
+      Name: 'UNKNOWN',
+      Phone: phoneNorm,
+      Status: 'auto-ingested',
+      Timestamp: new Date().toISOString(),
+      LeadType: 'wa_delivery_only'
+    };
+    leads.push(hit);
+  }
+
+  hit.lastDeliveryStatus    = statusPayload.status || '';
+  hit.lastDeliveryCode      = statusPayload.errorCode || null;
+  hit.lastDeliveryReason    = statusPayload.errorTitle || statusPayload.errorDetail || null;
+  hit.lastDeliveryAt        = new Date(statusPayload.ts || Date.now()).toISOString();
+  hit.lastDeliveryMessageId = statusPayload.messageId || '';
+
+  saveCrmLeadsSafe(leads);
+
+  if (DEBUG) {
+    console.log('DELIVERY_STATUS_TRACKED', {
+      phone: phoneNorm,
+      status: hit.lastDeliveryStatus,
+      code: hit.lastDeliveryCode,
+      reason: hit.lastDeliveryReason
+    });
+  }
+}
+
+
+// ensure canonical CRM mount
+app.use("/crm", require("./routes/crm.cjs"));
+
 app.use(express.json());
+
+app.use(express.static(path.join(__dirname, "public")));
+
+const leadsRouter = require('./routes/leads.cjs');
+app.use('/api/leads', leadsRouter);
+
+// GET /api/uploads/list — list files in public/uploads
+app.get('/api/uploads/list', (req, res) => {
+try {
+const dir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(dir)) return res.json({ ok: true, files: [] });
+const names = fs.readdirSync(dir).filter(f => fs.statSync(path.join(dir,
+f)).isFile());
+const files = names.map(n => ({ name: n, url: `/uploads/${n}` }));
+return res.json({ ok: true, files });
+} catch (e) {
+console.error('/api/uploads/list error', e && e.message ? e.message : e);
+return res.status(500).json({ ok: false, error: String(e) });
+}
+});
+
+// === Google Sheets Sync Routes ===
+const sheetsRouter = require('./routes/sheets.cjs');
+app.use('/api/sheets', sheetsRouter);
+
+// === Dashboard Routes (SPA) ===
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
+});
+
+// --- Serve SPA index for /dashboard and any subpath (regex handler) ---
+// --- Fixed SPA handler for /dashboard and subpaths inserted here ---
+
+app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
+  try {
+  } catch (e) { console.error('sendFile error', e && e.message ? e.message : e); return res.status(500).send('internal'); }
+});
 
 // fetch compatibility
 const fetch = (global.fetch) ? global.fetch : require('node-fetch');
@@ -100,6 +277,8 @@ const PHONE_NUMBER_ID = (process.env.PHONE_NUMBER_ID || '').trim();
 const ADMIN_WA        = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
 const VERIFY_TOKEN    = (process.env.VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
 
+const CONTACT_SHEET_CSV_URL = (process.env.CONTACT_SHEET_CSV_URL || '').trim();
+const CONTACT_POSTER_URL    = (process.env.CONTACT_POSTER_URL || '').trim();
 const SHEET_TOYOTA_CSV_URL    = (process.env.SHEET_TOYOTA_CSV_URL || '').trim();
 const SHEET_HYUNDAI_CSV_URL   = (process.env.SHEET_HYUNDAI_CSV_URL || '').trim();
 const SHEET_MERCEDES_CSV_URL  = (process.env.SHEET_MERCEDES_CSV_URL || '').trim();
@@ -480,53 +659,89 @@ async function loadUsedSheetRows() {
   return [];
 }
 
-// ---------------- Bullet EMI simulation (USED) ----------------
-function simulateBulletPlan({ loanAmount, months, internalRatePct, bulletPct = 0.25 }) {
-  const L = Number(loanAmount || 0);
-  const N = Number(months || 0);
-  const r = Number(internalRatePct || USED_CAR_ROI_INTERNAL) / 12 / 100;
-  if (!L || !N || !isFinite(r)) return null;
+// Simulate a bullet loan plan:
+// - bulletPct portion of loan is paid in "bullets" (e.g. yearly)
+// - EMI is calculated on (loan - bullet_total)
+// - interest is charged on both EMI principal and bullet principal,
+//   but tenure always ends at `months` (no extension).
+function simulateBulletPlan({ amount, rate, months, bulletPct }) {
+  const L   = Number(amount || 0);      // loan amount
+  const R   = Number(rate || 0);        // annual ROI % (e.g. 10)
+  const n   = Number(months || 0);      // tenure in months
+  const pct = Number(bulletPct || 0);   // e.g. 0.25 for 25%
 
-  const bullet_total = Math.round(L * Number(bulletPct || 0.25));
-  const num_bullets  = Math.max(1, Math.floor(N / 12));
-  const bullet_each  = Math.round(bullet_total / num_bullets);
+  if (!L || !R || !n || !pct) return null;
 
+  // Bullet principal (fixed % of loan)
+  const bullet_total = L * pct;
+
+  // Number of bullets inside tenure (yearly bullets: 12,24,...)
+  const num_bullets = Math.max(1, Math.floor(n / 12));
+  const bullet_each = bullet_total / num_bullets;
+
+  // EMI principal = loan - bullet principal
   const principal_for_emi = L - bullet_total;
-  const monthly_emi = calcEmiSimple(principal_for_emi, internalRatePct, N);
 
-  let principal           = principal_for_emi;
-  let total_interest      = 0;
+  // Monthly interest rate
+  const r = R / 12 / 100;
+
+  // Base EMI on non-bullet principal over full tenure
+  let base_emi = 0;
+  if (principal_for_emi > 0 && r > 0) {
+    const pow = Math.pow(1 + r, n);
+    base_emi = (principal_for_emi * r * pow) / (pow - 1);
+  } else if (principal_for_emi > 0 && n > 0) {
+    base_emi = principal_for_emi / n;
+  }
+
+  // Now simulate month by month, adding interest on bullet principal
+  let remainingBullet     = bullet_total;
   let total_emi_paid      = 0;
   let total_bullets_paid  = 0;
+  let monthly_emi_example = 0; // EMI in first month including bullet interest
 
-  for (let m = 1; m <= N; m++) {
-    const interest = Math.round(principal * r);
-    let principal_paid_by_emi = monthly_emi - interest;
-    if (principal_paid_by_emi < 0) principal_paid_by_emi = 0;
-    principal = Math.max(0, principal - principal_paid_by_emi);
-    total_interest += interest;
-    total_emi_paid += monthly_emi;
+  for (let m = 1; m <= n; m++) {
+    // Interest on bullet principal this month (on whatever is still outstanding)
+    const bulletInterestThisMonth = remainingBullet * r;
 
-    if (m % 12 === 0) {
-      const remaining_bullets = bullet_total - total_bullets_paid;
-      const bullet_paid = Math.max(0, Math.min(bullet_each, remaining_bullets));
-      total_bullets_paid += bullet_paid;
-      principal = Math.max(0, principal - bullet_paid);
+    // Total EMI this month = base EMI + bullet interest
+    const paymentThisMonth = base_emi + bulletInterestThisMonth;
+
+    total_emi_paid += paymentThisMonth;
+
+    // At each year (12, 24, 36, ...) pay one bullet principal chunk
+    if (m % 12 === 0 && remainingBullet > 0) {
+      const pay = Math.min(bullet_each, remainingBullet);
+      remainingBullet    -= pay;
+      total_bullets_paid += pay;
+    }
+
+    // remember the "typical" monthly EMI including bullet interest for display
+    if (m === 1) {
+      monthly_emi_example = Math.round(paymentThisMonth);
     }
   }
 
-  const total_payable = total_emi_paid + total_bullets_paid;
+  const total_payable = Math.round(total_emi_paid + total_bullets_paid);
+
   return {
-    loan: L,
-    months: N,
-    internalRatePct,
-    monthly_emi,
-    bullet_total,
+    loan: Math.round(L),
+    rate: R,
+    months: n,
+    bulletPct: pct,
+
+    principal_for_emi: Math.round(principal_for_emi),
+
+    // This is what you display as "Monthly EMI (approx)"
+    monthly_emi: monthly_emi_example,
+    base_emi: Math.round(base_emi),
+
+    bullet_total: Math.round(bullet_total),
     num_bullets,
-    bullet_each,
-    total_interest,
-    total_emi_paid,
-    total_bullets_paid,
+    bullet_each: Math.round(bullet_each),
+
+    total_emi_paid: Math.round(total_emi_paid),
+    total_bullets_paid: Math.round(total_bullets_paid),
     total_payable
   };
 }
@@ -770,7 +985,6 @@ const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
  * - Message must start with a greeting keyword (hi/hello/hey/namaste/enquiry/inquiry/help/start).
  * - Message must be short (<= 4 words) to avoid matching model/variant queries.
  * - Respect the GREETING_WINDOW_MS throttle to avoid repeated greetings.
- */
 function shouldGreetNow(from, msgText) {
   try {
     if (ADMIN_WA && from === ADMIN_WA) return false;
@@ -813,7 +1027,6 @@ try {
 /* =======================================================================
    Signature GPT & Brochure helpers
    ======================================================================= */
-const SIGNATURE_MODEL = process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || 'gpt-4o-mini';
 const BROCHURE_INDEX_PATH = process.env.BROCHURE_INDEX_PATH || './brochures/index.json';
 
 // advisory intent detector
@@ -1280,16 +1493,18 @@ app.get('/webhook', (req, res) => {
 });
 
 // -------------- CRM API ROUTES ---------------
-
-// GET /crm/leads  (for dashboards)
 app.get('/crm/leads', async (req, res) => {
   try {
-    const limit = Number(req.query.limit || 100);
-    const leads = await getAllLeads(limit);
-    res.json({ ok: true, count: leads.length, leads });
+    // ALWAYS prefer manually loaded leads
+    if (globalThis.leads && Array.isArray(globalThis.leads) && globalThis.leads.length) {
+      return res.json({ ok:true, leads: globalThis.leads });
+    }
+
+    // fallback disabled to avoid overwriting
+    return res.json({ ok:true, leads: [] });
+
   } catch (e) {
-    console.error('CRM /crm/leads error:', e && e.message ? e.message : e);
-    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+    return res.status(500).json({ ok:false, error: String(e) });
   }
 });
 
@@ -1365,8 +1580,11 @@ app.post('/admin/test_alert', async (req, res) => {
 // ---------------- main webhook handler ----------------
 app.post('/webhook', async (req, res) => {
   try {
+    // ensure `short` exists in the outer scope so later code can't throw ReferenceError
+    let short = {};
+
     if (DEBUG) {
-      const short = {
+      short = {
         object: req.body && req.body.object,
         entry0: Array.isArray(req.body?.entry)
           ? Object.keys(req.body.entry[0] || {})
@@ -1375,18 +1593,63 @@ app.post('/webhook', async (req, res) => {
       console.log('📩 Incoming webhook (short):', JSON.stringify(short));
     }
 
+    /* AUTO-INGEST (minimal, safe): forward to /crm/ingest via helper */
+    const autoIngest = require("./routes/auto_ingest.cjs");
+    const senderForAuto = short?.from || req.body?.from || "";
+    const senderNameForAuto = short?.name || req.body?.name || senderForAuto;
+    const lastMsgForAuto = short?.text || req.body?.text || "";
+    if (senderForAuto) autoIngest({ bot:"MR.CAR", channel:"whatsapp", from: senderForAuto, name: senderNameForAuto, lastMessage: lastMsgForAuto, meta:{source:"webhook-auto"} });
+
     const entry  = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value  = change?.value || {};
 
-    if (value.statuses && !value.messages) {
-      if (DEBUG) console.log('Received status-only event (sent/delivered/read) — ignoring for replies.');
-      return res.sendStatus(200);
+    // ---- WhatsApp delivery status tracking ----
+if (value.statuses && !value.messages) {
+  for (const st of value.statuses) {
+    try {
+      const status      = st.status;              // 'sent', 'delivered', 'read', 'failed'
+      const messageId   = st.id;
+      const recipient   = st.recipient_id;
+      const ts          = st.timestamp ? Number(st.timestamp) * 1000 : Date.now();
+      const errorCode   = st.errors && st.errors[0] ? st.errors[0].code : null;
+      const errorTitle  = st.errors && st.errors[0] ? st.errors[0].title : null;
+      const errorDetail = st.errors && st.errors[0]
+        ? (st.errors[0].details || st.errors[0].error_data)
+        : null;
+
+      // 1) Log to console
+      console.log('WA DELIVERY STATUS EVENT:', {
+        recipient,
+        status,
+        messageId,
+        errorCode,
+        errorTitle
+      });
+
+      // 2) Save into CRM
+      recordDeliveryStatusForPhone(recipient, {
+        status,
+        messageId,
+        errorCode,
+        errorTitle,
+        errorDetail,
+        ts
+      });
+
+    } catch (e) {
+      console.warn('Error handling WA status event:', e?.message || e);
     }
+  }
+
+  if (DEBUG) {
+    console.log('Status-only event processed for delivery tracking.');
+  }
+  return res.sendStatus(200);  // Important: DO NOT REMOVE THIS
+}
 
     const msg     = value?.messages?.[0];
-    const contact = value?.contacts?.[0];
-    if (!msg) return res.sendStatus(200);
+    const contact = value?.contacts?.[0];	
 
     const from = msg.from;
     const type = msg.type;
@@ -1802,6 +2065,510 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ---------------- start server ----------------
+
+/* --- FORCE: serve /assets from public/dashboard/assets (regex fallback) --- */
+app.get(/^\/assets\/(.*)$/, (req, res) => {
+  try {
+    const rel = (req.params && req.params[0]) || req.path.replace(/^\/assets\//, "");
+    const filePath = path.join(__dirname, "public", "dashboard", "assets", rel);
+    if (fs.existsSync(filePath)) return res.sendFile(filePath);
+    return res.status(404).send("asset not found");
+  } catch (e) {
+    console.error("assets fallback error", e && e.message ? e.message : e);
+    return res.status(500).send("internal");
+  }
+});
+
+/* Serve vite.svg at root (safe) */
+app.get("/vite.svg", (req, res) => {
+  try {
+    const p = path.join(__dirname, "public", "dashboard", "vite.svg");
+    if (fs.existsSync(p)) return res.sendFile(p);
+    return res.status(404).send("vite.svg not found");
+  } catch (e) {
+    console.error("vite.svg handler error", e && e.message ? e.message : e);
+    return res.status(500).send("internal");
+  }
+});
+/* --- end snippet --- */
+// --- MRCAR: manual ingest from JSON (dedupe, replace global leads) ---
+app.post('/api/leads/ingest-from-json', async (req, res) => {
+  try {
+    const arr = req.body;
+    if (!Array.isArray(arr)) {
+      return res.status(400).json({ ok:false, error:'Body must be JSON array' });
+    }
+
+    // Deduplicate (id > phone > name)
+    const seen = new Set();
+    const uniq = [];
+    for (const l of arr) {
+      const key = (l.id || l.phone || l.name || '').toString().trim();
+      if (!key) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniq.push(l);
+    }
+
+    
+globalThis.leads = uniq;
+try { global.leadsDB = uniq; } catch(e) { /* ignore */ }
+  
+    return res.json({ ok:true, replaced: uniq.length });
+  } catch(e){
+    console.error("ingest-from-json error", e);
+    return res.status(500).json({ ok:false, error:String(e) });
+  }
+});
+// === IMAGE UPLOAD ENDPOINT (for sending pics on WhatsApp) ===
+const multer = require("multer");
+
+const imageStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "public/uploads");
+  },
+  filename: function (req, file, cb) {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, unique + "-" + file.originalname.replace(/\s+/g, "_"));
+  }
+});
+
+const uploadImage = multer({ storage: imageStorage });
+
+app.post("/api/uploads/image", uploadImage.single("image"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ ok: false, error: "No image uploaded" });
+  }
+  const url = "/uploads/" + req.file.filename;
+  return res.json({ ok: true, url });
+});
+
+// === BULK WHATSAPP SENDER ===
+app.post("/api/bulk/send", async (req, res) => {
+  const rows = req.body.rows || [];
+  let sent = 0;
+
+  for (const r of rows) {
+    if (!r.phone || !r.message) continue;
+
+    try {
+      await waSendText(r.phone, r.message);
+      sent++;
+      await new Promise(r => setTimeout(r, 350)); // avoid Meta rate-limit
+    } catch (err) {
+      console.warn("bulk send failed for", r.phone, err.message);
+    }
+  }
+
+  res.json({ ok: true, sent });
+});
+
+app.post('/send-image', async (req, res) => {
+try {
+const { to, imageUrl, caption } = req.body || {};
+if (!to || !imageUrl) return res.status(400).json({ ok:false, error:'missing to or imageUrl' });
+
+// If imageUrl is a local path (starts with /uploads or does not start with http)
+let mediaId = null;
+let useLink = null;
+if (String(imageUrl).startsWith('/uploads') || !/^https?:\/\//i.test(imageUrl)) {
+// treat as local server file
+const localRel = imageUrl.replace(/^\//, ''); // e.g. public/uploads/xxx
+const localPath = path.join(__dirname, localRel);
+if (!fs.existsSync(localPath)) return res.status(404).json({ ok:false, error:'local file not found' });
+mediaId = await uploadMediaToWhatsApp(localPath);
+} else {
+// If fully public URL, optionally try sending directly (provider may require public URL)
+useLink = imageUrl;
+}
+
+// send via WhatsApp Cloud API
+const token = process.env.META_TOKEN;
+const phoneNumberId = process.env.PHONE_NUMBER_ID;
+if (!token || !phoneNumberId) return res.status(500).json({ ok:false, error:'missing META_TOKEN or PHONE_NUMBER_ID' });
+
+const body = {
+messaging_product: 'whatsapp',
+to: String(to).replace(/\D/g, ''),
+type: 'image',
+image: mediaId ? { id: mediaId, caption: caption || '' } : { link: useLink, caption: caption || '' }
+};
+
+const sendResp = await fetch(`https://graph.facebook.com/v17.0/${phoneNumberId}/messages`, {
+method: 'POST',
+headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+body: JSON.stringify(body)
+});
+const jr = await sendResp.json();
+if (!sendResp.ok) return res.status(500).json({ ok:false, error: jr });
+return res.json({ ok:true, sent:true, resp: jr });
+} catch (e) {
+console.error('send-image error', e && e.message ? e.message : e);
+return res.status(500).json({ ok:false, error: String(e) });
+}
+});
+// === waSendImage helper (WhatsApp Cloud API) ===
+async function waSendImage(to, mediaId, caption="") {
+  const token = process.env.META_TOKEN;
+  const phoneNumberId = process.env.PHONE_NUMBER_ID;
+  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "image",
+    image: { id: mediaId, caption: caption }
+  };
+
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const j = await r.json();
+  return j;
+}
+
+// === uploadMediaToWhatsApp: upload a local file to WhatsApp Cloud and return media_id ===
+async function uploadMediaToWhatsApp(localPath) {
+  try {
+    const token = process.env.META_TOKEN || process.env.WA_TOKEN || process.env.META_ACCESS_TOKEN;
+    const phoneNumberId = (process.env.PHONE_NUMBER_ID || process.env.WA_PHONE_NUMBER_ID || "").trim();
+    if (!token || !phoneNumberId) throw new Error('Missing META_TOKEN or PHONE_NUMBER_ID');
+
+    // resolve local file path (accept "/uploads/xxx" or "uploads/xxx" or "public/uploads/xxx")
+    const rel = String(localPath).replace(/^\/+/, '');
+    let fullPath = path.resolve(__dirname, rel);
+    if (!fs.existsSync(fullPath)) {
+      // try under public/
+      fullPath = path.resolve(__dirname, 'public', rel);
+    }
+    if (!fs.existsSync(fullPath)) throw new Error('Local file not found: ' + fullPath);
+
+    const form = new FormData();
+    form.append('file', fs.createReadStream(fullPath));
+    form.append('messaging_product', 'whatsapp');
+
+    const resp = await fetch(`https://graph.facebook.com/v17.0/${phoneNumberId}/media`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, ...form.getHeaders() },
+      body: form
+    });
+
+    const j = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      throw new Error('Upload failed: ' + JSON.stringify(j));
+    }
+    // usually { id: "..." }
+    return j && (j.id || j.media || j) ;
+  } catch (e) {
+    console.error('uploadMediaToWhatsApp error', e && e.message ? e.message : e);
+    throw e;
+  }
+}
+
+app.post('/send-image', async (req, res) => {
+  try {
+    const { to, file, caption } = req.body;
+    if (!to || !file) return res.json({ ok:false, error:"Missing to/file" });
+
+    const localPath = path.join(__dirname, 'public/uploads', file);
+
+    if (!fs.existsSync(localPath)) {
+      return res.json({ ok:false, error:"File not found in uploads/" });
+    }
+
+    const uploaded = await uploadMediaToWhatsApp(localPath);
+    const mediaId = uploaded.id;
+
+    if (!mediaId) return res.json({ ok:false, error:"Upload failed", uploaded });
+
+    const sent = await waSendImage(to, mediaId, caption || "");
+
+    res.json({ ok:true, mediaId, sent });
+  }
+  catch (e) {
+    console.error("send-image error:", e);
+    res.json({ ok:false, error:String(e) });
+  }
+});
+// ============================================================================
+//  Sheet broadcast helpers (do NOT affect normal "Hi" → Namaste flow)
+// ============================================================================
+
+// simple CSV parser for your contact sheet (no commas inside fields)
+function parseCsvFromContactSheet(text) {
+  const lines = String(text || '').trim().split(/\r?\n/);
+  if (!lines.length) return [];
+
+  const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const rows = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+
+    const parts = raw.split(',');
+    const row = {};
+
+    header.forEach((key, idx) => {
+      row[key] = (parts[idx] || '').trim();
+    });
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+// read contacts from the Google Sheet defined in CONTACT_SHEET_CSV_URL
+async function fetchContactsFromSheet() {
+  if (!CONTACT_SHEET_CSV_URL) {
+    throw new Error('CONTACT_SHEET_CSV_URL is not set in .env');
+  }
+
+  if (DEBUG) console.log('Sheet broadcast: fetching contacts from', CONTACT_SHEET_CSV_URL);
+
+  const resp = await fetch(CONTACT_SHEET_CSV_URL);
+  if (!resp.ok) {
+    throw new Error(`Sheet fetch failed: ${resp.status} ${resp.statusText}`);
+  }
+
+  const text = await resp.text();
+  const rawRows = parseCsvFromContactSheet(text);
+
+  const contacts = rawRows
+    .map(row => {
+      const name = row['name'] || row['Name'] || 'UNKNOWN';
+      const phone = row['phone'] || row['Phone'] || '';
+      const city = row['city'] || row['City'] || '';
+      const leadFrom = row['lead from'] || row['lead_from'] || '';
+      const customerType = row['customer type'] || row['customer_type'] || '';
+
+      if (!phone) return null;
+
+      return { name, phone, city, leadFrom, customerType };
+    })
+    .filter(Boolean);
+
+  if (DEBUG) console.log(`Sheet broadcast: parsed ${contacts.length} contacts from sheet`);
+  return contacts;
+}
+
+// send the same mr_car_welcome Namaste template we used in curl,
+// but using CONTACT_POSTER_URL as the header image
+async function sendSheetWelcomeTemplate(to, name) {
+  if (!META_TOKEN || !PHONE_NUMBER_ID) {
+    throw new Error('META_TOKEN or PHONE_NUMBER_ID not set');
+  }
+  if (!CONTACT_POSTER_URL) {
+    throw new Error('CONTACT_POSTER_URL not set in .env');
+  }
+
+  const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'template',
+    template: {
+      name: 'mr_car_welcome',          // your existing Namaste template
+      language: { code: 'en' },
+      components: [
+        {
+          type: 'header',
+          parameters: [
+            {
+              type: 'image',
+              image: {
+                link: CONTACT_POSTER_URL
+              }
+            }
+          ]
+        },
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: name || 'Customer' }
+          ]
+        }
+      ]
+    }
+  };
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${META_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    console.error('WA sheet-broadcast error:', to, resp.status, JSON.stringify(data).slice(0, 300));
+    return false;
+  }
+
+  if (DEBUG) console.log('WA sheet-broadcast sent:', to, JSON.stringify(data));
+  return true;
+}
+
+// small delay helper so we don’t spam WhatsApp too fast
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// --------------------------------------------------------------------------
+//  POST /tools/send-greeting-from-sheet
+//  - Reads Google Sheet
+//  - Sends mr_car_welcome + poster to each valid phone
+//  - DOES NOT change normal webhook flow
+// --------------------------------------------------------------------------
+app.post('/tools/send-greeting-from-sheet', async (req, res) => {
+  try {
+    if (!CONTACT_SHEET_CSV_URL) {
+      return res.status(500).json({ ok: false, error: 'CONTACT_SHEET_CSV_URL missing in env' });
+    }
+    if (!CONTACT_POSTER_URL) {
+      return res.status(500).json({ ok: false, error: 'CONTACT_POSTER_URL missing in env' });
+    }
+
+    const contacts = await fetchContactsFromSheet();
+
+    // basic filter: Indian mobile numbers starting with 91 and at least 10 digits
+    const targets = contacts.filter(c => {
+      const p = String(c.phone || '').replace(/\s+/g, '');
+      return p && p.startsWith('91') && p.length >= 10;
+    });
+
+    if (DEBUG) console.log(`Sheet broadcast: will send to ${targets.length} contacts`);
+
+    let sent = 0;
+    const failed = [];
+
+    for (const c of targets) {
+      const phone = String(c.phone || '').replace(/\s+/g, '');
+      const name = c.name || 'Customer';
+
+      try {
+        const ok = await sendSheetWelcomeTemplate(phone, name);
+        if (ok) {
+          sent++;
+        } else {
+          failed.push(phone);
+        }
+      } catch (err) {
+        console.warn('Sheet broadcast: error for', phone, err && err.message ? err.message : err);
+        failed.push(phone);
+      }
+
+      // 0.8s pause between messages
+      await delay(800);
+    }
+
+    if (DEBUG) console.log(`Sheet broadcast: done. Sent=${sent}, Failed=${failed.length}`);
+
+    return res.json({
+      ok: true,
+      total: targets.length,
+      sent,
+      failed: failed.length,
+      failedPhones: failed
+    });
+  } catch (err) {
+    console.error('Sheet broadcast route failed:', err);
+    return res.status(500).json({ ok: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+// --------------------------------------------------------------------------
+//  Simple UI for "Send Greeting" broadcast
+//  URL: GET /tools/send-greeting-ui
+//  Shows a single button that calls POST /tools/send-greeting-from-sheet
+// --------------------------------------------------------------------------
+app.get('/tools/send-greeting-ui', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Send Greeting • Mr.Car CRM</title>
+  <style>
+    body { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:#0b1020; color:#f5f5f5; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+    .card { background:#11162a; padding:24px 28px; border-radius:16px; box-shadow:0 18px 45px rgba(0,0,0,0.45); max-width:420px; width:100%; }
+    h1 { font-size:20px; margin:0 0 8px 0; }
+    p { font-size:14px; margin:4px 0 12px 0; color:#c0c4d0; }
+    button { background:#2563eb; color:white; border:none; border-radius:999px; padding:10px 20px; font-size:14px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; }
+    button[disabled] { opacity:0.6; cursor:default; }
+    small { display:block; font-size:11px; color:#9ca3af; margin-top:8px; }
+    #status { margin-top:10px; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Send Greeting to Sheet Contacts</h1>
+    <p>This will send the <strong>Namaste + poster</strong> template to all valid phone numbers in the Google Sheet.</p>
+    <button id="sendBtn">
+      <span>🚀 Send Greeting</span>
+    </button>
+    <small>Uses /tools/send-greeting-from-sheet on this server.</small>
+    <div id="status">Idle.</div>
+  </div>
+
+  <script>
+    (function () {
+      const btn = document.getElementById('sendBtn');
+      const status = document.getElementById('status');
+
+      btn.addEventListener('click', async () => {
+        const ok = window.confirm('Send Namaste greeting + poster to ALL contacts from Google Sheet now?');
+        if (!ok) return;
+
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = 'Sending...';
+        status.textContent = 'Broadcast in progress...';
+
+        try {
+          const resp = await fetch('/tools/send-greeting-from-sheet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+
+          if (!resp.ok) {
+            const text = await resp.text();
+            console.error('Broadcast failed:', resp.status, text);
+            alert('Error sending greeting. Check server logs.');
+            status.textContent = 'Error sending greeting. Check server logs.';
+            return;
+          }
+
+          const data = await resp.json();
+          console.log('Broadcast result:', data);
+          const msg = 'Greeting sent: ' + data.sent + '/' + data.total + ' delivered, ' + data.failed + ' failed.';
+          alert(msg);
+          status.textContent = msg;
+        } catch (e) {
+          console.error('Exception:', e);
+          alert('Unexpected error. Check console/server logs.');
+          status.textContent = 'Unexpected error. See logs.';
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>`);
+});
+
 app.listen(PORT, () => {
   console.log('==== MR.CAR BUILD TAG: 2025-11-25-NEWCAR-ADVISORY-FIX ====');
   console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
@@ -1814,3 +2581,563 @@ app.listen(PORT, () => {
     DEBUG
   });
 });
+
+//    Uses existing LEADS_FILE and safeJsonRead helper.
+if (!app._leads_compat_installed) {
+  app.get('/leads', (req, res) => {
+    try {
+      const raw = safeJsonRead(LEADS_FILE) || {};
+      // older backups stored { leads: [...] } or plain array
+      let leads = [];
+      if (Array.isArray(raw)) leads = raw;
+      else if (Array.isArray(raw.leads)) leads = raw.leads;
+      else if (raw && raw.leads && Array.isArray(raw.leads)) leads = raw.leads;
+      res.json(leads);
+    } catch (e) {
+      console.error('GET /leads error', e && e.message ? e.message : e);
+      res.json([]);
+    }
+  });
+  app._leads_compat_installed = true;
+}
+
+/* --- test route: verify Express can serve the dashboard index.html --- */
+try {
+  if (typeof app !== 'undefined' && typeof path !== 'undefined') {
+    app.get('/test-dashboard', (req, res) => {
+      try {
+        return res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
+      } catch (e) {
+        console.error('test-dashboard sendFile error', e && e.message ? e.message : e);
+        return res.status(500).send('internal');
+      }
+    });
+  } else {
+    console.warn('Skipping /test-dashboard route: app or path not defined');
+  }
+} catch (e) {
+  console.error('Failed to install /test-dashboard route', e && e.message ? e.message : e);
+}
+
+/* APPEND: SPA catch-all for /dashboard and subpaths (safe) */
+app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
+  try {
+    return res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
+  } catch (e) {
+    console.error('sendFile error for /dashboard', e && e.message ? e.message : e);
+    return res.status(500).send('internal');
+  }
+});
+/* end APPEND */
+
+// EXPORT_CSV_ENDPOINT_MARKER
+// Minimal CSV export/import endpoints added for local dashboard export/import.
+const csvStringifyLocal = (rows) => rows.map(r => r.map(c => '"' + String(c||'').replace(/"/g,'""') + '"').join(',')).join('\n');
+
+try {
+  const multer = require('multer');
+  const upload = multer({ storage: multer.memoryStorage() });
+
+  app.get('/api/leads/export-csv', async (req, res) => {
+    try {
+      let leads = [];
+      if (typeof getLeadsFromDbOrCache === 'function') {
+        leads = await getLeadsFromDbOrCache();
+      } else if (typeof db !== 'undefined' && db.collection) {
+        // try common fallback (may or may not apply)
+        try { leads = await db.collection('leads').find().toArray(); } catch(e) {}
+      }
+      const rows = [['ID','Name','Phone','Status','Timestamp'], ...(leads||[]).map(l => [l.id||l._id||'', l.name||'', l.phone||'', l.status||'', l.timestamp||''])];
+      const csv = csvStringifyLocal(rows);
+      res.setHeader('Content-Type','text/csv');
+      res.setHeader('Content-Disposition','attachment; filename="leads.csv"');
+      return res.send(csv);
+    } catch(err) {
+      console.error('export-csv err', err);
+      return res.status(500).send('export failed');
+    }
+  });
+
+  app.post('/api/leads/import-csv', upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ ok:false, error: 'no file uploaded' });
+      const csv = req.file.buffer.toString('utf8');
+      // naive CSV split (works for simple CSVs with quoted values)
+      const rows = csv.split(/\r?\n/).filter(Boolean).map(line => {
+        // split on commas not inside quotes (simple)
+        return line.match(/(?:\"([^\"]*(?:\"\"[^\"]*)*)\")|([^,]+)/g).map(cell => (cell||'').replace(/^"|"$/g,'').replace(/""/g,'"'));
+      });
+      const header = rows.shift().map(h => h.toString().trim().toLowerCase());
+      const docs = rows.map(r => {
+        const obj = {};
+        for (let i=0;i<header.length;i++) obj[header[i]] = (r[i]||'').toString().trim();
+        return obj;
+      });
+      console.log('imported rows', docs.length);
+      // TODO: plug into your ingest/save pipeline (e.g., await ingestLeads(docs))
+      return res.json({ ok:true, imported: docs.length });
+    } catch(e){
+      console.error('import-csv err', e);
+      return res.status(500).json({ ok:false, error: e.message });
+    }
+  });
+} catch(e) {
+  console.error('CSV endpoints setup error', e);
+}
+// MRCAR_API_LEADS_ENDPOINT_MARKER
+try {
+  app.get('/api/leads', async (req, res) => {
+    try {
+      const q = (req.query.q||'').toString().trim();
+      const leadType = (req.query.lead_type||'').toString().trim().toLowerCase();
+      let leads = [];
+      if (typeof getLeadsFromDbOrCache === 'function') {
+        try { leads = await getLeadsFromDbOrCache(); } catch(e) { console.error('getLeadsFromDbOrCache err', e); leads = []; }
+      } else if (Array.isArray(globalThis.leads)) {
+        leads = globalThis.leads;
+      } else {
+        leads = [];
+      }
+      leads = (leads||[]).map(l => ({
+        id: l.id||l.ID||'', name: l.name||l.Name||'', phone: l.phone||l.Phone||'',
+        status: l.status||l.Status||'', timestamp: l.timestamp||l.Timestamp||'',
+        car_enquired: l.car_enquired||l.car||l.variant||'',
+        budget: l.budget||l.Budget||'', last_ai_reply: l.last_ai_reply||'',
+        ai_quote: l.ai_quote||'', _raw:l
+      }))
+      if (q) {
+        const ql = q.toLowerCase();
+        leads = leads.filter(x => ((x.id||'') + (x.name||'') + (x.phone||'') + (x.car_enquired||'')).toLowerCase().includes(ql));
+      }
+      if (leadType) {
+        const lt = leadType;
+        leads = leads.filter(x => (x.status||'').toLowerCase().includes(lt) || (x.car_enquired||'').toLowerCase().includes(lt));
+      }
+      return res.json({ ok:true, leads });
+    } catch(e) {
+      return res.status(500).json({ ok:false, error: e.message||String(e) });
+    }
+  });
+  console.log('MRCAR: /api/leads endpoint installed (normalizes extra fields)');
+} catch(e) {
+  console.error('MRCAR: failed to install /api/leads endpoint', e);
+}
+
+
+
+// MRCAR_LEADS_DEBUG_MARKER
+// Diagnostic endpoint to inspect possible lead sources and sample items
+try {
+  app.get('/api/leads/debug-sources', async (req, res) => {
+    try {
+      const out = { ok:true, found: {} };
+
+      // helper to safe call functions
+      async function tryFn(fn) {
+        try {
+          const v = await fn();
+          return { ok:true, sample: Array.isArray(v) ? v.slice(0,3) : v };
+        } catch(e) {
+          return { ok:false, error: String(e) };
+        }
+      }
+
+      // 1) getLeadsFromDbOrCache
+      out.found.getLeadsFromDbOrCache = (typeof getLeadsFromDbOrCache === 'function') ? 'function' : 'none';
+      if (typeof getLeadsFromDbOrCache === 'function') {
+        out.getLeadsFromDbOrCache = await tryFn(() => getLeadsFromDbOrCache());
+        out.getLeadsFromDbOrCache_count = Array.isArray(out.getLeadsFromDbOrCache.sample) ? out.getLeadsFromDbOrCache.sample.length : (out.getLeadsFromDbOrCache.sample ? 1 : 0);
+      }
+
+      // 2) db.collection('leads')
+      out.found.db = (typeof db !== 'undefined' && db && db.collection) ? 'db-collection-available' : 'no-db';
+      if (typeof db !== 'undefined' && db && db.collection) {
+        try {
+          const c = db.collection('leads');
+          const sample = await c.find().limit(3).toArray().catch(e=>{throw e});
+          out.db_collection_sample = sample;
+          out.db_collection_count_guess = (Array.isArray(sample) ? sample.length : 0);
+        } catch(e) {
+          out.db_collection_error = String(e);
+        }
+      }
+
+      // 3) global caches / common names
+      const tries = ['globalLeadsCache','leadsCache','leadsList','leads','globalThis.leads'];
+      out.found.globals = {};
+      for (const k of tries) {
+        try {
+          let val = undefined;
+          if (k === 'globalThis.leads') val = globalThis.leads;
+          else if (typeof globalThis[k] !== 'undefined') val = globalThis[k];
+          else if (typeof eval("typeof " + k + " !== 'undefined' && " + k) !== 'undefined') {
+            // not reliable; skip
+          }
+          out.found.globals[k] = Array.isArray(val) ? ('array:' + val.length) : (val ? 'present' : 'none');
+          if (Array.isArray(val)) out[k + '_sample'] = val.slice(0,3);
+        } catch(e) {
+          out.found.globals[k] = 'error';
+          out[k + '_error'] = String(e);
+        }
+      }
+
+      // 4) try to find a function that looks like "loadLeads" or "refreshLeads"
+      const candidates = ['loadLeads','refreshLeads','fetchLeads','getAllLeads'];
+      out.found.candidates = {};
+      for (const fn of candidates) {
+        out.found.candidates[fn] = (typeof globalThis[fn] === 'function') ? 'function' : 'none';
+      }
+
+      // 5) include a small portion of server.cjs where "leads" appears to help quick grep
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const serverText = fs.readFileSync(path.join(__dirname,'server.cjs'),'utf8');
+        // return lines with "leads" (first 40 matches) to help debugging
+        const lines = serverText.split(/\\r?\\n/).map((l,i)=>({i:i+1,l}));
+        const matches = lines.filter(x => /\\bleads\\b/i.test(x.l)).slice(0,40).map(x => x.i + ':' + x.l);
+        out.server_leads_lines = matches;
+      } catch(e) {
+        out.server_leads_lines_error = String(e);
+      }
+
+      return res.json(out);
+    } catch(e) {
+      console.error('leads debug endpoint error', e);
+      return res.status(500).json({ ok:false, error: String(e) });
+    }
+  });
+  console.log('MRCAR: /api/leads/debug-sources endpoint installed');
+} catch(e){
+  console.error('MRCAR: failed to install leads debug endpoint', e);
+}
+
+
+// MRCAR_GETALL_LEADS_MARKER
+// Route to fetch leads using getAllLeads() and normalize for dashboard quickly
+try {
+  app.get('/api/leads/from-getall', async (req, res) => {
+    try {
+      if (typeof getAllLeads !== 'function') return res.status(404).json({ ok:false, error: 'getAllLeads not present' });
+
+      // call getAllLeads — handle sync or promise-returning functions
+      let raw;
+      try {
+        raw = await Promise.resolve(getAllLeads());
+      } catch (e1) {
+        // sometimes functions expect options object — try with empty object
+        try { raw = await Promise.resolve(getAllLeads({})); } catch(e2) { throw e1; }
+      }
+
+      // ensure array
+      const arr = Array.isArray(raw) ? raw : (raw && raw.items && Array.isArray(raw.items) ? raw.items : []);
+      const leads = (arr || []).map(l => {
+        return {
+          id: l.id || l._id || l.ID || '',
+          name: l.name || l.Name || l.customerName || l.cust_name || '',
+          phone: l.phone || l.Phone || l.mobile || l.Mobile || '',
+          status: l.status || l.Status || '',
+          timestamp: l.timestamp || l.Timestamp || l.ts || l._created || '',
+          car_enquired: l.car_enquired || l.car || l.variant || l['Car Enquired'] || l['car_enquired'] || '',
+          budget: l.budget || l.Budget || l.expected_budget || l['Budget'] || '',
+          last_ai_reply: l.last_ai_reply || l.last_ai || l['Last AI Reply'] || '',
+          ai_quote: l.ai_quote || l.quote || l['AI Quote'] || '',
+          _raw: l
+        };
+      });
+
+      return res.json({ ok:true, count: leads.length, leads: leads.slice(0, 30) });
+    } catch (e) {
+      console.error('MRCAR /api/leads/from-getall error', e);
+      return res.status(500).json({ ok:false, error: String(e) });
+    }
+  });
+  console.log('MRCAR: /api/leads/from-getall route installed');
+} catch(e){
+  console.error('MRCAR: failed to install /api/leads/from-getall', e);
+}
+
+
+// MRCAR_INGEST_FROM_SHEETS_MARKER
+// Ingest leads from /api/sheets/export, normalize and populate globalThis.leads
+try {
+  app.post('/api/leads/ingest-from-sheets', async (req, res) => {
+    try {
+      // attempt to fetch rows from internal export logic
+      let sheetResp;
+      // prefer calling internal function if available
+      if (typeof exports !== 'undefined' && exports && typeof exports.exportSheets === 'function') {
+        sheetResp = await Promise.resolve(exports.exportSheets(req.body || {}));
+      } else if (typeof fetch === 'function') {
+        const url = (req.protocol ? (req.protocol + '://') : '') + (req.get ? req.get('host') : ('localhost:3000')) + '/api/sheets/export';
+        // If internal host not resolvable, fallback to localhost
+        const internalUrl = 'http://localhost:10000/api/sheets/export';
+        const fresp = await fetch(internalUrl, { method: 'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(req.body || {}) }).catch(e=>null);
+        sheetResp = fresp ? await fresp.json().catch(e=>null) : null;
+      } else {
+        return res.status(500).json({ ok:false, error:'No internal fetch available to call sheets export' });
+      }
+
+      if (!sheetResp || !sheetResp.ok) {
+        return res.status(500).json({ ok:false, error: sheetResp && sheetResp.error ? sheetResp.error : 'sheets export failed or returned no rows' });
+      }
+
+      // sheetResp may contain .rows (csv-parsed) or .exported rows depending on implementation
+      // Try common places
+      const rawRows = sheetResp.rows || sheetResp.data || sheetResp.values || sheetResp.items || (sheetResp.exported ? sheetResp.rows : null) || null;
+      // If no rows found but updatedRange present, try calling /api/sheets/export with fallback reading
+      if (!rawRows || !Array.isArray(rawRows)) {
+        // some implementations return CSV text as "csv" or "content"
+        if (Array.isArray(sheetResp.rows)) {
+          // leave as is
+        } else if (Array.isArray(sheetResp.values)) {
+          // already set
+        } else {
+          // Can't find rows array -> return debug text
+          return res.status(500).json({ ok:false, error: 'unexpected sheets export format', sheetResp });
+        }
+      }
+
+      // Normalize header+rows -> array of objects
+      // if first row looks like header row (array of strings)
+      let objs = [];
+      if (Array.isArray(rawRows) && rawRows.length > 0 && Array.isArray(rawRows[0])) {
+        const header = rawRows[0].map(h => String(h||'').trim());
+        const rows = rawRows.slice(1);
+        objs = rows.map(r => {
+          const obj = {};
+          for (let i=0;i<header.length;i++) {
+            const key = header[i] ? header[i].toString().trim() : ('col'+i);
+            obj[key] = r[i] !== undefined ? r[i] : '';
+          }
+          return obj;
+        });
+      } else if (Array.isArray(rawRows) && rawRows.length > 0 && typeof rawRows[0] === 'object') {
+        objs = rawRows;
+      }
+
+      // Normalization: map likely column names to expected keys
+      const normalized = (objs||[]).map(l => {
+        const get = (names) => {
+          for (const n of names) {
+            if (Object.prototype.hasOwnProperty.call(l, n)) return l[n];
+            // try lowercased keys
+            const k = Object.keys(l).find(x => x && x.toLowerCase() === (n||'').toLowerCase());
+            if (k) return l[k];
+          }
+          return '';
+        };
+        return {
+          id: get(['ID','Id','id']) || get(['phone','Phone']) || '',
+          name: get(['Name','name','Customer','customerName']) || '',
+          phone: get(['Phone','phone','Mobile','mobile','Contact']) || '',
+          status: get(['Status','status']) || '',
+          timestamp: get(['Timestamp','timestamp','ts','created_at']) || '',
+          car_enquired: get(['Car Enquired','Car','car_enquired','car_enquired','carEnquired','Variant','variant']) || '',
+          budget: get(['Budget','budget','Expected Budget','expected_budget']) || '',
+          last_ai_reply: get(['Last AI Reply','Last AI','last_ai_reply','lastAiReply']) || '',
+          ai_quote: get(['AI Quote','ai_quote','Quote','quote']) || '',
+          _raw: l
+        };
+      });
+
+      // set into globalThis.leads so existing /api/leads uses it
+      globalThis.leads = normalized;
+
+      return res.json({ ok:true, imported: normalized.length, sample: normalized.slice(0,10) });
+    } catch (e) {
+      console.error('ingest-from-sheets error', e);
+      return res.status(500).json({ ok:false, error: String(e) });
+    }
+  });
+  console.log('MRCAR: /api/leads/ingest-from-sheets route installed');
+} catch(e) {
+  console.error('MRCAR: failed to install ingest-from-sheets route', e);
+}
+
+
+// MRCAR_INGEST_FROM_SHEETS_ROBUST_MARKER
+// Robust ingest: if sheets export returns metadata only, fetch CSV (SHEET_TOYOTA_CSV_URL or built from GOOGLE_SHEET_ID)
+try {
+  app.post('/api/leads/ingest-from-sheets-robust', async (req, res) => {
+    try {
+      const fetchJson = async () => {
+        // call internal sheets export endpoint
+        try {
+          const resp = await (typeof fetch === 'function' ? fetch('http://localhost:10000/api/sheets/export', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(req.body||{}) }) : null);
+          if (!resp) return null;
+          try { return await resp.json(); } catch(e) { return { ok:false, error:'invalid-json-from-sheets-export' }; }
+        } catch(e) { return null; }
+      };
+
+      let sheetResp = await fetchJson();
+      if (!sheetResp) {
+        return res.status(500).json({ ok:false, error:'failed to call /api/sheets/export internally' });
+      }
+
+      // If sheetResp looks like it already had rows, reuse that logic
+      if (Array.isArray(sheetResp.rows) && sheetResp.rows.length) {
+        // let existing logic in ingest-from-sheets handle it if desired; here we will reuse that structure
+        // convert to normalized objects below
+      } else {
+        // fallback: try to fetch CSV
+        const env = process.env || {};
+        let csvUrl = env.SHEET_TOYOTA_CSV_URL || env.SHEET_CSV_URL || '';
+        if (!csvUrl && env.GOOGLE_SHEET_ID) {
+          const gid = (sheetResp.updatedRange && /gid=(\\d+)/.test(sheetResp.updatedRange)) ? RegExp.$1 : '0';
+          csvUrl = `https://docs.google.com/spreadsheets/d/${env.GOOGLE_SHEET_ID}/export?format=csv&gid=${gid}`;
+        }
+        if (!csvUrl) {
+          return res.status(500).json({ ok:false, error:'no CSV url available (set SHEET_TOYOTA_CSV_URL or GOOGLE_SHEET_ID)' , sheetResp});
+        }
+
+        // fetch CSV
+        let csvText = '';
+        try {
+          const resp2 = await (typeof fetch === 'function' ? fetch(csvUrl) : null);
+          if (!resp2 || !resp2.ok) {
+            // try node http fallback using native https
+            const https = require('https');
+            csvText = await new Promise((resolve, reject) => {
+              let data = '';
+              https.get(csvUrl, (r) => {
+                r.on('data', chunk => data += chunk);
+                r.on('end', () => resolve(data));
+                r.on('error', reject);
+              }).on('error', reject);
+            }).catch(e=>null);
+          } else {
+            csvText = await resp2.text();
+          }
+        } catch(e) {
+          return res.status(500).json({ ok:false, error:'failed to fetch sheet csv', e: String(e), csvUrl });
+        }
+
+        if (!csvText) return res.status(500).json({ ok:false, error:'empty csv fetched', csvUrl });
+
+        // minimal CSV parse (handles quoted fields)
+        const parseCSV = (text) => {
+          const rows = [];
+          let cur = '';
+          let row = [];
+          let inQuotes = false;
+          for (let i=0;i<text.length;i++) {
+            const ch = text[i];
+            const next = text[i+1];
+            if (ch === '"' ) {
+              if (inQuotes && next === '"') { cur += '"'; i++; continue; } // escaped quote
+              inQuotes = !inQuotes;
+              continue;
+            }
+            if (ch === ',' && !inQuotes) { row.push(cur); cur=''; continue; }
+            if ((ch === '\\n' || ch === '\\r') && !inQuotes) {
+              // handle CRLF
+              if (ch === '\\r' && text[i+1] === '\\n') { i++; }
+              row.push(cur); rows.push(row); row=[]; cur=''; continue;
+            }
+            cur += ch;
+          }
+          // flush last
+          if (cur !== '' || row.length) {
+            row.push(cur);
+            rows.push(row);
+          }
+          return rows.filter(r => r.length>1 || (r.length===1 && String(r[0]||'').trim()!==''));
+        };
+
+        const rows = parseCSV(csvText);
+        // first row header?
+        let objs = [];
+        if (rows.length > 0 && rows[0].every(c => String(c||'').trim() !== '')) {
+          const header = rows[0].map(h => String(h||'').trim());
+          const dataRows = rows.slice(1);
+          objs = dataRows.map(r => {
+            const o = {};
+            for (let i=0;i<header.length;i++) o[header[i]||('col'+i)] = r[i] !== undefined ? r[i] : '';
+            return o;
+          });
+        } else {
+          objs = rows.map(r => {
+            const o = {};
+            r.forEach((c,i)=>o['col'+i]=c);
+            return o;
+          });
+        }
+
+        // normalize (case-insensitive key matches)
+        const normalized = objs.map(l => {
+          const keys = Object.keys(l||{});
+          const find = (names) => {
+            for (const n of names) {
+              const k = keys.find(x => x && x.toLowerCase() === (n||'').toLowerCase());
+              if (k) return l[k];
+            }
+            return '';
+          };
+          return {
+            id: find(['ID','Id','id']) || find(['Phone','phone']) || '',
+            name: find(['Name','name','Customer','customerName']) || '',
+            phone: find(['Phone','phone','Mobile','mobile','Contact']) || '',
+            status: find(['Status','status']) || '',
+            timestamp: find(['Timestamp','timestamp','ts','created_at']) || '',
+            car_enquired: find(['Car Enquired','Car','car_enquired','Variant','variant']) || '',
+            budget: find(['Budget','budget','Expected Budget','expected_budget']) || '',
+            last_ai_reply: find(['Last AI Reply','Last AI','last_ai_reply','lastAiReply']) || '',
+            ai_quote: find(['AI Quote','ai_quote','Quote','quote']) || '',
+            _raw: l
+          };
+        });
+
+        globalThis.leads = normalized;
+        return res.json({ ok:true, imported: normalized.length, sample: normalized.slice(0,10), csvUrl });
+      }
+
+      // If we reach here, sheetResp already contained rows (not typical for your setup),
+      // attempt to transform them similarly (left as fallback)
+      const rawRows = sheetResp.rows || sheetResp.values || sheetResp.data || [];
+      // Normalize header->objects if first row is header array
+      let objs = [];
+      if (Array.isArray(rawRows) && rawRows.length && Array.isArray(rawRows[0])) {
+        const header = rawRows[0].map(h => String(h||'').trim());
+        const dataRows = rawRows.slice(1);
+        objs = dataRows.map(r => {
+          const o = {};
+          for (let i=0;i<header.length;i++) o[header[i]||('col'+i)] = r[i] !== undefined ? r[i] : '';
+          return o;
+        });
+      } else if (Array.isArray(rawRows) && rawRows.length && typeof rawRows[0] === 'object') {
+        objs = rawRows;
+      }
+      const normalized = objs.map(l => {
+        const keys = Object.keys(l||{});
+        const find = (names) => {
+          for (const n of names) {
+            const k = keys.find(x => x && x.toLowerCase() === (n||'').toLowerCase());
+            if (k) return l[k];
+          }
+          return '';
+        };
+        return {
+          id: find(['ID','Id','id']) || find(['Phone','phone']) || '',
+          name: find(['Name','name','Customer','customerName']) || '',
+          phone: find(['Phone','phone','Mobile','mobile','Contact']) || '',
+          status: find(['Status','status']) || '',
+          timestamp: find(['Timestamp','timestamp','ts','created_at']) || '',
+          car_enquired: find(['Car Enquired','Car','car_enquired','Variant','variant']) || '',
+          budget: find(['Budget','budget','Expected Budget','expected_budget']) || '',
+          last_ai_reply: find(['Last AI Reply','Last AI','last_ai_reply','lastAiReply']) || '',
+          ai_quote: find(['AI Quote','ai_quote','Quote','quote']) || '',
+          _raw: l
+        };
+      });
+      globalThis.leads = normalized;
+      return res.json({ ok:true, imported: normalized.length, sample: normalized.slice(0,10) });
+    } catch(e) {
+      console.error('ingest-from-sheets-robust error', e);
+      return res.status(500).json({ ok:false, error: String(e) });
+    }
+  });
+  console.log('MRCAR: /api/leads/ingest-from-sheets-robust route installed');
+} catch(e) {
+  console.error('MRCAR: failed to install ingest-from-sheets-robust route', e);
+}
