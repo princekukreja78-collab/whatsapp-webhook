@@ -666,33 +666,29 @@ async function loadUsedSheetRows() {
   return [];
 }
 
-// Simulate a bullet loan plan:
-// - bulletPct portion of loan is paid in "bullets" (e.g. yearly)
-// - EMI is calculated on (loan - bullet_total)
-// - interest is charged on both EMI principal and bullet principal,
-//   but tenure always ends at `months` (no extension).
+// Simulate a bullet loan plan for MR.CAR.
+// - amount: loan amount
+// - rate: annual ROI %, if missing defaults to 10
+// - months: tenure in months, if missing defaults to 60
+// - bulletPct: fraction (0.25 = 25%), defaults to 0.25
 function simulateBulletPlan({ amount, rate, months, bulletPct }) {
-  const L   = Number(amount || 0);      // loan amount
-  const R   = Number(rate || 0);        // annual ROI % (e.g. 10)
-  const n   = Number(months || 0);      // tenure in months
-  const pct = Number(bulletPct || 0);   // e.g. 0.25 for 25%
+  const L   = Number(amount || 0);            // loan amount
+  const R   = Number(rate || 10);             // use 10% if not provided
+  const n   = Number(months || 60);           // default 60 months
+  const pct = (bulletPct !== undefined && bulletPct !== null)
+    ? Number(bulletPct)
+    : 0.25;                                   // default 25%
 
-  if (!L || !R || !n || !pct) return null;
+  if (!L || !n || !pct) {
+    return null;
+  }
 
-  // Bullet principal (fixed % of loan)
-  const bullet_total = L * pct;
+  const bullet_total = L * pct;               // bullet principal total
+  const principal_for_emi = L - bullet_total; // EMI principal only
 
-  // Number of bullets inside tenure (yearly bullets: 12,24,...)
-  const num_bullets = Math.max(1, Math.floor(n / 12));
-  const bullet_each = bullet_total / num_bullets;
+  const r = R / 12 / 100;                     // monthly rate
 
-  // EMI principal = loan - bullet principal
-  const principal_for_emi = L - bullet_total;
-
-  // Monthly interest rate
-  const r = R / 12 / 100;
-
-  // Base EMI on non-bullet principal over full tenure
+  // Base EMI on non-bullet principal
   let base_emi = 0;
   if (principal_for_emi > 0 && r > 0) {
     const pow = Math.pow(1 + r, n);
@@ -701,29 +697,29 @@ function simulateBulletPlan({ amount, rate, months, bulletPct }) {
     base_emi = principal_for_emi / n;
   }
 
-  // Now simulate month by month, adding interest on bullet principal
+  // Number of bullets: yearly bullets within tenure
+  const num_bullets = Math.max(1, Math.floor(n / 12));
+  const bullet_each = bullet_total / num_bullets;
+
   let remainingBullet     = bullet_total;
   let total_emi_paid      = 0;
   let total_bullets_paid  = 0;
-  let monthly_emi_example = 0; // EMI in first month including bullet interest
+  let monthly_emi_example = 0;
 
   for (let m = 1; m <= n; m++) {
-    // Interest on bullet principal this month (on whatever is still outstanding)
+    // Interest on remaining bullet principal this month
     const bulletInterestThisMonth = remainingBullet * r;
 
-    // Total EMI this month = base EMI + bullet interest
     const paymentThisMonth = base_emi + bulletInterestThisMonth;
-
     total_emi_paid += paymentThisMonth;
 
-    // At each year (12, 24, 36, ...) pay one bullet principal chunk
+    // Pay one bullet principal chunk every 12 months
     if (m % 12 === 0 && remainingBullet > 0) {
       const pay = Math.min(bullet_each, remainingBullet);
       remainingBullet    -= pay;
       total_bullets_paid += pay;
     }
 
-    // remember the "typical" monthly EMI including bullet interest for display
     if (m === 1) {
       monthly_emi_example = Math.round(paymentThisMonth);
     }
@@ -739,8 +735,8 @@ function simulateBulletPlan({ amount, rate, months, bulletPct }) {
 
     principal_for_emi: Math.round(principal_for_emi),
 
-    // This is what you display as "Monthly EMI (approx)"
-    monthly_emi: monthly_emi_example,
+    // for display as "Monthly EMI (approx)"
+    monthly_emi: Math.round(monthly_emi_example),
     base_emi: Math.round(base_emi),
 
     bullet_total: Math.round(bullet_total),
@@ -1870,11 +1866,11 @@ if (value.statuses && !value.messages) {
         return res.sendStatus(200);
       }
       const sim = simulateBulletPlan({
-        loanAmount: loanAmt,
-        months,
-        internalRatePct: USED_CAR_ROI_INTERNAL,
-        bulletPct: 0.25
-      });
+  amount: loanAmt,                  // ✔ correct parameter
+  rate: USED_CAR_ROI_INTERNAL,      // ✔ 10% internal
+  months: months,                   // ✔ tenure
+  bulletPct: 0.25                   // ✔ 25%
+});
       if (!sim) {
         await waSendText(from, 'Bullet calculation failed.');
         return res.sendStatus(200);
