@@ -2571,6 +2571,21 @@ app.get('/tools/send-greeting-ui', (req, res) => {
 </body>
 </html>`);
 });
+// === WA delivery status log download ===
+app.get('/api/wa-delivery-log', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const logPath = path.join(__dirname, '.crm_data', 'wa_status_log.json');
+
+  if (!fs.existsSync(logPath)) {
+    return res.json({ ok: false, error: "No log file found" });
+  }
+
+  const data = fs.readFileSync(logPath, 'utf8');
+  res.setHeader('Content-Type', 'application/json');
+  res.send(data);
+});
+
 
 app.listen(PORT, () => {
   console.log('==== MR.CAR BUILD TAG: 2025-11-25-NEWCAR-ADVISORY-FIX ====');
