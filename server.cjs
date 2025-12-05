@@ -424,43 +424,62 @@ function incrementQuoteUsage(from) {
     console.warn('incrementQuoteUsage failed', e && e.message ? e.message : e);
   }
 }
-
 // ---------------- WA helpers ----------------
 
-// Raw sender
+async function waSendImageLink(to, imageUrl, caption = "") {
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "image",
+    image: {
+      link: imageUrl,          // use URL, not media ID
+      caption: caption || ""
+    }
+  };
+
+  const r = await waSendRaw(payload);
+
+  if (r && r.messages) return { ok: true, resp: r };
+  return { ok: false, error: r?.error || r };
+}
+
+// Low-level sender
 async function waSendRaw(payload) {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
-    console.warn('WA skipped - META_TOKEN or PHONE_NUMBER_ID missing');
+    console.warn("WA skipped - META_TOKEN or PHONE_NUMBER_ID missing");
     return null;
   }
 
   const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
 
   try {
-    if (DEBUG) console.log('WA OUTGOING PAYLOAD:', JSON.stringify(payload).slice(0, 400));
+    if (DEBUG) console.log("WA OUTGOING PAYLOAD:", JSON.stringify(payload).slice(0, 400));
 
     const r = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${META_TOKEN}`,
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json"
       },
       body: JSON.stringify(payload)
     });
 
     const j = await r.json().catch(() => ({}));
 
-    if (!r.ok) console.error("WA send error", r.status, j);
-    else if (DEBUG) console.log("WA send OK:", r.status, JSON.stringify(j).slice(0, 400));
+    if (!r.ok) {
+      console.error("WA send error", r.status, j);
+    } else if (DEBUG) {
+      console.log("WA send OK:", r.status, JSON.stringify(j).slice(0, 400));
+    }
 
     return j;
   } catch (err) {
-    console.error('waSendRaw exception:', err);
+    console.error("waSendRaw exception:", err);
     return null;
   }
 }
 
-// Simple text sender
+// Simple text
 async function waSendText(to, body) {
   return waSendRaw({
     messaging_product: "whatsapp",
@@ -470,7 +489,7 @@ async function waSendText(to, body) {
   });
 }
 
-// Template sender (SINGLE CLEAN VERSION)
+// Template (single, clean version)
 async function waSendTemplate(to, templateName, components = []) {
   const payload = {
     messaging_product: "whatsapp",
@@ -478,12 +497,10 @@ async function waSendTemplate(to, templateName, components = []) {
     type: "template",
     template: {
       name: templateName,
-      language: { code: "en_US" },   // always use en_US
-      components
+      language: { code: "en_US" },
+      components: Array.isArray(components) ? components : []
     }
   };
-
-  if (DEBUG) console.log("Sending template:", templateName);
 
   const r = await waSendRaw(payload);
 
@@ -494,14 +511,14 @@ async function waSendTemplate(to, templateName, components = []) {
   return { ok: false, error: r?.error || r };
 }
 
-// Image sender (poster message)
+// Image (poster) – **USES LINK, NOT ID**
 async function waSendImage(to, imageUrl, caption = "") {
   const payload = {
     messaging_product: "whatsapp",
     to,
     type: "image",
     image: {
-      link: imageUrl,
+      link: imageUrl,          // <<<<<< IMPORTANT
       caption: caption || ""
     }
   };
@@ -512,31 +529,62 @@ async function waSendImage(to, imageUrl, caption = "") {
   return { ok: false, error: r?.error || r };
 }
 
-// Greeting/Broadcast template sender
+// ---------------- SHEET BROADCAST SENDER ----------------
+// ORDER: 1) TEMPLATE TEXT, 2) POSTER IMAGE
+
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
+  if (!META_TOKEN || !PHONE_NUMBER_ID) {
+    throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
+  }
+
+  const displayName = name || "Customer";
+
+  // 1️⃣ Template
+  console.log(`Broadcast: sending template to ${phone}`);
+
   const components = [
     {
       type: "body",
       parameters: [
-        { type: "text", text: name }
+        { type: "text", text: displayName }
       ]
     }
   ];
 
-  const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
+  const t = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
 
-  if (!res.ok) {
-    console.warn("sendSheetWelcomeTemplate failed", phone, res.error);
+  if (!t.ok) {
+    console.warn("WA sheet-broadcast error (template send):", phone, t.error);
     return false;
+  }
+
+  console.log("Template sent OK:", phone);
+
+  // 2️⃣ Poster (if URL configured)
+  if (CONTACT_POSTER_URL) {
+    const posterUrl = CONTACT_POSTER_URL;
+    try {
+      console.log(`Broadcast: sending poster image to ${phone} via ${posterUrl}`);
+      const img = await waSendImageLink(phone, posterUrl, "");
+      if (!img.ok) {
+        console.warn("Poster image failed for:", phone, img.error);
+      } else {
+        console.log("🖼 Poster send attempted for:", phone);
+      }
+    } catch (e) {
+      console.warn("Poster image exception for", phone, e?.message || e);
+    }
+  } else if (DEBUG) {
+    console.log("CONTACT_POSTER_URL not set; skipping poster image for", phone);
   }
 
   return true;
 }
 
+// small delay helper so we don’t spam WhatsApp too fast
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-
 
 // compact buttons (used AFTER new-car quote)
 async function sendNewCarButtons(to) {
@@ -2509,7 +2557,7 @@ async function sendSheetWelcomeTemplate(to, name = "Customer") {
 
   try {
     console.log(`Broadcast: sending poster image to ${to} via ${posterUrl}`);
-    const img = await waSendImage(to, posterUrl, "");
+    const img = await waSendImageLink(to, posterUrl, "");
     if (!img.ok) {
       console.warn("Poster image failed for:", to, img.error);
     } else {
@@ -2569,7 +2617,7 @@ for (const c of targets) {
         'We are at your service. Just say "Hi" to get started.';
 
       console.log("🖼 Poster send attempted for:", phone);
-      await waSendImage(phone, CONTACT_POSTER_URL, caption);
+      await waSendImageLink(phone, CONTACT_POSTER_URL, caption);
     } catch (err) {
       console.warn(
         "WA sheet-broadcast error (poster image):",
