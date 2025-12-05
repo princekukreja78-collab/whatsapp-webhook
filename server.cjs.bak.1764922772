@@ -7,23 +7,6 @@ console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 console.log("MODEL SELECTED (SIGNATURE_MODEL)=", SIGNATURE_MODEL);
 console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 require('dotenv').config({ debug: false });
-// --- Template names from env (text + media) ---
-const GREETING_TEMPLATE_NAME =
-  process.env.GREETING_TEMPLATE_NAME || 'mr_car_broadcast_en';
-
-const GREETING_MEDIA_TEMPLATE_NAME =
-  process.env.GREETING_MEDIA_TEMPLATE_NAME || 'mr_car_broadcast_en';
-
-const BROADCAST_TEMPLATE_NAME =
-  process.env.BROADCAST_TEMPLATE_NAME || GREETING_TEMPLATE_NAME;
-
-console.log('GREETING_TEMPLATE_NAME =', GREETING_TEMPLATE_NAME);
-console.log('GREETING_MEDIA_TEMPLATE_NAME =', GREETING_MEDIA_TEMPLATE_NAME);
-console.log('BROADCAST_TEMPLATE_NAME =', BROADCAST_TEMPLATE_NAME);
-// --- WhatsApp template language (force English = 'en') ---
-const WA_TEMPLATE_LANG = process.env.WA_TEMPLATE_LANG || 'en';
-console.log('WA_TEMPLATE_LANG =', WA_TEMPLATE_LANG);
-
 // --- startup compatibility shim: ensure greeting & CRM helpers exist ---
 // Insert this *once* near top of server.cjs (after dotenv config)
 try {
@@ -452,62 +435,6 @@ async function waSendRaw(payload) {
 async function waSendText(to, body) {
   return waSendRaw({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
 }
-
-// --- WhatsApp template language (env or default 'en') ---
-
-console.log('WA_TEMPLATE_LANG =', WA_TEMPLATE_LANG);
-
-// ---------------- Template sender (force en_US) ----------------
-async function waSendTemplate(to, templateName, components = []) {
-  const payload = {
-    messaging_product: "whatsapp",
-    to: String(to).replace(/\D+/g, ""),
-    type: "template",
-    template: {
-      name: templateName,
-      language: { code: "en_US" },    // <<<<<< FORCE THIS ALWAYS
-      components: Array.isArray(components) ? components : []
-    }
-  };
-
-  console.log("Sending template:", templateName, "lang=en_US");
-
-  const r = await waSendRaw(payload);
-
-  if (r && r.messages && r.messages.length > 0) {
-    return { ok: true, resp: r };
-  }
-
-  return { ok: false, error: r && r.error ? r.error : r };
-}
-
-// Text-only greeting for sheet broadcast
-async function sendSheetWelcomeTemplate(phone, name) {
-  const displayName = name || 'Customer';
-
-  const components = [
-    {
-      type: 'body',
-      parameters: [
-        { type: 'text', text: displayName }   // {{1}} in template body
-      ]
-    }
-  ];
-
-  const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
-
-  if (!res || !res.ok) {
-    console.warn(
-      'sendSheetWelcomeTemplate failed for',
-      phone,
-      res && (res.error || JSON.stringify(res.resp || res))
-    );
-    return false;
-  }
-
-  return true;
-}
-
 // ---------------- Template sender (BROADCAST SAFE) ----------------
 async function waSendTemplate(to, templateName, components = []) {
   try {
@@ -533,32 +460,6 @@ async function waSendTemplate(to, templateName, components = []) {
   } catch (err) {
     return { ok: false, error: err?.message || err };
   }
-}
-// Text-only greeting for sheet broadcast
-async function sendSheetWelcomeTemplate(phone, name) {
-  const displayName = name || 'Customer';
-
-  const components = [
-    {
-      type: 'body',
-      parameters: [
-        { type: 'text', text: displayName }   // first {{1}} in template body
-      ]
-    }
-  ];
-
-  const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
-
-  if (!res || !res.ok) {
-    console.warn(
-      'sendSheetWelcomeTemplate failed for',
-      phone,
-      res && (res.error || JSON.stringify(res.resp || res))
-    );
-    return false;
-  }
-
-  return true;
 }
 
 // compact buttons (used AFTER new-car quote)
@@ -2488,7 +2389,7 @@ async function fetchContactsFromSheet() {
   return contacts;
 }
 
-// send greeting: first poster image, then text-only mr_car_broadcast_en template
+// send greeting: first poster image, then text-only mr_car_welcome template
 async function sendSheetWelcomeTemplate(to, name) {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
     throw new Error('META_TOKEN or PHONE_NUMBER_ID not set');
@@ -2516,7 +2417,7 @@ async function sendSheetWelcomeTemplate(to, name) {
     console.log('Sheet broadcast: CONTACT_POSTER_URL not set, skipping image for', to);
   }
 
-  // 2) Send text-only mr_car_broadcast_en template
+  // 2) Send text-only mr_car_welcome template
   const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
 
   const payload = {
@@ -2524,8 +2425,8 @@ async function sendSheetWelcomeTemplate(to, name) {
     to,
     type: 'template',
     template: {
-      name: 'mr_car_broadcast_en',          // same template name
-      language: { code: 'en_US' },
+      name: 'mr_car_welcome',          // same template name
+      language: { code: 'en' },
       components: [
         {
           type: 'body',
@@ -2569,7 +2470,7 @@ function delay(ms) {
 // --------------------------------------------------------------------------
 //  POST /tools/send-greeting-from-sheet
 //  - Reads Google Sheet
-//  - Sends mr_car_broadcast_en + poster to each valid phone
+//  - Sends mr_car_welcome + poster to each valid phone
 //  - DOES NOT change normal webhook flow
 // --------------------------------------------------------------------------
 app.post('/tools/send-greeting-from-sheet', async (req, res) => {
@@ -2586,6 +2487,7 @@ if (!CONTACT_POSTER_URL && DEBUG) {
 }
     const contacts = await fetchContactsFromSheet();
     console.log("📄 Contacts fetched:", contacts.length);
+
 // basic filter: Indian mobile numbers starting with 91 and at least 10 digits
 const targets = contacts.filter(c => {
   const p = String(c.phone || '').replace(/\s+/g, '');
@@ -2593,38 +2495,17 @@ const targets = contacts.filter(c => {
 });
 
 console.log("🎯 Valid targets:", targets.length);
-if (DEBUG) console.log(`Sheet broadcast: will send to ${targets.length} contacts`);
 
-let sent = 0;
-const failed = [];
+    if (DEBUG) console.log(`Sheet broadcast: will send to ${targets.length} contacts`);
 
-for (const c of targets) {
+    let sent = 0;
+    const failed = [];
+	for (const c of targets) {
   const phone = String(c.phone || '').replace(/\s+/g, '');
   const name = c.name || 'Customer';
 
-  console.log("Sheet broadcast → sending to:", phone, "Name:", name);
+  console.log("Sending to:", phone, "Name:", name);
 
-  // 1) Try sending poster image (NO TEMPLATE HERE)
-  if (CONTACT_POSTER_URL) {
-    try {
-      const caption =
-        'Hello ' + name + ', 👋\n' +
-        'Welcome to Mr.Car! 🚗✨\n' +
-        'We are at your service. Just say "Hi" to get started.';
-
-      console.log("🖼 Poster send attempted for:", phone);
-      await waSendImage(phone, CONTACT_POSTER_URL, caption);
-    } catch (err) {
-      console.warn(
-        "WA sheet-broadcast error (poster image):",
-        phone,
-        err && err.message ? err.message : err
-      );
-      // we don’t mark as failed here, text template send will still try
-    }
-  }
-
-  // 2) Send text template (mr_car_broadcast_en) with 1 param = name
   try {
     const ok = await sendSheetWelcomeTemplate(phone, name);
 
@@ -2633,30 +2514,51 @@ for (const c of targets) {
     } else {
       failed.push(phone);
     }
+
   } catch (err) {
-    console.warn(
-      "WA sheet-broadcast error (template send):",
-      phone,
-      err && err.message ? err.message : err
-    );
+    console.warn('Sheet broadcast: error for', phone, err?.message || err);
     failed.push(phone);
   }
 
-  // 0.8s pause between messages
   await delay(800);
 }
+    for (const phone of targets) {
+      try {
+        // Assuming you already have waSendTemplate defined earlier in the file
+        // and it returns { ok, error }.
+        const { ok } = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, []);
 
-if (DEBUG) console.log(`Sheet broadcast: done. Sent=${sent}, Failed=${failed.length}`);
+        console.log("📨 Template send status:", ok, "for", phone);
 
-console.log("🏁 GREETING BROADCAST FINISHED — Sent:", sent, "Failed:", failed.length);
+        if (ok) {
+          sent++;
+        } else {
+          failed.push(phone);
+        }
+      } catch (err) {
+        console.warn(
+          'Sheet broadcast: error for',
+          phone,
+          err && err.message ? err.message : err
+        );
+        failed.push(phone);
+      }
 
-return res.json({
-  ok: true,
-  total: targets.length,
-  sent,
-  failed: failed.length,
-  failedPhones: failed
-});
+      // 0.8s pause between messages
+      await delay(800);
+    }
+
+    if (DEBUG) console.log(`Sheet broadcast: done. Sent=${sent}, Failed=${failed.length}`);
+
+    console.log("🏁 GREETING BROADCAST FINISHED — Sent:", sent, "Failed:", failed.length);
+
+    return res.json({
+      ok: true,
+      total: targets.length,
+      sent,
+      failed: failed.length,
+      failedPhones: failed
+    });
 
   } catch (err) {
     console.error('Sheet broadcast route failed:', err);
