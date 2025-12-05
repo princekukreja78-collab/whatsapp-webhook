@@ -426,38 +426,51 @@ function incrementQuoteUsage(from) {
 }
 
 // ---------------- WA helpers ----------------
+
+// Raw sender
 async function waSendRaw(payload) {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
     console.warn('WA skipped - META_TOKEN or PHONE_NUMBER_ID missing');
     return null;
   }
-  const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
+
+  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+
   try {
     if (DEBUG) console.log('WA OUTGOING PAYLOAD:', JSON.stringify(payload).slice(0, 400));
+
     const r = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${META_TOKEN}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${META_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify(payload)
     });
+
     const j = await r.json().catch(() => ({}));
-    if (DEBUG) console.log('WA send response status', r.status, typeof j === 'object' ? JSON.stringify(j).slice(0, 800) : String(j).slice(0, 800));
-    if (!r.ok) console.error('WA send error', r.status, j);
+
+    if (!r.ok) console.error("WA send error", r.status, j);
+    else if (DEBUG) console.log("WA send OK:", r.status, JSON.stringify(j).slice(0, 400));
+
     return j;
-  } catch (e) {
-    console.error('waSendRaw failed', e && e.stack ? e.stack : e);
+  } catch (err) {
+    console.error('waSendRaw exception:', err);
     return null;
   }
 }
 
+// Simple text sender
 async function waSendText(to, body) {
-  return waSendRaw({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
+  return waSendRaw({
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body }
+  });
 }
 
-// --- WhatsApp template language (env or default 'en') ---
-
-console.log('WA_TEMPLATE_LANG =', WA_TEMPLATE_LANG);
-
-// ---------------- Template sender (force en_US) ----------------
+// Template sender (SINGLE CLEAN VERSION)
 async function waSendTemplate(to, templateName, components = []) {
   const payload = {
     messaging_product: "whatsapp",
@@ -465,12 +478,12 @@ async function waSendTemplate(to, templateName, components = []) {
     type: "template",
     template: {
       name: templateName,
-      language: { code: "en_US" },    // <<<<<< FORCE THIS ALWAYS
-      components: Array.isArray(components) ? components : []
+      language: { code: "en_US" },   // always use en_US
+      components
     }
   };
 
-  console.log("Sending template:", templateName, "lang=en_US");
+  if (DEBUG) console.log("Sending template:", templateName);
 
   const r = await waSendRaw(payload);
 
@@ -478,83 +491,44 @@ async function waSendTemplate(to, templateName, components = []) {
     return { ok: true, resp: r };
   }
 
-  return { ok: false, error: r && r.error ? r.error : r };
+  return { ok: false, error: r?.error || r };
 }
 
-// Text-only greeting for sheet broadcast
-async function sendSheetWelcomeTemplate(phone, name) {
-  const displayName = name || 'Customer';
+// Image sender (poster message)
+async function waSendImage(to, imageUrl, caption = "") {
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "image",
+    image: {
+      link: imageUrl,
+      caption: caption || ""
+    }
+  };
 
+  console.log("Sending image:", imageUrl);
+
+  const r = await waSendRaw(payload);
+
+  if (r && r.messages) return { ok: true };
+  return { ok: false, error: r?.error || r };
+}
+
+// Greeting/Broadcast template sender
+async function sendSheetWelcomeTemplate(phone, name = "Customer") {
   const components = [
     {
-      type: 'body',
+      type: "body",
       parameters: [
-        { type: 'text', text: displayName }   // {{1}} in template body
+        { type: "text", text: name }
       ]
     }
   ];
 
   const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
 
-  if (!res || !res.ok) {
-    console.warn(
-      'sendSheetWelcomeTemplate failed for',
-      phone,
-      res && (res.error || JSON.stringify(res.resp || res))
-    );
-    return false;
-  }
-
-  return true;
-}
-
-// ---------------- Template sender (BROADCAST SAFE) ----------------
-async function waSendTemplate(to, templateName, components = []) {
-  try {
-    const payload = {
-      messaging_product: "whatsapp",
-      to,
-      type: "template",
-      template: {
-        name: templateName,
-        language: { code: "en_US" },
-        components
-      }
-    };
-
-    const r = await waSendRaw(payload);
-
-    // r will contain WhatsApp response (or error object)
-    if (r && r.messages && r.messages.length > 0) {
-      return { ok: true, resp: r };
-    }
-
-    return { ok: false, error: r && r.error ? r.error : r };
-  } catch (err) {
-    return { ok: false, error: err?.message || err };
-  }
-}
-// Text-only greeting for sheet broadcast
-async function sendSheetWelcomeTemplate(phone, name) {
-  const displayName = name || 'Customer';
-
-  const components = [
-    {
-      type: 'body',
-      parameters: [
-        { type: 'text', text: displayName }   // first {{1}} in template body
-      ]
-    }
-  ];
-
-  const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
-
-  if (!res || !res.ok) {
-    console.warn(
-      'sendSheetWelcomeTemplate failed for',
-      phone,
-      res && (res.error || JSON.stringify(res.resp || res))
-    );
+  if (!res.ok) {
+    console.warn("sendSheetWelcomeTemplate failed", phone, res.error);
     return false;
   }
 
@@ -2488,82 +2462,61 @@ async function fetchContactsFromSheet() {
   return contacts;
 }
 
-// send greeting: first poster image, then text-only mr_car_broadcast_en template
-async function sendSheetWelcomeTemplate(to, name) {
+// ---------------- SHEET BROADCAST SENDER ----------------
+// ORDER = 1) TEMPLATE FIRST  2) POSTER IMAGE SECOND
+
+async function sendSheetWelcomeTemplate(to, name = "Customer") {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
-    throw new Error('META_TOKEN or PHONE_NUMBER_ID not set');
+    throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
   }
 
-  const displayName = name || 'Customer';
-  const caption = `WE ARE AT YOUR SERVICE\nJust say “Hi” to get started.`;
+  const displayName = name || "Customer";
 
-  // 1) Try to send poster image (if URL available)
-    if (CONTACT_POSTER_URL) {
-    try {
-      if (DEBUG) console.log('Sheet broadcast: sending poster image to', to, 'via', CONTACT_POSTER_URL);
-      // assumes waSendImage(to, imageUrl, caption) helper exists
-      await waSendImage(to, CONTACT_POSTER_URL, caption);
-      console.log("🖼 Poster send attempted for:", to);   // ← ADD THIS LINE HERE
-    } catch (e) {
-      console.warn(
-        'Sheet broadcast: poster image failed for',
-        to,
-        e && e.message ? e.message : e
-      );
-      // we do NOT fail the flow here; we still send the template text
-    }
-  } else if (DEBUG) {
-    console.log('Sheet broadcast: CONTACT_POSTER_URL not set, skipping image for', to);
-  }
+  // 1️⃣ TEMPLATE FIRST
+  console.log(`Broadcast: sending template to ${to}`);
 
-  // 2) Send text-only mr_car_broadcast_en template
-  const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
-
-  const payload = {
-    messaging_product: 'whatsapp',
-    to,
-    type: 'template',
-    template: {
-      name: 'mr_car_broadcast_en',          // same template name
-      language: { code: 'en_US' },
-      components: [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: displayName }
-          ]
-        }
+  const components = [
+    {
+      type: "body",
+      parameters: [
+        { type: "text", text: displayName }
       ]
     }
-  };
+  ];
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${META_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
+  const t = await waSendTemplate(
+    to,
+    BROADCAST_TEMPLATE_NAME,     // must be mr_car_broadcast_en from .env
+    components
+  );
 
-  const data = await resp.json();
-  if (!resp.ok) {
-    console.error(
-      'WA sheet-broadcast error (template send):',
+  if (!t.ok) {
+    console.warn(
+      "WA sheet-broadcast error (template send):",
       to,
-      resp.status,
-      JSON.stringify(data).slice(0, 300)
+      t.error
     );
     return false;
   }
 
-  if (DEBUG) console.log('WA sheet-broadcast template sent:', to, JSON.stringify(data));
-  return true;
-}
+  console.log("Template sent OK:", to);
 
-// small delay helper so we don’t spam WhatsApp too fast
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  // 2️⃣ POSTER IMAGE SECOND
+  const posterUrl = "https://whatsapp-gpt-crm.onrender.com/uploads/mrcar_poster.png";
+
+  try {
+    console.log(`Broadcast: sending poster image to ${to} via ${posterUrl}`);
+    const img = await waSendImage(to, posterUrl, "");
+    if (!img.ok) {
+      console.warn("Poster image failed for:", to, img.error);
+    } else {
+      console.log("🖼 Poster send attempted for:", to);
+    }
+  } catch (e) {
+    console.warn("Poster image exception for", to, e?.message || e);
+  }
+
+  return true;
 }
 
 // --------------------------------------------------------------------------
