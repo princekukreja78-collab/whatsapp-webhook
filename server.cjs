@@ -2586,7 +2586,6 @@ if (!CONTACT_POSTER_URL && DEBUG) {
 }
     const contacts = await fetchContactsFromSheet();
     console.log("📄 Contacts fetched:", contacts.length);
-
 // basic filter: Indian mobile numbers starting with 91 and at least 10 digits
 const targets = contacts.filter(c => {
   const p = String(c.phone || '').replace(/\s+/g, '');
@@ -2594,18 +2593,19 @@ const targets = contacts.filter(c => {
 });
 
 console.log("🎯 Valid targets:", targets.length);
+if (DEBUG) console.log(`Sheet broadcast: will send to ${targets.length} contacts`);
 
-    if (DEBUG) console.log(`Sheet broadcast: will send to ${targets.length} contacts`);
+let sent = 0;
+const failed = [];
 
-    let sent = 0;
-    const failed = [];
-	for (const c of targets) {
+for (const c of targets) {
   const phone = String(c.phone || '').replace(/\s+/g, '');
   const name = c.name || 'Customer';
 
-  console.log("Sending to:", phone, "Name:", name);
+  console.log("Sheet broadcast → sending to:", phone, "Name:", name);
 
   try {
+    // ✅ sends 1 body param {{1}} = name, matching the template
     const ok = await sendSheetWelcomeTemplate(phone, name);
 
     if (ok) {
@@ -2613,51 +2613,30 @@ console.log("🎯 Valid targets:", targets.length);
     } else {
       failed.push(phone);
     }
-
   } catch (err) {
-    console.warn('Sheet broadcast: error for', phone, err?.message || err);
+    console.warn(
+      'Sheet broadcast: error for',
+      phone,
+      err && err.message ? err.message : err
+    );
     failed.push(phone);
   }
 
+  // 0.8s pause between messages
   await delay(800);
 }
-    for (const phone of targets) {
-      try {
-        // Assuming you already have waSendTemplate defined earlier in the file
-        // and it returns { ok, error }.
-        const { ok } = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, []);
 
-        console.log("📨 Template send status:", ok, "for", phone);
+if (DEBUG) console.log(`Sheet broadcast: done. Sent=${sent}, Failed=${failed.length}`);
 
-        if (ok) {
-          sent++;
-        } else {
-          failed.push(phone);
-        }
-      } catch (err) {
-        console.warn(
-          'Sheet broadcast: error for',
-          phone,
-          err && err.message ? err.message : err
-        );
-        failed.push(phone);
-      }
+console.log("🏁 GREETING BROADCAST FINISHED — Sent:", sent, "Failed:", failed.length);
 
-      // 0.8s pause between messages
-      await delay(800);
-    }
-
-    if (DEBUG) console.log(`Sheet broadcast: done. Sent=${sent}, Failed=${failed.length}`);
-
-    console.log("🏁 GREETING BROADCAST FINISHED — Sent:", sent, "Failed:", failed.length);
-
-    return res.json({
-      ok: true,
-      total: targets.length,
-      sent,
-      failed: failed.length,
-      failedPhones: failed
-    });
+return res.json({
+  ok: true,
+  total: targets.length,
+  sent,
+  failed: failed.length,
+  failedPhones: failed
+});
 
   } catch (err) {
     console.error('Sheet broadcast route failed:', err);
