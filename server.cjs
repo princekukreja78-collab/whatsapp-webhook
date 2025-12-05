@@ -517,7 +517,7 @@ async function waSendTemplate(to, templateName, components = []) {
       type: "template",
       template: {
         name: templateName,
-        language: { code: "en" },
+        language: { code: "en_US" },
         components
       }
     };
@@ -2525,7 +2525,7 @@ async function sendSheetWelcomeTemplate(to, name) {
     type: 'template',
     template: {
       name: 'mr_car_welcome',          // same template name
-      language: { code: 'en' },
+      language: { code: 'en_US' },
       components: [
         {
           type: 'body',
