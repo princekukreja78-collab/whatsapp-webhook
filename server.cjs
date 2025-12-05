@@ -2604,8 +2604,28 @@ for (const c of targets) {
 
   console.log("Sheet broadcast → sending to:", phone, "Name:", name);
 
+  // 1) Try sending poster image (NO TEMPLATE HERE)
+  if (CONTACT_POSTER_URL) {
+    try {
+      const caption =
+        'Hello ' + name + ', 👋\n' +
+        'Welcome to Mr.Car! 🚗✨\n' +
+        'We are at your service. Just say "Hi" to get started.';
+
+      console.log("🖼 Poster send attempted for:", phone);
+      await waSendImage(phone, CONTACT_POSTER_URL, caption);
+    } catch (err) {
+      console.warn(
+        "WA sheet-broadcast error (poster image):",
+        phone,
+        err && err.message ? err.message : err
+      );
+      // we don’t mark as failed here, text template send will still try
+    }
+  }
+
+  // 2) Send text template (mr_car_broadcast_en) with 1 param = name
   try {
-    // ✅ sends 1 body param {{1}} = name, matching the template
     const ok = await sendSheetWelcomeTemplate(phone, name);
 
     if (ok) {
@@ -2615,7 +2635,7 @@ for (const c of targets) {
     }
   } catch (err) {
     console.warn(
-      'Sheet broadcast: error for',
+      "WA sheet-broadcast error (template send):",
       phone,
       err && err.message ? err.message : err
     );
