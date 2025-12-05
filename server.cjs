@@ -453,28 +453,32 @@ async function waSendText(to, body) {
   return waSendRaw({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
 }
 
+// --- WhatsApp template language (env or default 'en') ---
+
+console.log('WA_TEMPLATE_LANG =', WA_TEMPLATE_LANG);
+
 // ---------------- Template sender (uses waSendRaw) ----------------
 async function waSendTemplate(to, templateName, components = []) {
   const payload = {
     messaging_product: "whatsapp",
-    to: String(to).replace(/\D+/g, ""),   // keep only digits
+    to: String(to).replace(/\D+/g, ""),
     type: "template",
     template: {
       name: templateName,
-      language: { code: WA_TEMPLATE_LANG },   // <<<<<< KEY LINE
+      language: { code: WA_TEMPLATE_LANG },
       components: Array.isArray(components) ? components : []
     }
   };
 
-  const r = await waSendRaw(payload);
-
-  // small debug
   if (DEBUG) {
-    console.log(
-      "waSendTemplate payload.template.language.code =",
-      payload.template.language.code
-    );
+    console.log("waSendTemplate using:", {
+      name: templateName,
+      lang: WA_TEMPLATE_LANG,
+      to: payload.to
+    });
   }
+
+  const r = await waSendRaw(payload);
 
   if (r && r.messages && r.messages.length > 0) {
     return { ok: true, resp: r };
@@ -519,7 +523,7 @@ async function waSendTemplate(to, templateName, components = []) {
       type: "template",
       template: {
         name: templateName,
-        language: { code: "en_US" },
+        language: { code: "en" },
         components
       }
     };
