@@ -435,6 +435,32 @@ async function waSendRaw(payload) {
 async function waSendText(to, body) {
   return waSendRaw({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
 }
+// ---------------- Template sender (BROADCAST SAFE) ----------------
+async function waSendTemplate(to, templateName, components = []) {
+  try {
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: "en_US" },
+        components
+      }
+    };
+
+    const r = await waSendRaw(payload);
+
+    // r will contain WhatsApp response (or error object)
+    if (r && r.messages && r.messages.length > 0) {
+      return { ok: true, resp: r };
+    }
+
+    return { ok: false, error: r && r.error ? r.error : r };
+  } catch (err) {
+    return { ok: false, error: err?.message || err };
+  }
+}
 
 // compact buttons (used AFTER new-car quote)
 async function sendNewCarButtons(to) {
