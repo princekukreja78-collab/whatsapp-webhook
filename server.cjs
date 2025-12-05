@@ -20,6 +20,9 @@ const BROADCAST_TEMPLATE_NAME =
 console.log('GREETING_TEMPLATE_NAME =', GREETING_TEMPLATE_NAME);
 console.log('GREETING_MEDIA_TEMPLATE_NAME =', GREETING_MEDIA_TEMPLATE_NAME);
 console.log('BROADCAST_TEMPLATE_NAME =', BROADCAST_TEMPLATE_NAME);
+// --- WhatsApp template language (force English = 'en') ---
+const WA_TEMPLATE_LANG = process.env.WA_TEMPLATE_LANG || 'en';
+console.log('WA_TEMPLATE_LANG =', WA_TEMPLATE_LANG);
 
 // --- startup compatibility shim: ensure greeting & CRM helpers exist ---
 // Insert this *once* near top of server.cjs (after dotenv config)
@@ -449,26 +452,62 @@ async function waSendRaw(payload) {
 async function waSendText(to, body) {
   return waSendRaw({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
 }
+
 // ---------------- Template sender (uses waSendRaw) ----------------
 async function waSendTemplate(to, templateName, components = []) {
   const payload = {
     messaging_product: "whatsapp",
-    to,
+    to: String(to).replace(/\D+/g, ""),   // keep only digits
     type: "template",
     template: {
       name: templateName,
-      language: { code: "en_US" },
+      language: { code: WA_TEMPLATE_LANG },   // <<<<<< KEY LINE
       components: Array.isArray(components) ? components : []
     }
   };
 
   const r = await waSendRaw(payload);
 
+  // small debug
+  if (DEBUG) {
+    console.log(
+      "waSendTemplate payload.template.language.code =",
+      payload.template.language.code
+    );
+  }
+
   if (r && r.messages && r.messages.length > 0) {
     return { ok: true, resp: r };
   }
 
   return { ok: false, error: r && r.error ? r.error : r };
+}
+
+// Text-only greeting for sheet broadcast
+async function sendSheetWelcomeTemplate(phone, name) {
+  const displayName = name || 'Customer';
+
+  const components = [
+    {
+      type: 'body',
+      parameters: [
+        { type: 'text', text: displayName }   // {{1}} in template body
+      ]
+    }
+  ];
+
+  const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
+
+  if (!res || !res.ok) {
+    console.warn(
+      'sendSheetWelcomeTemplate failed for',
+      phone,
+      res && (res.error || JSON.stringify(res.resp || res))
+    );
+    return false;
+  }
+
+  return true;
 }
 
 // ---------------- Template sender (BROADCAST SAFE) ----------------
