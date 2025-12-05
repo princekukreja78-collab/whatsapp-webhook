@@ -7,6 +7,21 @@ console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 console.log("MODEL SELECTED (SIGNATURE_MODEL)=", SIGNATURE_MODEL);
 console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 require('dotenv').config({ debug: false });
+// --- Template names from env (text + media) ---
+const GREETING_TEMPLATE_NAME =
+  process.env.GREETING_TEMPLATE_NAME || 'mr_car_greeting_text_only';
+
+const GREETING_MEDIA_TEMPLATE_NAME =
+  process.env.GREETING_MEDIA_TEMPLATE_NAME || 'mr_car_welcome';
+
+// Sheet broadcast will use this (text template)
+const BROADCAST_TEMPLATE_NAME =
+  process.env.BROADCAST_TEMPLATE_NAME || GREETING_TEMPLATE_NAME;
+
+console.log('GREETING_TEMPLATE_NAME =', GREETING_TEMPLATE_NAME);
+console.log('GREETING_MEDIA_TEMPLATE_NAME =', GREETING_MEDIA_TEMPLATE_NAME);
+console.log('BROADCAST_TEMPLATE_NAME =', BROADCAST_TEMPLATE_NAME);
+
 // --- startup compatibility shim: ensure greeting & CRM helpers exist ---
 // Insert this *once* near top of server.cjs (after dotenv config)
 try {
@@ -435,6 +450,28 @@ async function waSendRaw(payload) {
 async function waSendText(to, body) {
   return waSendRaw({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
 }
+// ---------------- Template sender (uses waSendRaw) ----------------
+async function waSendTemplate(to, templateName, components = []) {
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: "en_US" },
+      components: Array.isArray(components) ? components : []
+    }
+  };
+
+  const r = await waSendRaw(payload);
+
+  if (r && r.messages && r.messages.length > 0) {
+    return { ok: true, resp: r };
+  }
+
+  return { ok: false, error: r && r.error ? r.error : r };
+}
+
 // ---------------- Template sender (BROADCAST SAFE) ----------------
 async function waSendTemplate(to, templateName, components = []) {
   try {
@@ -460,6 +497,32 @@ async function waSendTemplate(to, templateName, components = []) {
   } catch (err) {
     return { ok: false, error: err?.message || err };
   }
+}
+// Text-only greeting for sheet broadcast
+async function sendSheetWelcomeTemplate(phone, name) {
+  const displayName = name || 'Customer';
+
+  const components = [
+    {
+      type: 'body',
+      parameters: [
+        { type: 'text', text: displayName }   // first {{1}} in template body
+      ]
+    }
+  ];
+
+  const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
+
+  if (!res || !res.ok) {
+    console.warn(
+      'sendSheetWelcomeTemplate failed for',
+      phone,
+      res && (res.error || JSON.stringify(res.resp || res))
+    );
+    return false;
+  }
+
+  return true;
 }
 
 // compact buttons (used AFTER new-car quote)
