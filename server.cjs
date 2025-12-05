@@ -457,7 +457,7 @@ async function waSendText(to, body) {
 
 console.log('WA_TEMPLATE_LANG =', WA_TEMPLATE_LANG);
 
-// ---------------- Template sender (uses waSendRaw) ----------------
+// ---------------- Template sender (force en_US) ----------------
 async function waSendTemplate(to, templateName, components = []) {
   const payload = {
     messaging_product: "whatsapp",
@@ -465,18 +465,12 @@ async function waSendTemplate(to, templateName, components = []) {
     type: "template",
     template: {
       name: templateName,
-      language: { code: WA_TEMPLATE_LANG },
+      language: { code: "en_US" },    // <<<<<< FORCE THIS ALWAYS
       components: Array.isArray(components) ? components : []
     }
   };
 
-  if (DEBUG) {
-    console.log("waSendTemplate using:", {
-      name: templateName,
-      lang: WA_TEMPLATE_LANG,
-      to: payload.to
-    });
-  }
+  console.log("Sending template:", templateName, "lang=en_US");
 
   const r = await waSendRaw(payload);
 
