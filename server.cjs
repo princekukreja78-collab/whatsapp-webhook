@@ -501,7 +501,7 @@ async function waSendImage(to, imageUrl, caption = "") {
     to,
     type: "image",
     image: {
-      link: imageUrl,       // <<<<<< THIS IS THE FIX
+      link: imageUrl,
       caption: caption || ""
     }
   };
