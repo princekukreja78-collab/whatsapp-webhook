@@ -9,12 +9,11 @@ console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 require('dotenv').config({ debug: false });
 // --- Template names from env (text + media) ---
 const GREETING_TEMPLATE_NAME =
-  process.env.GREETING_TEMPLATE_NAME || 'mr_car_greeting_text_only';
+  process.env.GREETING_TEMPLATE_NAME || 'mr_car_welcome';
 
 const GREETING_MEDIA_TEMPLATE_NAME =
   process.env.GREETING_MEDIA_TEMPLATE_NAME || 'mr_car_welcome';
 
-// Sheet broadcast will use this (text template)
 const BROADCAST_TEMPLATE_NAME =
   process.env.BROADCAST_TEMPLATE_NAME || GREETING_TEMPLATE_NAME;
 
