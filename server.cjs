@@ -501,7 +501,7 @@ async function waSendImage(to, imageUrl, caption = "") {
     to,
     type: "image",
     image: {
-      link: imageUrl,   // <<<<<< THIS MUST BE 'link', NOT 'id'
+      link: imageUrl,       // <<<<<< THIS IS THE FIX
       caption: caption || ""
     }
   };
@@ -523,10 +523,6 @@ async function sendSheetWelcomeTemplate(phone, name = "Customer") {
     }
   ];
 
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
   const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
 
   if (!res.ok) {
@@ -536,6 +532,11 @@ function delay(ms) {
 
   return true;
 }
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 
 // compact buttons (used AFTER new-car quote)
 async function sendNewCarButtons(to) {
