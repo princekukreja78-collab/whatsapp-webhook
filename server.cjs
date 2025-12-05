@@ -501,12 +501,10 @@ async function waSendImage(to, imageUrl, caption = "") {
     to,
     type: "image",
     image: {
-      link: imageUrl,
+      link: imageUrl,   // <<<<<< THIS MUST BE 'link', NOT 'id'
       caption: caption || ""
     }
   };
-
-  console.log("Sending image:", imageUrl);
 
   const r = await waSendRaw(payload);
 
@@ -524,6 +522,10 @@ async function sendSheetWelcomeTemplate(phone, name = "Customer") {
       ]
     }
   ];
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
   const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
 
