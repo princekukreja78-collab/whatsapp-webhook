@@ -2474,28 +2474,23 @@ console.log("🎯 Valid targets:", targets.length);
 
     let sent = 0;
     const failed = [];
-	for (const c of targets) {
+for (const c of targets) {
   const phone = String(c.phone || '').replace(/\s+/g, '');
   const name = c.name || 'Customer';
 
-  console.log("Sending to:", phone, "Name:", name);
+  
+, phone, "Name:", name);
 
   try {
     const ok = await sendSheetWelcomeTemplate(phone, name);
-
     if (ok) {
       sent++;
     } else {
       failed.push(phone);
     }
+      let sent = 0;
+    const failed = [];
 
-  } catch (err) {
-    console.warn('Sheet broadcast: error for', phone, err?.message || err);
-    failed.push(phone);
-  }
-
-  await delay(800);
-}
     for (const phone of targets) {
       try {
         // Assuming you already have waSendTemplate defined earlier in the file
