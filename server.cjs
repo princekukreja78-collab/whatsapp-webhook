@@ -160,6 +160,7 @@ const path = require('path');
 const express = require('express');
 const app = express();
 const FormData = require('form-data');
+const crmIngestHandler = require('./routes/crm_ingest.cjs');
 
 // ---- Delivery status tracking (CRM + console) ----
 const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
@@ -249,6 +250,20 @@ app.use("/crm", require("./routes/crm.cjs"));
 
 app.use(express.json());
 
+// === CRM ingest route: used by auto_ingest & webhook to store leads ===
+app.post('/crm/ingest', async (req, res) => {
+  try {
+    await crmIngestHandler(req, res);
+  } catch (err) {
+    console.error('CRM /crm/ingest error:', err && err.message ? err.message : err);
+    if (!res.headersSent) {
+      res
+        .status(500)
+        .json({ ok: false, error: err.message || String(err) });
+    }
+  }
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 const leadsRouter = require('./routes/leads.cjs');
@@ -297,31 +312,25 @@ app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
   }
 });
 
-// fetch compatibility
+// routes/auto_ingest.cjs
+// Auto-ingest helper for MR.CAR → posts leads to CRM /crm/ingest
+
 const fetch = (global.fetch) ? global.fetch : require('node-fetch');
 
-module.exports = async function autoIngest(payload) {
-  const DEBUG = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+module.exports = async function autoIngest(enriched = {}) {
+  // Prefer CRM_URL from env (Render: ngrok URL; Local: optional override)
+  // Fallback: local server at 127.0.0.1:PORT (default 10000)
+  const portEnv = process.env.PORT || 10000;
+  const baseEnv = (process.env.CRM_URL || '').trim();
+  const baseUrl = (baseEnv || `http://127.0.0.1:${portEnv}`).replace(/\/+$/, '');
+
+  const url = `${baseUrl}/crm/ingest`;
 
   try {
-    // 1) Base URL priority:
-    //    - CRM_URL from env (Render: ngrok, Local: you can set too)
-    //    - fallback to local server using same PORT as main app
-    const portEnv = process.env.PORT || 10000;
-    const rawBase =
-      (process.env.CRM_URL && process.env.CRM_URL.trim()) ||
-      `http://127.0.0.1:${portEnv}`;
-
-    const url = `${rawBase.replace(/\/+$/, '')}/crm/ingest`;
-
-    if (DEBUG) {
-      console.log('AUTO-INGEST: POST', url, 'payload:', payload);
-    }
-
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(enriched)
     });
 
     if (!res.ok) {
@@ -332,14 +341,15 @@ module.exports = async function autoIngest(payload) {
         res.statusText,
         text
       );
-    } else if (DEBUG) {
-      const text = await res.text().catch(() => '');
-      console.log('AUTO-INGEST: /crm/ingest OK', res.status, text);
+    } else {
+      console.log('AUTO-INGEST: posted to', url, 'for', enriched.from || 'UNKNOWN');
     }
-  } catch (err) {
+  } catch (e) {
     console.warn(
-      'AUTO-INGEST: posting to /crm/ingest failed',
-      err && err.message ? err.message : err
+      'AUTO-INGEST: posting to',
+      url,
+      'failed',
+      e && e.message ? e.message : e
     );
   }
 };
@@ -1698,48 +1708,33 @@ app.get('/webhook', (req, res) => {
 // -------------- CRM API ROUTES ---------------
 app.get('/crm/leads', async (req, res) => {
   try {
-    // ALWAYS prefer manually loaded leads
+    // 1) Prefer in-memory leads if present
     if (globalThis.leads && Array.isArray(globalThis.leads) && globalThis.leads.length) {
-      return res.json({ ok:true, leads: globalThis.leads });
+      return res.json({ ok: true, leads: globalThis.leads });
     }
 
-    // fallback disabled to avoid overwriting
-    return res.json({ ok:true, leads: [] });
+    // 2) Fallback: try reading from LEADS_FILE (crm_leads.json)
+    let fileLeads = [];
+    try {
+      if (fs.existsSync(LEADS_FILE)) {
+        const raw = fs.readFileSync(LEADS_FILE, 'utf8');
+        if (raw && raw.trim()) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            fileLeads = parsed;
+          } else if (parsed && Array.isArray(parsed.leads)) {
+            fileLeads = parsed.leads;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('crm/leads: failed to read LEADS_FILE', e && e.message ? e.message : e);
+    }
+
+    return res.json({ ok: true, leads: fileLeads });
 
   } catch (e) {
-    return res.status(500).json({ ok:false, error: String(e) });
-  }
-});
-
-// POST /crm/ingest  (for other bots: Signature, Property, Loan, etc.)
-app.post('/crm/ingest', async (req, res) => {
-  try {
-    const lead = req.body || {};
-    const enrichedLead = {
-      bot: lead.bot || 'UNKNOWN',
-      channel: lead.channel || 'whatsapp',
-      from: lead.from || '',
-      name: lead.name || '',
-      lastMessage: lead.lastMessage || lead.text || '',
-      service: lead.service || null,
-      tags: Array.isArray(lead.tags) ? lead.tags : [],
-      meta: lead.meta || {}
-    };
-    await postLeadToCRM(enrichedLead);
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error('CRM /crm/ingest error:', e && e.message ? e.message : e);
-    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
-  }
-});
-
-// optional ADMIN route to clear greeting throttles
-app.post('/admin/reset_greetings', (req, res) => {
-  try {
-    lastGreeting.clear();
-    res.json({ ok: true, message: 'Greeting counters reset' });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+    return res.status(500).json({ ok: false, error: String(e) });
   }
 });
 

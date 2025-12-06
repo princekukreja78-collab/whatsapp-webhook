@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Mr.Car • Signature CRM — Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg:#f7f9fb; --card:#fff; --muted:#6b7280; --accent:#0ea5e9;
+      --nav:#0b1b36; --btn:#0f1724; --success:#10b981;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    body{margin:0;background:var(--bg);color:#0b1b2b}
+    header{background:linear-gradient(90deg,#0b1b36,#091029);color:white;padding:18px 28px;display:flex;align-items:center;gap:16px}
+    header .logo{display:flex;align-items:center;gap:12px}
+    header img{height:44px}
+    header h1{font-size:18px;margin:0;letter-spacing:0.4px}
+    .wrap{display:flex;gap:20px;padding:20px}
+    .panel{background:var(--card);border-radius:12px;box-shadow:0 6px 20px rgba(11,27,54,0.06);padding:16px}
+    .left{width:320px;min-height:520px}
+    .right{flex:1;min-height:520px}
+    .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    button{background:linear-gradient(90deg,#4f46e5,#06b6d4);border:none;color:white;padding:8px 12px;border-radius:10px;cursor:pointer}
+    .btn-ghost{background:white;color:#0b1220;border:1px solid #e6eef8}
+    .muted{color:var(--muted);font-size:13px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #f1f5f9;text-align:left}
+    th{font-weight:600;font-size:13px;color:#0b1220}
+    tr:hover{background:#fbfdff}
+    .upload-area{border:2px dashed #e6eef8;padding:10px;border-radius:8px;text-align:center;color:var(--muted);font-size:13px}
+    .small{font-size:13px;color:var(--muted)}
+    .top-actions{display:flex;gap:8px;align-items:center}
+    .search{flex:1;padding:10px;border-radius:10px;border:1px solid #e6eef8}
+    input[type=file]{display:none}
+    .logo-preview{height:36px;border-radius:8px;object-fit:contain}
+  </style>
+  <link rel="stylesheet" href="/fix-dashboard.css">
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <img id="mcLogo" src="/assets/mc-logo.png" alt="MC logo" onerror="this.src='/assets/mc-logo-fallback.png'"/>
+  <div class="dashboard-export-controls" style="display:inline-block; margin-left:12px;">
+    <button id="exportCsvBtn" class="btn primary" style="padding:8px 12px; margin-right:8px;">Export CSV</button>
+    <input id="importCsvInput" type="file" accept=".csv,text/csv" style="display:inline-block; vertical-align:middle;">
+  </div>
+      <div>
+        <h1>Mr.Car • Signature CRM</h1>
+        <div class="small">New Car · Used Car · Finance · Sell</div>
+      </div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="refreshBtn" class="btn-ghost">Refresh</button>
+      <button id="exportBtn">Export CSV</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="panel left">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>Leads</strong>
+        <div class="small">Total: <span id="leadCount">0</span></div>
+      </div>
+
+      <div class="controls">
+        <input id="search" class="search" placeholder="Search by name, phone or id" />
+        <button id="syncBtn">Sync</button>
+      </div>
+
+      <div style="margin:12px 0">
+        <div class="upload-area">
+          <label for="csvUploadInput" style="cursor:pointer">
+            <strong>Upload CSV</strong><br/>
+            <span class="small">Drag & drop or click to upload leads CSV</span>
+          </label>
+          <input id="csvUploadInput" type="file" accept=".csv" />
+        </div>
+        <div style="height:10px"></div>
+        <div class="upload-area">
+          <label for="templateUploadInput" style="cursor:pointer">
+            <strong>Upload Template</strong><br/>
+            <span class="small">Upload a JSON template or mapping file</span>
+          </label>
+          <input id="templateUploadInput" type="file" accept=".json" />
+        </div>
+        <div style="height:10px"></div>
+        <div class="upload-area">
+          <label for="logoUploadInput" style="cursor:pointer">
+            <strong>Upload Logo (PNG)</strong><br/>
+            <span class="small">Replace MC logo (we’ll convert & place it under /assets)</span>
+          </label>
+          <input id="logoUploadInput" type="file" accept="image/*" />
+        </div>
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button id="clearBtn" class="btn-ghost">Clear</button>
+        <button id="downloadBtn" class="btn-ghost">Download JSON</button>
+      </div>
+
+      <div style="margin-top:16px;color:var(--muted);font-size:13px">
+        Pro tools:
+        <ul style="padding-left:18px;margin:8px 0 0 0">
+          <li>CSV import (mapped to ID,Name,Phone,Status,Timestamp)</li>
+          <li>Template uploads (for field mappings)</li>
+          <li>Logo replacement (PNG)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="panel right">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="display:flex;gap:12px;align-items:center">
+          <strong>Leads table</strong>
+          <div class="small" id="status">—</div>
+        </div>
+
+        <div class="top-actions">
+          <label class="small">Auto-refresh <input id="autoRefresh" type="checkbox" /></label>
+        </div>
+      </div>
+
+      <div style="overflow:auto;max-height:540px">
+        <table>
+          <thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Status</th><th>Timestamp</th></tr></thead>
+          <tbody id="leadsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+const api = {
+  getLeads: () => fetch('/crm/leads').then(r => r.json()),
+  sync: (payload={}) => fetch('/api/sheets/sync', {method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify(payload)}).then(r => r.json()),
+  uploadCSV: (formData) => fetch('/api/uploads/csv', { method:'POST', body: formData }).then(r => r.json()),
+  uploadTemplate: (formData) => fetch('/api/uploads/template', { method:'POST', body: formData }).then(r => r.json()),
+  uploadLogo: (formData) => fetch('/api/uploads/logo', { method:'POST', body: formData }).then(r => r.json()),
+  exportCSV: () => fetch('/api/sheets/export', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) }).then(r => r.json())
+};
+
+let leadsCache = [];
+
+async function loadLeads(){
+  document.getElementById('status').textContent = 'Loading…';
+  try {
+    const j = await api.getLeads();
+    if (j.ok){
+      leadsCache = j.leads || [];
+      renderLeads(leadsCache);
+      document.getElementById('leadCount').textContent = (leadsCache||[]).length;
+      document.getElementById('status').textContent = 'Loaded';
+    } else {
+      document.getElementById('status').textContent = 'No leads';
+    }
+  } catch (e){
+    console.error(e);
+    document.getElementById('status').textContent = 'Error';
+  }
+}
+
+function renderLeads(rows){
+  const t = document.getElementById('leadsTbody');
+  t.innerHTML = '';
+  const q = (document.getElementById('search').value || '').toLowerCase();
+  const filtered = rows.filter(r => !q || (r.name||'').toLowerCase().includes(q) || (r.phone||'').toLowerCase().includes(q) || (r.id||'').toLowerCase().includes(q));
+  for (const r of filtered){
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>'+escapeHtml(r.id||'')+'</td><td>'+escapeHtml(r.name||'')+'</td><td>'+escapeHtml(r.phone||'')+'</td><td>'+escapeHtml(r.status||'')+'</td><td>'+escapeHtml(r.created_at||'')+'</td>';
+    t.appendChild(tr);
+  }
+}
+
+function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+document.getElementById('syncBtn').addEventListener('click', async ()=>{
+  document.getElementById('status').textContent = 'Syncing…';
+  try {
+    const res = await api.sync({});
+    if (res.ok){
+      document.getElementById('status').textContent = 'Synced: '+res.imported;
+      await loadLeads();
+    } else {
+      document.getElementById('status').textContent = 'Sync failed';
+      console.error(res);
+    }
+  } catch (e){
+    document.getElementById('status').textContent = 'Sync error';
+    console.error(e);
+  }
+});
+
+document.getElementById('refreshBtn').addEventListener('click', loadLeads);
+
+document.getElementById('search').addEventListener('input', ()=> renderLeads(leadsCache));
+
+document.getElementById('csvUploadInput').addEventListener('change', async (ev)=>{
+  const f = ev.target.files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append('csv', f);
+  document.getElementById('status').textContent = 'Uploading CSV...';
+  const r = await api.uploadCSV(fd);
+  if (r.ok) { document.getElementById('status').textContent = 'CSV uploaded: '+r.imported; await loadLeads(); }
+  else { document.getElementById('status').textContent = 'Upload failed'; console.error(r); }
+});
+
+document.getElementById('templateUploadInput').addEventListener('change', async (ev)=>{
+  const f = ev.target.files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append('template', f);
+  document.getElementById('status').textContent = 'Uploading template...';
+  const r = await api.uploadTemplate(fd);
+  if (r.ok) { document.getElementById('status').textContent = 'Template uploaded'; }
+  else { document.getElementById('status').textContent = 'Upload failed'; console.error(r); }
+});
+
+document.getElementById('logoUploadInput').addEventListener('change', async (ev)=>{
+  const f = ev.target.files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append('logo', f);
+  document.getElementById('status').textContent = 'Uploading logo...';
+  const r = await api.uploadLogo(fd);
+  if (r.ok) { document.getElementById('status').textContent = 'Logo updated'; document.getElementById('mcLogo').src = '/assets/mc-logo.png?'+Date.now(); }
+  else { document.getElementById('status').textContent = 'Logo upload failed'; console.error(r); }
+});
+
+document.getElementById('clearBtn').addEventListener('click', async ()=>{
+  if (!confirm('Clear local leads.json?')) return;
+  const ok = await fetch('/crm/clear', {method:'POST'}).then(r=>r.json());
+  if (ok && ok.ok) { await loadLeads(); document.getElementById('status').textContent='Cleared'; }
+});
+
+document.getElementById('downloadBtn').addEventListener('click', async ()=>{
+  const data = JSON.stringify(leadsCache || [], null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'crm_leads.json'; document.body.appendChild(a); a.click(); a.remove();
+});
+
+document.getElementById('exportBtn').addEventListener('click', async ()=>{
+  document.getElementById('status').textContent = 'Exporting…';
+  try {
+    const res = await api.exportCSV();
+    if (res.ok) document.getElementById('status').textContent = 'Exported: '+res.exported;
+    else document.getElementById('status').textContent = 'Export failed';
+  } catch (e){ document.getElementById('status').textContent = 'Export error'; console.error(e); }
+});
+
+let autoTimer = null;
+document.getElementById('autoRefresh').addEventListener('change', function(){
+  if (this.checked){
+    autoTimer = setInterval(loadLeads, 10000);
+  } else {
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+});
+
+loadLeads();
+</script>
+
+<script>
+window.__mrcar_csv_handlers = true;
+document.getElementById('exportCsvBtn')?.addEventListener('click', async function(){
+  try {
+    const res = await fetch('/api/leads/export-csv');
+    if (!res.ok) return alert('Export failed: '+res.statusText);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'leads-export.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch(e) { alert('Export error: '+e.message) }
+});
+
+document.getElementById('importCsvInput')?.addEventListener('change', async function(e){
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/leads/import-csv', { method: 'POST', body: fd });
+    const json = await res.json();
+    alert(json.ok ? 'Import success: '+(json.imported||0)+' rows' : 'Import failed: '+(json.error||JSON.stringify(json)));
+    if (json.ok) window.location.reload();
+  } catch(err){
+    alert('Import error: '+err.message);
+  }
+});
+</script>
+
+</body>
+</html>
