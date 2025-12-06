@@ -46,7 +46,6 @@ body {
   font-size: 14px;
   opacity: 0.9;
 }
-
 .brand-tags {
   margin-top: 6px;
   display: flex;
@@ -54,13 +53,23 @@ body {
   gap: 6px;
 }
 
-.brand-tags span {
+.tag-pill {
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   opacity: 0.85;
+  background: transparent;
+  color: #f5f7ff;
+  cursor: pointer;
 }
+
+.tag-pill.active {
+  background: #2f7bff;
+  border-color: #2f7bff;
+  opacity: 1;
+}
+
 
 .header-right {
   display: flex;

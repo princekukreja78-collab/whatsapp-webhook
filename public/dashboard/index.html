@@ -15,12 +15,13 @@
             <span class="brand-main">Mr.Car</span>
             <span class="brand-sub">Signature CRM</span>
           </div>
-          <div class="brand-tags">
-            <span>New Car</span>
-            <span>Used Car</span>
-            <span>Finance</span>
-            <span>Sell</span>
-          </div>
+<div class="brand-tags">
+  <button class="tag-pill active" data-lead-type="">All</button>
+  <button class="tag-pill" data-lead-type="new">New Car</button>
+  <button class="tag-pill" data-lead-type="used">Used Car</button>
+  <button class="tag-pill" data-lead-type="finance">Finance</button>
+  <button class="tag-pill" data-lead-type="sell">Sell</button>
+</div>
         </div>
         <div class="header-right">
           <button id="btn-refresh" class="btn ghost">Refresh</button>
@@ -157,8 +158,10 @@
       const summaryNew = document.getElementById('summary-new');
       const btnRefresh = document.getElementById('btn-refresh');
       const btnExport = document.getElementById('btn-export-csv');
+const tagButtons = Array.from(document.querySelectorAll('[data-lead-type]'));
 
-      let allLeads = [];
+let allLeads = [];
+let activeLeadType = ''; // matches data-lead-type
 
       async function fetchLeads() {
         try {
@@ -176,19 +179,22 @@
         const q = (searchInput.value || '').trim().toLowerCase();
         const status = statusFilter.value;
 
-        const filtered = allLeads.filter((lead) => {
-          const id = String(lead.id || lead.ID || '').toLowerCase();
-          const name = String(lead.name || lead.Name || '').toLowerCase();
-          const phone = String(lead.phone || lead.Phone || '').toLowerCase();
-          const st = String(lead.status || lead.Status || '').toLowerCase();
+const filtered = allLeads.filter((lead) => {
+  const id = String(lead.id || lead.ID || '').toLowerCase();
+  const name = String(lead.name || lead.Name || '').toLowerCase();
+  const phone = String(lead.phone || lead.Phone || '').toLowerCase();
+  const st = String(lead.status || lead.Status || '').toLowerCase();
+  const leadType = String(lead.leadType || lead['Lead Type'] || '').toLowerCase();
 
-          const matchesSearch =
-            !q || id.includes(q) || name.includes(q) || phone.includes(q);
+  const matchesSearch =
+    !q || id.includes(q) || name.includes(q) || phone.includes(q);
 
-          const matchesStatus = !status || st === status.toLowerCase();
+  const matchesStatus = !status || st === status.toLowerCase();
 
-          return matchesSearch && matchesStatus;
-        });
+  const matchesLeadType = !activeLeadType || leadType === activeLeadType;
+
+  return matchesSearch && matchesStatus && matchesLeadType;
+});
 
         tbody.innerHTML = '';
         filtered.forEach((lead) => {
@@ -268,6 +274,17 @@
       statusFilter.addEventListener('change', renderLeads);
       btnRefresh.addEventListener('click', fetchLeads);
       btnExport.addEventListener('click', exportCsv);
+tagButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    activeLeadType = btn.dataset.leadType || '';
+
+    tagButtons.forEach((b) => {
+      b.classList.toggle('active', b === btn);
+    });
+
+    renderLeads();
+  });
+});
 
       // Initial load
       fetchLeads();
