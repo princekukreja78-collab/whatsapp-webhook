@@ -1747,14 +1747,29 @@ app.post('/webhook', async (req, res) => {
       };
       console.log('📩 Incoming webhook (short):', JSON.stringify(short));
     }
+/* AUTO-INGEST using actual WhatsApp message fields */
+try {
+  const msg = value.messages?.[0];
+  const contact = value.contacts?.[0];
 
-    /* AUTO-INGEST (minimal, safe): forward to /crm/ingest via helper */
-    const autoIngest = require("./routes/auto_ingest.cjs");
-    const senderForAuto = short?.from || req.body?.from || "";
-    const senderNameForAuto = short?.name || req.body?.name || senderForAuto;
-    const lastMsgForAuto = short?.text || req.body?.text || "";
-    if (senderForAuto) autoIngest({ bot:"MR.CAR", channel:"whatsapp", from: senderForAuto, name: senderNameForAuto, lastMessage: lastMsgForAuto, meta:{source:"webhook-auto"} });
+  if (msg && msg.from) {
+    const senderForAuto = msg.from;
+    const senderNameForAuto = contact?.profile?.name || senderForAuto;
+    const lastMsgForAuto = msg.text?.body || msg.interactive?.button_reply?.title || "";
 
+    autoIngest({
+      bot: "MR.CAR",
+      channel: "whatsapp",
+      from: senderForAuto,
+      name: senderNameForAuto,
+      lastMessage: lastMsgForAuto,
+      meta: { source: "webhook-auto" }
+    });
+  }
+} catch (e) {
+  console.warn("AUTO-INGEST FAILED:", e?.message || e);
+}
+    
     const entry  = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value  = change?.value || {};
