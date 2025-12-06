@@ -1,18 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-/**
- * CRM ingest handler.
- * - Accepts JSON body from auto_ingest / webhook.
- * - Enriches with id + timestamp.
- * - Appends to data/crm_leads.json.
- * - Responds with { ok: true, lead }.
- *
- * This is self-contained and does NOT touch your new/used car quote logic.
- */
-
-const dataDir   = path.join(__dirname, '..', 'data');
-const leadsFile = path.join(dataDir, 'crm_leads.json');
+// crm_leads.json in project root (used by /crm/leads + dashboard)
+const leadsFile = path.join(__dirname, '..', 'crm_leads.json');
 
 function loadLeads() {
   try {
@@ -21,17 +11,16 @@ function loadLeads() {
     if (!txt.trim()) return [];
     return JSON.parse(txt);
   } catch (err) {
-    console.warn('crm_ingest: failed to read leads file:', err.message || err);
+    console.warn('crm_ingest: failed to read crm_leads.json:', err.message || err);
     return [];
   }
 }
 
 function saveLeads(leads) {
   try {
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(leadsFile, JSON.stringify(leads, null, 2), 'utf8');
   } catch (err) {
-    console.error('crm_ingest: failed to write leads file:', err.message || err);
+    console.error('crm_ingest: failed to write crm_leads.json:', err.message || err);
   }
 }
 
@@ -40,15 +29,47 @@ module.exports = async (req, res) => {
     const body = req.body || {};
 
     const nowIso = new Date().toISOString();
-    const id = body.id || body.phone || body.from || `L${Date.now()}`;
+    const id =
+      body.ID ||
+      body.id ||
+      body.phone ||
+      body.from ||
+      `L${Date.now()}`;
+
+    const phone =
+      body.Phone ||
+      body.phone ||
+      body.from ||
+      '';
+
+    const firstText =
+      body.text ||
+      (body.raw && (body.raw.text || body.raw.message || body.raw.body)) ||
+      body.message ||
+      '';
 
     const lead = {
-      id,
-      name: body.name || body.contact_name || 'UNKNOWN',
-      phone: body.phone || body.from || '',
-      status: body.status || 'auto-ingested',
-      source: body.source || 'whatsapp',
-      timestamp: nowIso,
+      ID: id,
+      Name: body.Name || body.name || body.contact_name || 'UNKNOWN',
+      Phone: phone,
+      Status: body.Status || body.status || 'auto-ingested',
+      Timestamp: body.Timestamp || nowIso,
+
+      // "What they asked for"
+      'Car Enquired':
+        body['Car Enquired'] ||
+        body.carEnquired ||
+        firstText,
+
+      Budget: body.Budget || body.budget || '',
+      'Last AI Reply': body['Last AI Reply'] || body.lastAiReply || body.last_ai_reply || '',
+      'AI Quote': body['AI Quote'] || body.aiQuote || body.ai_quote || '',
+      'Lead Type':
+        body['Lead Type'] ||
+        body.leadType ||
+        body.lead_type ||
+        (firstText ? 'whatsapp_query' : 'auto-ingested'),
+
       raw: body,
     };
 
@@ -56,11 +77,12 @@ module.exports = async (req, res) => {
     leads.push(lead);
     saveLeads(leads);
 
-    console.log('CRM /crm/ingest saved lead:', {
-      id: lead.id,
-      phone: lead.phone,
-      name: lead.name,
-      status: lead.status,
+    console.log('CRM /crm/ingest saved lead (dashboard compatible):', {
+      ID: lead.ID,
+      Phone: lead.Phone,
+      Name: lead.Name,
+      Status: lead.Status,
+      CarEnquired: lead['Car Enquired'],
     });
 
     return res.json({ ok: true, lead });
