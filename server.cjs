@@ -290,11 +290,59 @@ app.get('/dashboard', (req, res) => {
 
 app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
   try {
-  } catch (e) { console.error('sendFile error', e && e.message ? e.message : e); return res.status(500).send('internal'); }
+    res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
+  } catch (e) {
+    console.error('sendFile error', e && e.message ? e.message : e);
+    return res.status(500).send('internal');
+  }
 });
 
 // fetch compatibility
 const fetch = (global.fetch) ? global.fetch : require('node-fetch');
+
+module.exports = async function autoIngest(payload) {
+  const DEBUG = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+
+  try {
+    // 1) Base URL priority:
+    //    - CRM_URL from env (Render: ngrok, Local: you can set too)
+    //    - fallback to local server using same PORT as main app
+    const portEnv = process.env.PORT || 10000;
+    const rawBase =
+      (process.env.CRM_URL && process.env.CRM_URL.trim()) ||
+      `http://127.0.0.1:${portEnv}`;
+
+    const url = `${rawBase.replace(/\/+$/, '')}/crm/ingest`;
+
+    if (DEBUG) {
+      console.log('AUTO-INGEST: POST', url, 'payload:', payload);
+    }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.warn(
+        'AUTO-INGEST: /crm/ingest non-OK',
+        res.status,
+        res.statusText,
+        text
+      );
+    } else if (DEBUG) {
+      const text = await res.text().catch(() => '');
+      console.log('AUTO-INGEST: /crm/ingest OK', res.status, text);
+    }
+  } catch (err) {
+    console.warn(
+      'AUTO-INGEST: posting to /crm/ingest failed',
+      err && err.message ? err.message : err
+    );
+  }
+};
 
 // ---------------- ENV ----------------
 const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
