@@ -528,42 +528,50 @@ async function waSendImage(to, imageUrl, caption = "") {
   if (r && r.messages) return { ok: true };
   return { ok: false, error: r?.error || r };
 }
-
-// === ONE SINGLE GREETING (image header + personalised body) ===
+// === ONE SINGLE GREETING (image header + personalised text body) ===
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
     throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
   }
 
   const displayName = name || "Customer";
-  const components = [];
 
-  // HEADER: image from CONTACT_POSTER_URL
-  if (CONTACT_POSTER_URL) {
-    components.push({
+  // Use env URL if set, otherwise fall back to known poster URL
+  const headerImageLink =
+    (CONTACT_POSTER_URL && CONTACT_POSTER_URL.trim()) ||
+    "https://whatsapp-gpt-crm.onrender.com/uploads/mrcar_poster.png";
+
+  const components = [
+    {
+      // HEADER: IMAGE, as required by mr_car_broadcast_en
       type: "header",
       parameters: [
         {
           type: "image",
           image: {
-            link: CONTACT_POSTER_URL   // https://whatsapp-gpt-crm.onrender.com/uploads/mrcar_poster.png
+            link: headerImageLink
           }
         }
       ]
-    });
-  }
+    },
+    {
+      // BODY: fills {{1}} in "Namaste {{1}}, welcome to Mr.Car! ..."
+      type: "body",
+      parameters: [
+        { type: "text", text: displayName }
+      ]
+    }
+  ];
 
-  // BODY: fills {{1}}
-  components.push({
-    type: "body",
-    parameters: [
-      { type: "text", text: displayName }
-    ]
-  });
+  console.log(
+    `Broadcast: sending media template to ${phone} with header ${headerImageLink}`
+  );
 
-  console.log(`Broadcast: sending media template to ${phone}`);
-
-  const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
+  const res = await waSendTemplate(
+    phone,
+    BROADCAST_TEMPLATE_NAME,
+    components
+  );
 
   if (!res.ok) {
     console.warn("sendSheetWelcomeTemplate failed", phone, res.error);
@@ -2509,7 +2517,7 @@ async function fetchContactsFromSheet() {
 // ---------------- SHEET BROADCAST SENDER ----------------
 // ORDER = 1) TEMPLATE FIRST  2) POSTER IMAGE SECOND
 
-async function sendSheetWelcomeTemplate(to, name = "Customer") {
+async function sendSheetWelcomeTemplate_OLD(to, name = "Customer") {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
     throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
   }
