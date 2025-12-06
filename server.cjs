@@ -529,18 +529,39 @@ async function waSendImage(to, imageUrl, caption = "") {
   return { ok: false, error: r?.error || r };
 }
 
-// === ONE SINGLE GREETING MESSAGE (image+text in one template) ===
+// === ONE SINGLE GREETING (image header + personalised body) ===
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
     throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
   }
 
   const displayName = name || "Customer";
-
-    // No parameters, treat template as static text
   const components = [];
 
-  console.log(`Broadcast: sending single media template to ${phone}`);
+  // HEADER: image from CONTACT_POSTER_URL
+  if (CONTACT_POSTER_URL) {
+    components.push({
+      type: "header",
+      parameters: [
+        {
+          type: "image",
+          image: {
+            link: CONTACT_POSTER_URL   // https://whatsapp-gpt-crm.onrender.com/uploads/mrcar_poster.png
+          }
+        }
+      ]
+    });
+  }
+
+  // BODY: fills {{1}}
+  components.push({
+    type: "body",
+    parameters: [
+      { type: "text", text: displayName }
+    ]
+  });
+
+  console.log(`Broadcast: sending media template to ${phone}`);
 
   const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
 
