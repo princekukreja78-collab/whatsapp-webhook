@@ -529,9 +529,7 @@ async function waSendImage(to, imageUrl, caption = "") {
   return { ok: false, error: r?.error || r };
 }
 
-// ---------------- SHEET BROADCAST SENDER ----------------
-// ORDER: 1) TEMPLATE TEXT, 2) POSTER IMAGE
-
+// === ONE SINGLE GREETING MESSAGE (image+text in one template) ===
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
     throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
@@ -539,45 +537,25 @@ async function sendSheetWelcomeTemplate(phone, name = "Customer") {
 
   const displayName = name || "Customer";
 
-  // 1️⃣ Template
-  console.log(`Broadcast: sending template to ${phone}`);
-
   const components = [
     {
       type: "body",
       parameters: [
-        { type: "text", text: displayName }
+        { type: "text", text: displayName }   // fills {{1}}
       ]
     }
   ];
 
-  const t = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
+  console.log(`Broadcast: sending single media template to ${phone}`);
 
-  if (!t.ok) {
-    console.warn("WA sheet-broadcast error (template send):", phone, t.error);
+  const res = await waSendTemplate(phone, BROADCAST_TEMPLATE_NAME, components);
+
+  if (!res.ok) {
+    console.warn("sendSheetWelcomeTemplate failed", phone, res.error);
     return false;
   }
 
-  console.log("Template sent OK:", phone);
-
-  // 2️⃣ Poster (if URL configured)
-  if (CONTACT_POSTER_URL) {
-    const posterUrl = CONTACT_POSTER_URL;
-    try {
-      console.log(`Broadcast: sending poster image to ${phone} via ${posterUrl}`);
-      const img = await waSendImageLink(phone, posterUrl, "");
-      if (!img.ok) {
-        console.warn("Poster image failed for:", phone, img.error);
-      } else {
-        console.log("🖼 Poster send attempted for:", phone);
-      }
-    } catch (e) {
-      console.warn("Poster image exception for", phone, e?.message || e);
-    }
-  } else if (DEBUG) {
-    console.log("CONTACT_POSTER_URL not set; skipping poster image for", phone);
-  }
-
+  console.log("Greeting template sent OK:", phone);
   return true;
 }
 
@@ -2557,7 +2535,6 @@ async function sendSheetWelcomeTemplate(to, name = "Customer") {
 
   try {
     console.log(`Broadcast: sending poster image to ${to} via ${posterUrl}`);
-    const img = await waSendImageLink(to, posterUrl, "");
     if (!img.ok) {
       console.warn("Poster image failed for:", to, img.error);
     } else {
@@ -2617,7 +2594,6 @@ for (const c of targets) {
         'We are at your service. Just say "Hi" to get started.';
 
       console.log("🖼 Poster send attempted for:", phone);
-      await waSendImageLink(phone, CONTACT_POSTER_URL, caption);
     } catch (err) {
       console.warn(
         "WA sheet-broadcast error (poster image):",
