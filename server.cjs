@@ -537,14 +537,8 @@ async function sendSheetWelcomeTemplate(phone, name = "Customer") {
 
   const displayName = name || "Customer";
 
-  const components = [
-    {
-      type: "body",
-      parameters: [
-        { type: "text", text: displayName }   // fills {{1}}
-      ]
-    }
-  ];
+    // No parameters, treat template as static text
+  const components = [];
 
   console.log(`Broadcast: sending single media template to ${phone}`);
 
