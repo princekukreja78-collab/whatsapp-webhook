@@ -1738,7 +1738,7 @@ app.post('/webhook', async (req, res) => {
     // ensure `short` exists in the outer scope so later code can't throw ReferenceError
     let short = {};
 
-    if (DEBUG) {
+        if (DEBUG) {
       short = {
         object: req.body && req.body.object,
         entry0: Array.isArray(req.body?.entry)
@@ -1747,32 +1747,56 @@ app.post('/webhook', async (req, res) => {
       };
       console.log('📩 Incoming webhook (short):', JSON.stringify(short));
     }
-/* AUTO-INGEST using actual WhatsApp message fields */
-try {
-  const msg = value.messages?.[0];
-  const contact = value.contacts?.[0];
 
-  if (msg && msg.from) {
-    const senderForAuto = msg.from;
-    const senderNameForAuto = contact?.profile?.name || senderForAuto;
-    const lastMsgForAuto = msg.text?.body || msg.interactive?.button_reply?.title || "";
+    // --- Safely derive entry / change / value once, before using anywhere ---
+    let entry  = null;
+    let change = null;
+    let value  = {};
 
-    autoIngest({
-      bot: "MR.CAR",
-      channel: "whatsapp",
-      from: senderForAuto,
-      name: senderNameForAuto,
-      lastMessage: lastMsgForAuto,
-      meta: { source: "webhook-auto" }
-    });
-  }
-} catch (e) {
-  console.warn("AUTO-INGEST FAILED:", e?.message || e);
-}
-    
-    const entry  = req.body?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value  = change?.value || {};
+    try {
+      if (Array.isArray(req.body?.entry) && req.body.entry.length > 0) {
+        entry = req.body.entry[0] || null;
+
+        if (Array.isArray(entry?.changes) && entry.changes.length > 0) {
+          change = entry.changes[0] || null;
+          value  = change?.value || {};
+        }
+      }
+    } catch (e) {
+      console.warn("WEBHOOK PARSE FAILED:", e?.message || e);
+      entry  = null;
+      change = null;
+      value  = {};
+    }
+
+    /* AUTO-INGEST using actual WhatsApp message fields */
+    try {
+      const msg     = value.messages?.[0];
+      const contact = value.contacts?.[0];
+
+      if (msg && msg.from) {
+        const senderForAuto     = msg.from;
+        const senderNameForAuto = contact?.profile?.name || senderForAuto;
+        const lastMsgForAuto =
+          msg.text?.body ||
+          msg.interactive?.button_reply?.title ||
+          msg.interactive?.list_reply?.title ||
+          "";
+
+        const autoIngest = require("./routes/auto_ingest.cjs");
+
+        autoIngest({
+          bot: "MR.CAR",
+          channel: "whatsapp",
+          from: senderForAuto,
+          name: senderNameForAuto,
+          lastMessage: lastMsgForAuto,
+          meta: { source: "webhook-auto" }
+        });
+      }
+    } catch (e) {
+      console.warn("AUTO-INGEST FAILED:", e?.message || e);
+    }
 
     // ---- WhatsApp delivery status tracking ----
 if (value.statuses && !value.messages) {
@@ -2781,7 +2805,17 @@ app.get('/api/wa-delivery-log', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(data);
 });
+// ==== DASHBOARD STATIC ROUTES (RESTORE) ====
+app.use('/dashboard', express.static(path.join(__dirname, 'public', 'dashboard')));
 
+app.get('/dashboard', (req, res) => {
+  return res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
+});
+
+// Catch-all for internal dashboard routes
+app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
+  return res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
+});
 
 app.listen(PORT, () => {
 console.log("🟢 Server fully started — READY to receive greeting UI and webhook events");
