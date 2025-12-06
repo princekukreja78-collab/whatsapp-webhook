@@ -29,12 +29,14 @@ module.exports = async (req, res) => {
     const body = req.body || {};
 
     const nowIso = new Date().toISOString();
+    const nowTs  = Date.now();
+
     const id =
       body.ID ||
       body.id ||
       body.phone ||
       body.from ||
-      `L${Date.now()}`;
+      `L${nowTs}`;
 
     const phone =
       body.Phone ||
@@ -48,19 +50,35 @@ module.exports = async (req, res) => {
       body.message ||
       '';
 
-    const lead = {
-      ID: id,
-      Name: body.Name || body.name || body.contact_name || 'UNKNOWN',
-      Phone: phone,
-      Status: body.Status || body.status || 'auto-ingested',
-      Timestamp: body.Timestamp || nowIso,
+    const name =
+      body.Name ||
+      body.name ||
+      body.contact_name ||
+      'UNKNOWN';
 
-      // "What they asked for"
+    const status =
+      body.Status ||
+      body.status ||
+      'auto-ingested';
+
+    const tsIso =
+      body.Timestamp ||
+      body.timestamp ||
+      body.ts ||
+      nowIso;
+
+    // Normalized lead shape for dashboard + sheet
+    const lead = {
+      // Sheet / CONTACT SHEET headers (UPPER)
+      ID: id,
+      Name: name,
+      Phone: phone,
+      Status: status,
+      Timestamp: tsIso,
       'Car Enquired':
         body['Car Enquired'] ||
         body.carEnquired ||
         firstText,
-
       Budget: body.Budget || body.budget || '',
       'Last AI Reply': body['Last AI Reply'] || body.lastAiReply || body.last_ai_reply || '',
       'AI Quote': body['AI Quote'] || body.aiQuote || body.ai_quote || '',
@@ -70,6 +88,15 @@ module.exports = async (req, res) => {
         body.lead_type ||
         (firstText ? 'whatsapp_query' : 'auto-ingested'),
 
+      // Dashboard JS (lowercase / snake-case) compatibility
+      id,
+      name,
+      phone,
+      status,
+      timestamp: tsIso,
+      ts: nowTs,
+
+      // keep raw payload for debugging
       raw: body,
     };
 
