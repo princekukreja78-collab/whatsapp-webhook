@@ -160,7 +160,6 @@ const path = require('path');
 const express = require('express');
 const app = express();
 const FormData = require('form-data');
-const crmIngestHandler = require('./routes/crm_ingest.cjs');
 
 // ---- Delivery status tracking (CRM + console) ----
 const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
@@ -249,20 +248,6 @@ function recordDeliveryStatusForPhone(phone, statusPayload) {
 app.use("/crm", require("./routes/crm.cjs"));
 
 app.use(express.json());
-
-// === CRM ingest route: used by auto_ingest & webhook to store leads ===
-app.post('/crm/ingest', async (req, res) => {
-  try {
-    await crmIngestHandler(req, res);
-  } catch (err) {
-    console.error('CRM /crm/ingest error:', err && err.message ? err.message : err);
-    if (!res.headersSent) {
-      res
-        .status(500)
-        .json({ ok: false, error: err.message || String(err) });
-    }
-  }
-});
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -1836,22 +1821,6 @@ app.post('/webhook', async (req, res) => {
           lastMessage: lastMsgForAuto,
           meta: { source: "webhook-auto" }
         });
-// --- Admin Alert: New Lead Received (IST time) ---
-try {
-  if (ADMIN_WA && senderForAuto !== ADMIN_WA) {
-    await waSendText(
-      ADMIN_WA,
-      `🔔 *New Lead Received*\n\n` +
-      `👤 Name: ${senderNameForAuto}\n` +
-      `📱 Phone: ${senderForAuto}\n` +
-      `💬 Message: ${lastMsgForAuto || 'No text'}\n` +
-      `⏰ Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
-    );
-  }
-} catch (e) {
-  console.warn("Admin alert failed:", e?.message || e);
-}
-
       }
     } catch (e) {
       console.warn("AUTO-INGEST FAILED:", e?.message || e);

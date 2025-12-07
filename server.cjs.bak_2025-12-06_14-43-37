@@ -160,7 +160,6 @@ const path = require('path');
 const express = require('express');
 const app = express();
 const FormData = require('form-data');
-const crmIngestHandler = require('./routes/crm_ingest.cjs');
 
 // ---- Delivery status tracking (CRM + console) ----
 const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
@@ -250,20 +249,6 @@ app.use("/crm", require("./routes/crm.cjs"));
 
 app.use(express.json());
 
-// === CRM ingest route: used by auto_ingest & webhook to store leads ===
-app.post('/crm/ingest', async (req, res) => {
-  try {
-    await crmIngestHandler(req, res);
-  } catch (err) {
-    console.error('CRM /crm/ingest error:', err && err.message ? err.message : err);
-    if (!res.headersSent) {
-      res
-        .status(500)
-        .json({ ok: false, error: err.message || String(err) });
-    }
-  }
-});
-
 app.use(express.static(path.join(__dirname, "public")));
 
 const leadsRouter = require('./routes/leads.cjs');
@@ -305,54 +290,11 @@ app.get('/dashboard', (req, res) => {
 
 app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
   try {
-    res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
-  } catch (e) {
-    console.error('sendFile error', e && e.message ? e.message : e);
-    return res.status(500).send('internal');
-  }
+  } catch (e) { console.error('sendFile error', e && e.message ? e.message : e); return res.status(500).send('internal'); }
 });
 
-// routes/auto_ingest.cjs
-// Auto-ingest helper for MR.CAR → posts leads to CRM /crm/ingest
-
+// fetch compatibility
 const fetch = (global.fetch) ? global.fetch : require('node-fetch');
-
-module.exports = async function autoIngest(enriched = {}) {
-  // Prefer CRM_URL from env (Render: ngrok URL; Local: optional override)
-  // Fallback: local server at 127.0.0.1:PORT (default 10000)
-  const portEnv = process.env.PORT || 10000;
-  const baseEnv = (process.env.CRM_URL || '').trim();
-  const baseUrl = (baseEnv || `http://127.0.0.1:${portEnv}`).replace(/\/+$/, '');
-
-  const url = `${baseUrl}/crm/ingest`;
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(enriched)
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      console.warn(
-        'AUTO-INGEST: /crm/ingest non-OK',
-        res.status,
-        res.statusText,
-        text
-      );
-    } else {
-      console.log('AUTO-INGEST: posted to', url, 'for', enriched.from || 'UNKNOWN');
-    }
-  } catch (e) {
-    console.warn(
-      'AUTO-INGEST: posting to',
-      url,
-      'failed',
-      e && e.message ? e.message : e
-    );
-  }
-};
 
 // ---------------- ENV ----------------
 const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
@@ -1708,33 +1650,48 @@ app.get('/webhook', (req, res) => {
 // -------------- CRM API ROUTES ---------------
 app.get('/crm/leads', async (req, res) => {
   try {
-    // 1) Prefer in-memory leads if present
+    // ALWAYS prefer manually loaded leads
     if (globalThis.leads && Array.isArray(globalThis.leads) && globalThis.leads.length) {
-      return res.json({ ok: true, leads: globalThis.leads });
+      return res.json({ ok:true, leads: globalThis.leads });
     }
 
-    // 2) Fallback: try reading from LEADS_FILE (crm_leads.json)
-    let fileLeads = [];
-    try {
-      if (fs.existsSync(LEADS_FILE)) {
-        const raw = fs.readFileSync(LEADS_FILE, 'utf8');
-        if (raw && raw.trim()) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            fileLeads = parsed;
-          } else if (parsed && Array.isArray(parsed.leads)) {
-            fileLeads = parsed.leads;
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('crm/leads: failed to read LEADS_FILE', e && e.message ? e.message : e);
-    }
-
-    return res.json({ ok: true, leads: fileLeads });
+    // fallback disabled to avoid overwriting
+    return res.json({ ok:true, leads: [] });
 
   } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e) });
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+// POST /crm/ingest  (for other bots: Signature, Property, Loan, etc.)
+app.post('/crm/ingest', async (req, res) => {
+  try {
+    const lead = req.body || {};
+    const enrichedLead = {
+      bot: lead.bot || 'UNKNOWN',
+      channel: lead.channel || 'whatsapp',
+      from: lead.from || '',
+      name: lead.name || '',
+      lastMessage: lead.lastMessage || lead.text || '',
+      service: lead.service || null,
+      tags: Array.isArray(lead.tags) ? lead.tags : [],
+      meta: lead.meta || {}
+    };
+    await postLeadToCRM(enrichedLead);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('CRM /crm/ingest error:', e && e.message ? e.message : e);
+    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// optional ADMIN route to clear greeting throttles
+app.post('/admin/reset_greetings', (req, res) => {
+  try {
+    lastGreeting.clear();
+    res.json({ ok: true, message: 'Greeting counters reset' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
   }
 });
 
@@ -1781,7 +1738,7 @@ app.post('/webhook', async (req, res) => {
     // ensure `short` exists in the outer scope so later code can't throw ReferenceError
     let short = {};
 
-        if (DEBUG) {
+    if (DEBUG) {
       short = {
         object: req.body && req.body.object,
         entry0: Array.isArray(req.body?.entry)
@@ -1791,71 +1748,16 @@ app.post('/webhook', async (req, res) => {
       console.log('📩 Incoming webhook (short):', JSON.stringify(short));
     }
 
-    // --- Safely derive entry / change / value once, before using anywhere ---
-    let entry  = null;
-    let change = null;
-    let value  = {};
+    /* AUTO-INGEST (minimal, safe): forward to /crm/ingest via helper */
+    const autoIngest = require("./routes/auto_ingest.cjs");
+    const senderForAuto = short?.from || req.body?.from || "";
+    const senderNameForAuto = short?.name || req.body?.name || senderForAuto;
+    const lastMsgForAuto = short?.text || req.body?.text || "";
+    if (senderForAuto) autoIngest({ bot:"MR.CAR", channel:"whatsapp", from: senderForAuto, name: senderNameForAuto, lastMessage: lastMsgForAuto, meta:{source:"webhook-auto"} });
 
-    try {
-      if (Array.isArray(req.body?.entry) && req.body.entry.length > 0) {
-        entry = req.body.entry[0] || null;
-
-        if (Array.isArray(entry?.changes) && entry.changes.length > 0) {
-          change = entry.changes[0] || null;
-          value  = change?.value || {};
-        }
-      }
-    } catch (e) {
-      console.warn("WEBHOOK PARSE FAILED:", e?.message || e);
-      entry  = null;
-      change = null;
-      value  = {};
-    }
-
-    /* AUTO-INGEST using actual WhatsApp message fields */
-    try {
-      const msg     = value.messages?.[0];
-      const contact = value.contacts?.[0];
-
-      if (msg && msg.from) {
-        const senderForAuto     = msg.from;
-        const senderNameForAuto = contact?.profile?.name || senderForAuto;
-        const lastMsgForAuto =
-          msg.text?.body ||
-          msg.interactive?.button_reply?.title ||
-          msg.interactive?.list_reply?.title ||
-          "";
-
-        const autoIngest = require("./routes/auto_ingest.cjs");
-
-        autoIngest({
-          bot: "MR.CAR",
-          channel: "whatsapp",
-          from: senderForAuto,
-          name: senderNameForAuto,
-          lastMessage: lastMsgForAuto,
-          meta: { source: "webhook-auto" }
-        });
-// --- Admin Alert: New Lead Received (IST time) ---
-try {
-  if (ADMIN_WA && senderForAuto !== ADMIN_WA) {
-    await waSendText(
-      ADMIN_WA,
-      `🔔 *New Lead Received*\n\n` +
-      `👤 Name: ${senderNameForAuto}\n` +
-      `📱 Phone: ${senderForAuto}\n` +
-      `💬 Message: ${lastMsgForAuto || 'No text'}\n` +
-      `⏰ Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
-    );
-  }
-} catch (e) {
-  console.warn("Admin alert failed:", e?.message || e);
-}
-
-      }
-    } catch (e) {
-      console.warn("AUTO-INGEST FAILED:", e?.message || e);
-    }
+    const entry  = req.body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value  = change?.value || {};
 
     // ---- WhatsApp delivery status tracking ----
 if (value.statuses && !value.messages) {
@@ -2864,17 +2766,7 @@ app.get('/api/wa-delivery-log', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(data);
 });
-// ==== DASHBOARD STATIC ROUTES (RESTORE) ====
-app.use('/dashboard', express.static(path.join(__dirname, 'public', 'dashboard')));
 
-app.get('/dashboard', (req, res) => {
-  return res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
-});
-
-// Catch-all for internal dashboard routes
-app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
-  return res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
-});
 
 app.listen(PORT, () => {
 console.log("🟢 Server fully started — READY to receive greeting UI and webhook events");
