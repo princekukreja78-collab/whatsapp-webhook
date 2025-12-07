@@ -2229,18 +2229,26 @@ if (value.statuses && !value.messages) {
     try {
       // derive service + purpose once
       const lastServiceValue = getLastService(from) || null;
-      let purpose = 'general_query';
+      let purpose = "new";
 
       if (lastServiceValue) {
-        purpose = String(lastServiceValue).toLowerCase();
+        const svc = String(lastServiceValue).toLowerCase();
+        if (svc.includes("used")) purpose = "used";
+        else if (svc.includes("sell")) purpose = "sell";
+        else if (svc.includes("loan")) purpose = "loan";
+        else purpose = "new";
       } else if (msgText) {
         const tLow = msgText.toLowerCase();
-        if (/used|pre[-\s]?owned|second[-\s]?hand/.test(tLow))         purpose = 'used';
-        else if (/sell my car|sell car|selling my car/.test(tLow))      purpose = 'sell';
-        else if (/loan|finance|emi|bullet/.test(tLow))                  purpose = 'loan';
-        else if (/new car|on[-\s]?road|onroad|booking|price|quote/.test(tLow)) purpose = 'new';
+        if (/used|pre[-\s]?owned|second[-\s]?hand/.test(tLow)) {
+          purpose = "used";
+        } else if (/sell my car|sell car|selling my car/.test(tLow)) {
+          purpose = "sell";
+        } else if (/loan|finance|emi|bullet/.test(tLow)) {
+          purpose = "loan";
+        } else {
+          purpose = "new";
+        }
       }
-
       const lead = {
         bot: 'MR_CAR_AUTO',
         channel: 'whatsapp',
