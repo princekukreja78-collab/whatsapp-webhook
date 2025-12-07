@@ -2,397 +2,1023 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>MR.CAR – WhatsApp Leads CRM</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mr.Car – Signature CRM</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       :root {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #0f172a;
-        color: #e5e7eb;
+        --bg-main: #020713;
+        --bg-card: #050c1c;
+        --bg-card-alt: #070f22;
+        --border-subtle: #1b2538;
+        --accent: #3b82f6;
+        --accent-soft: rgba(59,130,246,0.12);
+        --accent-soft-strong: rgba(59,130,246,0.25);
+        --text-main: #f9fafb;
+        --text-muted: #9ca3af;
+        --pill-bg: #111827;
+        --danger: #ef4444;
+        --success: #22c55e;
+        --warning: #facc15;
+        --radius-lg: 18px;
+        --radius-xl: 24px;
+        --shadow-soft: 0 18px 45px rgba(0,0,0,0.65);
       }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
         padding: 0;
-        background: radial-gradient(circle at top, #1e293b 0, #020617 60%);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top left, #111827, #020617 55%, #000 100%);
+        color: var(--text-main);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .app-shell {
         min-height: 100vh;
-      }
-      .page {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 24px 16px 40px;
-      }
-      h1 {
-        margin: 0 0 4px;
-        font-size: 26px;
-        letter-spacing: 0.03em;
-      }
-      .subtitle {
-        margin: 0 0 18px;
-        font-size: 13px;
-        color: #9ca3af;
-      }
-      .card {
-        background: rgba(15, 23, 42, 0.92);
-        border-radius: 14px;
-        padding: 16px 18px;
-        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
-        border: 1px solid rgba(148, 163, 184, 0.3);
-        backdrop-filter: blur(14px);
-      }
-      .toolbar {
         display: flex;
-        flex-wrap: wrap;
+        flex-direction: column;
+      }
+
+      header {
+        padding: 18px 32px 8px;
+        display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
+      }
+
+      header .title-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .app-title {
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .app-subtitle {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .env-pill {
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border-subtle);
+        background: rgba(15,23,42,0.85);
+        color: var(--text-muted);
+      }
+
+      .layout {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+        gap: 18px;
+        padding: 8px 24px 24px;
+      }
+
+      /* Sidebar */
+      .sidebar {
+        background: linear-gradient(160deg, var(--bg-card), var(--bg-card-alt));
+        border-radius: var(--radius-xl);
+        padding: 18px 18px 20px;
+        box-shadow: var(--shadow-soft);
+        border: 1px solid var(--border-subtle);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .sidebar-section {
+        padding-bottom: 14px;
+        border-bottom: 1px dashed rgba(148,163,184,0.35);
+      }
+
+      .sidebar-section:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+
+      .sidebar-title {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-muted);
         margin-bottom: 10px;
       }
-      .toolbar-left {
+
+      .sidebar-label {
+        font-size: 12px;
+        color: var(--text-main);
+        margin-bottom: 6px;
+      }
+
+      .sidebar-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 6px;
+        line-height: 1.4;
+      }
+
+      .input-shell {
+        border-radius: 999px;
+        border: 1px solid var(--border-subtle);
+        background: rgba(15,23,42,0.95);
+        padding: 6px 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+        gap: 6px;
+      }
+
+      .input-shell input[type="file"] {
+        font-size: 11px;
+        color: var(--text-muted);
+        max-width: 100%;
+      }
+
+      .btn {
+        border-radius: 999px;
+        border: none;
+        padding: 7px 14px;
+        font-size: 12px;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .btn-primary {
+        background: radial-gradient(circle at top left, var(--accent), #1d4ed8);
+        color: #fff;
+        box-shadow: 0 10px 25px rgba(59,130,246,0.45);
+      }
+
+      .btn-outline {
+        background: transparent;
+        color: var(--text-main);
+        border: 1px solid var(--border-subtle);
+      }
+
+      .btn-ghost {
+        background: rgba(15,23,42,0.9);
+        color: var(--text-muted);
+        border: 1px solid rgba(31,41,55,0.8);
+      }
+
+      .btn-pill-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+        flex-wrap: wrap;
+      }
+
+      /* Main panel */
+      .main-panel {
+        background: radial-gradient(circle at top left, #020617 0%, #020617 35%, #020617 100%);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-subtle);
+        box-shadow: var(--shadow-soft);
+        padding: 16px 18px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .main-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .main-heading-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .main-heading {
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .main-sub {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .tab-row {
+        display: inline-flex;
+        border-radius: 999px;
+        border: 1px solid rgba(31,41,55,0.9);
+        background: rgba(15,23,42,0.9);
+        padding: 3px;
+        margin-top: 10px;
+        gap: 4px;
+      }
+
+      .tab-pill {
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--text-muted);
+      }
+
+      .tab-pill.active {
+        background: var(--accent-soft);
+        color: var(--text-main);
+      }
+
+      .metrics-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .metric-pill {
+        border-radius: 999px;
+        padding: 4px 9px;
+        background: rgba(15,23,42,0.95);
+        border: 1px solid rgba(31,41,55,0.95);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .metric-label {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .metric-value {
+        font-weight: 600;
+        color: var(--text-main);
+        font-size: 12px;
+      }
+
+      .metric-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      .last-sync {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .filters-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        margin-top: 6px;
+      }
+
+      .filters-left,
+      .filters-right {
         display: flex;
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
       }
-      .badge {
-        font-size: 11px;
-        padding: 3px 8px;
+
+      .chip-input {
         border-radius: 999px;
-        background: rgba(59, 130, 246, 0.15);
-        border: 1px solid rgba(59, 130, 246, 0.4);
-        color: #bfdbfe;
+        border: 1px solid rgba(31,41,55,0.9);
+        background: rgba(17,24,39,0.9);
+        padding: 5px 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--text-muted);
       }
-      .search-input {
-        padding: 6px 10px;
-        border-radius: 8px;
-        border: 1px solid rgba(148, 163, 184, 0.5);
-        background: rgba(15, 23, 42, 0.9);
-        color: #e5e7eb;
-        font-size: 13px;
-        min-width: 220px;
+
+      .chip-input input,
+      .chip-input select {
+        background: transparent;
+        border: none;
+        outline: none;
+        color: var(--text-main);
+        font-size: 12px;
+        min-width: 0;
       }
-      .search-input::placeholder {
+
+      .chip-input input::placeholder {
+        color: #4b5563;
+      }
+
+      .chip-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
         color: #6b7280;
       }
-      .btn {
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.6);
-        padding: 5px 11px;
-        font-size: 12px;
-        background: rgba(15, 23, 42, 0.95);
-        color: #e5e7eb;
-        cursor: pointer;
+
+      .chip-input input[type="date"] {
+        font-size: 11px;
       }
-      .btn:hover {
-        background: rgba(30, 64, 175, 0.9);
-        border-color: rgba(59, 130, 246, 0.9);
+
+      /* Table */
+      .table-shell {
+        margin-top: 10px;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        overflow: hidden;
+        background: radial-gradient(circle at top left, #020617, #020617 55%, #000 100%);
       }
+
       table {
         width: 100%;
         border-collapse: collapse;
-        margin-top: 6px;
-        font-size: 13px;
+        font-size: 12px;
       }
+
       thead {
-        background: rgba(15, 23, 42, 0.9);
+        background: rgba(15,23,42,0.98);
       }
-      th, td {
+
+      th,
+      td {
+        padding: 9px 10px;
         text-align: left;
-        padding: 6px 8px;
-        border-bottom: 1px solid rgba(31, 41, 55, 0.9);
-        vertical-align: top;
+        border-bottom: 1px solid rgba(31,41,55,0.9);
       }
+
       th {
-        font-weight: 600;
         font-size: 11px;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: #9ca3af;
-        white-space: nowrap;
+        letter-spacing: 0.12em;
+        color: var(--text-muted);
       }
-      tr:nth-child(even) td {
-        background: rgba(15, 23, 42, 0.72);
+
+      tbody tr:nth-child(even) {
+        background: rgba(15,23,42,0.75);
       }
-      tr:nth-child(odd) td {
-        background: rgba(15, 23, 42, 0.55);
+
+      tbody tr:nth-child(odd) {
+        background: rgba(15,23,42,0.9);
       }
-      .purpose-chip {
+
+      tbody tr:hover {
+        background: rgba(30,64,175,0.45);
+      }
+
+      .tag {
         display: inline-flex;
         align-items: center;
-        padding: 2px 8px;
+        justify-content: center;
+        padding: 3px 8px;
         border-radius: 999px;
-        font-size: 11px;
-        font-weight: 500;
+        font-size: 10px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.11em;
       }
-      .purpose-new {
-        background: rgba(34, 197, 94, 0.1);
-        border: 1px solid rgba(34, 197, 94, 0.8);
+
+      .tag-muted {
+        background: rgba(31,41,55,0.95);
+        color: var(--text-muted);
+      }
+
+      .tag-new {
+        background: var(--accent-soft-strong);
+        color: var(--text-main);
+      }
+
+      .tag-auto {
+        background: rgba(22,163,74,0.28);
         color: #bbf7d0;
       }
-      .purpose-used {
-        background: rgba(249, 115, 22, 0.12);
-        border: 1px solid rgba(249, 115, 22, 0.85);
-        color: #fed7aa;
-      }
-      .purpose-loan {
-        background: rgba(59, 130, 246, 0.12);
-        border: 1px solid rgba(59, 130, 246, 0.9);
-        color: #bfdbfe;
-      }
-      .purpose-sell {
-        background: rgba(244, 63, 94, 0.18);
-        border: 1px solid rgba(244, 63, 94, 0.95);
-        color: #fecaca;
-      }
-      .purpose-default {
-        background: rgba(75, 85, 99, 0.15);
-        border: 1px solid rgba(75, 85, 99, 0.9);
+
+      .tag-type {
+        background: rgba(55,65,81,0.95);
         color: #e5e7eb;
       }
-      .msg-text {
-        max-width: 320px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: #e5e7eb;
-      }
-      .small {
+
+      .action-link {
         font-size: 11px;
-        color: #9ca3af;
+        color: #4ade80;
+        text-decoration: none;
       }
-      .name-cell {
-        font-weight: 600;
-        font-size: 13px;
+
+      .tip-row {
+        font-size: 11px;
+        color: var(--text-muted);
+        padding: 8px 4px 0;
       }
-      .phone-cell {
-        font-family: monospace;
+
+      .tip-row span {
+        opacity: 0.8;
       }
-      .status-pill {
-        display: inline-flex;
-        border-radius: 999px;
+
+      .api-chip {
+        float: right;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .badge {
         padding: 2px 7px;
-        font-size: 11px;
-        border: 1px solid rgba(148, 163, 184, 0.7);
-        color: #e5e7eb;
-      }
-      .status-pill.auto-ingested {
-        border-color: rgba(52, 211, 153, 0.9);
-        color: #a7f3d0;
-      }
-      .status-pill.new {
-        border-color: rgba(59, 130, 246, 0.9);
-        color: #bfdbfe;
-      }
-      .leadtype-pill {
+        border-radius: 999px;
         font-size: 10px;
         text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: #9ca3af;
+        letter-spacing: 0.12em;
+        border: 1px solid rgba(55,65,81,0.9);
+        color: var(--text-muted);
       }
-      .footer {
-        margin-top: 10px;
-        font-size: 10px;
-        color: #6b7280;
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-      @media (max-width: 768px) {
-        .msg-text {
-          max-width: 180px;
+
+      @media (max-width: 960px) {
+        .layout {
+          grid-template-columns: 1fr;
         }
-        .page {
-          padding: 16px 10px 32px;
+        .sidebar {
+          order: 2;
         }
       }
     </style>
   </head>
   <body>
-    <div class="page">
-      <h1>MR.CAR – WhatsApp Leads</h1>
-      <p class="subtitle">
-        Live leads from WhatsApp bot. <strong>Purpose</strong> = routing (New / Used / Loan / Sell). 
-        <strong>Enquiry</strong> = exact message text from customer.
-      </p>
-
-      <div class="card">
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <span class="badge" id="lead-count-badge">Leads: 0</span>
-            <span class="small" id="last-sync-label">Last sync: –</span>
-          </div>
-          <div>
-            <input
-              id="search-box"
-              class="search-input"
-              type="text"
-              placeholder="Search name / phone / enquiry / purpose…"
-            />
+    <div class="app-shell">
+      <header>
+        <div class="title-block">
+          <div class="app-title">Mr.Car – Signature CRM</div>
+          <div class="app-subtitle">
+            Live leads from WhatsApp bot. CSV tools on the left • Auto-ingest +
+            manual upload.
           </div>
         </div>
-
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Customer</th>
-                <th>Phone</th>
-                <th>Purpose</th>
-                <th>Enquiry (Last Message)</th>
-                <th>Status / Type</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody id="leads-tbody">
-              <tr>
-                <td colspan="7" class="small">Loading leads…</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="env-pill">
+          <span style="opacity:0.65;">ENV</span> &nbsp; Production · API:
+          <code style="font-size:11px;">/api/leads</code>
         </div>
+      </header>
 
-        <div class="footer">
-          <span>✨ Tip: Purpose is auto-detected from chat (default = NEW if not specified).</span>
-          <span id="backend-source" class="small"></span>
-        </div>
-      </div>
+      <main class="layout">
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+          <section class="sidebar-section">
+            <div class="sidebar-title">Leads tools</div>
+            <div class="sidebar-label">Import &amp; manage leads from CSV</div>
+            <div class="input-shell">
+              <input type="file" id="csvFileInput" accept=".csv" />
+            </div>
+            <div class="btn-pill-row">
+              <button class="btn btn-primary" id="btnUploadCsv">Upload CSV</button>
+              <button class="btn btn-ghost" id="btnSyncCsv">Sync CSV</button>
+            </div>
+            <div class="sidebar-hint">
+              Expected columns:
+              <ul style="margin:4px 0 0 13px;padding:0;">
+                <li>ID</li>
+                <li>Name</li>
+                <li>Phone</li>
+                <li>Status</li>
+                <li>Timestamp</li>
+              </ul>
+            </div>
+          </section>
+
+          <section class="sidebar-section">
+            <div class="sidebar-title">Upload Template</div>
+            <div class="sidebar-label">JSON mapping file (optional advanced)</div>
+            <div class="input-shell">
+              <input type="file" id="templateJsonInput" accept=".json" />
+            </div>
+            <div class="btn-pill-row">
+              <button class="btn btn-outline" id="btnUploadTemplate">
+                Upload Template JSON
+              </button>
+            </div>
+            <div class="sidebar-hint">
+              Map CSV → CRM fields. Leave empty for default behaviour.
+            </div>
+          </section>
+
+          <section class="sidebar-section">
+            <div class="sidebar-title">Upload Logo</div>
+            <div class="sidebar-label">Replace Mr.Car logo (PNG)</div>
+            <div class="input-shell">
+              <input type="file" id="logoPngInput" accept=".png" />
+            </div>
+            <div class="btn-pill-row">
+              <button class="btn btn-outline" id="btnUploadLogo">
+                Upload Logo PNG
+              </button>
+            </div>
+          </section>
+
+          <section class="sidebar-section">
+            <div class="sidebar-title">Pro tools</div>
+            <div class="sidebar-hint">
+              • CSV import mapped to ID, Name, Phone, Status, Timestamp.<br />
+              • Works alongside auto-ingest from WhatsApp.
+            </div>
+          </section>
+        </aside>
+
+        <!-- MAIN PANEL -->
+        <section class="main-panel">
+          <div class="main-header-row">
+            <div class="main-heading-block">
+              <div class="main-heading">WhatsApp Leads</div>
+              <div class="main-sub">
+                Purpose = routing (New / Used / Loan / Sell). Enquiry = exact
+                message text from customer.
+              </div>
+
+              <div class="tab-row" id="tabRow">
+                <div class="tab-pill active" data-tab="all">All</div>
+                <div class="tab-pill" data-tab="new">New Car</div>
+                <div class="tab-pill" data-tab="used">Used Car</div>
+                <div class="tab-pill" data-tab="finance">Finance</div>
+                <div class="tab-pill" data-tab="sell">Sell</div>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+              <div class="metrics-row">
+                <div class="metric-pill">
+                  <div class="metric-dot"></div>
+                  <span class="metric-label">Total</span>
+                  <span class="metric-value" id="metricTotal">0</span>
+                </div>
+                <div class="metric-pill">
+                  <span class="metric-label">Auto-ingested</span>
+                  <span class="metric-value" id="metricAuto">0</span>
+                </div>
+                <div class="metric-pill">
+                  <span class="metric-label">New / Open</span>
+                  <span class="metric-value" id="metricNew">0</span>
+                </div>
+              </div>
+              <div class="last-sync" id="lastSyncLabel">
+                Last sync: –
+              </div>
+            </div>
+          </div>
+
+          <div class="filters-row">
+            <div class="filters-left">
+              <div class="chip-input" style="min-width:260px;">
+                <div class="chip-label">Search</div>
+                <input
+                  id="searchInput"
+                  type="text"
+                  placeholder="Search name / phone / enquiry / purpose…"
+                />
+              </div>
+
+              <div class="chip-input">
+                <div class="chip-label">Status</div>
+                <select id="statusFilter">
+                  <option value="all">All statuses</option>
+                  <option value="auto-ingested">Auto-ingested</option>
+                  <option value="new">New</option>
+                  <option value="open">Open</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </div>
+
+              <div class="chip-input">
+                <div class="chip-label">From</div>
+                <input id="startDate" type="date" />
+              </div>
+              <div class="chip-input">
+                <div class="chip-label">To</div>
+                <input id="endDate" type="date" />
+              </div>
+            </div>
+
+            <div class="filters-right">
+              <button class="btn btn-ghost" id="btnRefresh">Refresh</button>
+              <button class="btn btn-primary" id="btnExportCsv">
+                Export CSV
+              </button>
+            </div>
+          </div>
+
+          <div class="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:80px;">ID</th>
+                  <th style="width:160px;">Customer</th>
+                  <th style="width:120px;">Phone</th>
+                  <th style="width:90px;">Purpose</th>
+                  <th>Enquiry (Last Message)</th>
+                  <th style="width:130px;">Status / Type</th>
+                  <th style="width:150px;">Time</th>
+                  <th style="width:120px;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="leadsBody">
+                <!-- rows injected here -->
+              </tbody>
+            </table>
+          </div>
+
+          <div class="tip-row">
+            <span>✨ Tip: Purpose is auto-detected from chat (default = NEW if not specified).</span>
+            <span class="api-chip">API: /api/leads</span>
+          </div>
+        </section>
+      </main>
     </div>
 
     <script>
-      async function fetchLeads() {
-        const tbody = document.getElementById("leads-tbody");
-        const badge = document.getElementById("lead-count-badge");
-        const lastSyncLabel = document.getElementById("last-sync-label");
-        const backendSource = document.getElementById("backend-source");
+      const API_LEADS = "/api/leads";
+      const API_IMPORT_CSV = "/api/leads/import-csv";   // adjust to your real route
+      const API_SYNC_CSV = "/api/leads/sync-csv";       // adjust if different
+      const API_EXPORT_CSV = "/api/leads/export-csv";   // adjust if different
+      const API_UPLOAD_TEMPLATE = "/api/leads/upload-template"; // adjust
+      const API_UPLOAD_LOGO = "/api/leads/upload-logo";        // adjust
 
+      let allLeads = [];
+      let activeTab = "all";
+
+      function normalizeLead(raw) {
+        const l = raw || {};
+        const id =
+          l.ID || l.id || l.Id || l.Phone || l.phone || l.whatsapp || "";
+        const name =
+          l.Name || l.name || l.customer || l.Customer || "UNKNOWN";
+        const phone = l.Phone || l.phone || "";
+        const purpose =
+          (l.Purpose || l.purpose || "").toString().trim() || "GENERAL";
+        const status =
+          (l.Status || l.status || "").toString().trim() || "";
+        const lastMessage =
+          l.lastMessage || l.enquiry || l.Enquiry || l.message || "";
+        const leadType =
+          l.LeadType || l.leadType || l.type || l.Type || "";
+        const tsRaw = l.Timestamp || l.timestamp || l.Time || null;
+
+        let ts = null;
+        let tsLabel = "–";
+        if (tsRaw) {
+          try {
+            const d = new Date(tsRaw);
+            if (!isNaN(d.getTime())) {
+              ts = d;
+              tsLabel = d.toLocaleString();
+            }
+          } catch (e) {}
+        }
+
+        return {
+          raw,
+          id,
+          name,
+          phone,
+          purpose,
+          status,
+          lastMessage,
+          leadType,
+          ts,
+          tsLabel,
+        };
+      }
+
+      function setLastSync() {
+        const el = document.getElementById("lastSyncLabel");
+        const now = new Date();
+        el.textContent =
+          "Last sync: " +
+          now.toLocaleDateString() +
+          ", " +
+          now.toLocaleTimeString();
+      }
+
+      function updateMetrics(leads) {
+        const total = leads.length;
+        const autoCount = leads.filter((l) =>
+          (l.status || "").toLowerCase().includes("auto")
+        ).length;
+        const newCount = leads.filter((l) =>
+          (l.status || "").toLowerCase().includes("new")
+        ).length;
+
+        document.getElementById("metricTotal").textContent = total;
+        document.getElementById("metricAuto").textContent = autoCount;
+        document.getElementById("metricNew").textContent = newCount;
+      }
+
+      function purposeMatchesTab(purpose, tab) {
+        const p = (purpose || "").toLowerCase();
+        if (tab === "all") return true;
+        if (tab === "new") return p.includes("new");
+        if (tab === "used") return p.includes("used");
+        if (tab === "finance") return p.includes("loan") || p.includes("finance");
+        if (tab === "sell") return p.includes("sell") || p.includes("exchange");
+        return true;
+      }
+
+      function applyFilters() {
+        const search = (document.getElementById("searchInput").value || "")
+          .toLowerCase()
+          .trim();
+        const statusFilter = document.getElementById("statusFilter").value;
+        const startDate = document.getElementById("startDate").value || "";
+        const endDate = document.getElementById("endDate").value || "";
+        const tbody = document.getElementById("leadsBody");
+        tbody.innerHTML = "";
+
+        let filtered = allLeads.slice();
+
+        if (activeTab !== "all") {
+          filtered = filtered.filter((l) =>
+            purposeMatchesTab(l.purpose, activeTab)
+          );
+        }
+
+        if (search) {
+          filtered = filtered.filter((l) => {
+            const blob =
+              (l.id || "") +
+              " " +
+              (l.name || "") +
+              " " +
+              (l.phone || "") +
+              " " +
+              (l.purpose || "") +
+              " " +
+              (l.lastMessage || "") +
+              " " +
+              (l.leadType || "") +
+              " " +
+              (l.status || "");
+            return blob.toLowerCase().includes(search);
+          });
+        }
+
+        if (statusFilter && statusFilter !== "all") {
+          filtered = filtered.filter((l) =>
+            (l.status || "")
+              .toLowerCase()
+              .includes(statusFilter.toLowerCase())
+          );
+        }
+
+        if (startDate) {
+          const sd = new Date(startDate + "T00:00:00");
+          filtered = filtered.filter(
+            (l) => !l.ts || l.ts >= sd
+          );
+        }
+        if (endDate) {
+          const ed = new Date(endDate + "T23:59:59");
+          filtered = filtered.filter(
+            (l) => !l.ts || l.ts <= ed
+          );
+        }
+
+        updateMetrics(filtered);
+
+        for (const l of filtered) {
+          const tr = document.createElement("tr");
+
+          // ID
+          const tdId = document.createElement("td");
+          tdId.textContent = l.id || "–";
+          tr.appendChild(tdId);
+
+          // CUSTOMER
+          const tdCust = document.createElement("td");
+          tdCust.style.fontWeight = "600";
+          tdCust.textContent = l.name || "UNKNOWN";
+          tr.appendChild(tdCust);
+
+          // PHONE
+          const tdPhone = document.createElement("td");
+          tdPhone.textContent = l.phone || "–";
+          tr.appendChild(tdPhone);
+
+          // PURPOSE
+          const tdPurpose = document.createElement("td");
+          const tag = document.createElement("span");
+          tag.className =
+            "tag " +
+            ((l.purpose || "").toLowerCase() === "new"
+              ? "tag-new"
+              : "tag-muted");
+          tag.textContent = (l.purpose || "GENERAL").toUpperCase();
+          tdPurpose.appendChild(tag);
+          tr.appendChild(tdPurpose);
+
+          // ENQUIRY
+          const tdEnq = document.createElement("td");
+          tdEnq.textContent = l.lastMessage || "–";
+          tr.appendChild(tdEnq);
+
+          // STATUS / TYPE
+          const tdStatus = document.createElement("td");
+          if (l.status) {
+            const sTag = document.createElement("span");
+            const st = (l.status || "").toLowerCase();
+            let cls = "tag-muted";
+            if (st.includes("auto")) cls = "tag-auto";
+            else if (st.includes("new") || st.includes("open"))
+              cls = "tag-new";
+            sTag.className = "tag " + cls;
+            sTag.textContent = l.status;
+            tdStatus.appendChild(sTag);
+          }
+          if (l.leadType) {
+            const tTag = document.createElement("span");
+            tTag.className = "tag tag-type";
+            tTag.style.marginLeft = "4px";
+            tTag.textContent = (l.leadType || "").toUpperCase();
+            tdStatus.appendChild(tTag);
+          }
+          tr.appendChild(tdStatus);
+
+          // TIME
+          const tdTime = document.createElement("td");
+          tdTime.textContent = l.tsLabel || "–";
+          tr.appendChild(tdTime);
+
+          // ACTION
+          const tdAction = document.createElement("td");
+          if (l.phone) {
+            const link = document.createElement("a");
+            link.href = "https://wa.me/" + l.phone;
+            link.target = "_blank";
+            link.className = "action-link";
+            link.textContent = "Open in WhatsApp";
+            tdAction.appendChild(link);
+          } else {
+            tdAction.textContent = "–";
+          }
+          tr.appendChild(tdAction);
+
+          tbody.appendChild(tr);
+        }
+      }
+
+      async function loadLeads() {
         try {
-          const res = await fetch("/api/leads");
-          const json = await res.json();
-
-          const leads = (json && json.leads) || [];
-          const sourceLabel = json.ok === true ? "API: /api/leads" : "API error";
-          backendSource.textContent = sourceLabel;
-
-          renderLeads(leads);
-
-          badge.textContent = "Leads: " + leads.length;
-          lastSyncLabel.textContent =
-            "Last sync: " + new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-
-          window.__ALL_LEADS__ = leads;
-        } catch (e) {
-          tbody.innerHTML =
-            '<tr><td colspan="7" class="small">Failed to load leads. Check server /api/leads.</td></tr>';
-          console.error("fetchLeads error", e);
+          const resp = await fetch(API_LEADS);
+          const data = await resp.json();
+          const leadsArr = data.leads || data || [];
+          allLeads = leadsArr.map(normalizeLead);
+          setLastSync();
+          applyFilters();
+        } catch (err) {
+          console.error("Failed to load leads", err);
         }
       }
 
-      function purposeClass(purpose) {
-        const p = String(purpose || "").toLowerCase();
-        if (p === "new") return "purpose-chip purpose-new";
-        if (p === "used") return "purpose-chip purpose-used";
-        if (p === "loan") return "purpose-chip purpose-loan";
-        if (p === "sell") return "purpose-chip purpose-sell";
-        return "purpose-chip purpose-default";
-      }
+      function bindFilters() {
+        document
+          .getElementById("searchInput")
+          .addEventListener("input", applyFilters);
+        document
+          .getElementById("statusFilter")
+          .addEventListener("change", applyFilters);
+        document
+          .getElementById("startDate")
+          .addEventListener("change", applyFilters);
+        document
+          .getElementById("endDate")
+          .addEventListener("change", applyFilters);
 
-      function formatTime(ts) {
-        if (!ts) return "";
-        try {
-          const d = typeof ts === "number" ? new Date(ts) : new Date(String(ts));
-          if (!isFinite(d.getTime())) return "";
-          return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-        } catch {
-          return "";
-        }
-      }
+        document
+          .getElementById("btnRefresh")
+          .addEventListener("click", () => loadLeads());
 
-      function renderLeads(leads) {
-        const tbody = document.getElementById("leads-tbody");
-        if (!leads || !leads.length) {
-          tbody.innerHTML =
-            '<tr><td colspan="7" class="small">No leads found.</td></tr>';
-          return;
-        }
-
-        const rows = leads.map((l) => {
-          const id = l.ID || "";
-          const name = l.Name || "";
-          const phone = l.Phone || "";
-          const purpose = l.Purpose || l.purpose || "";
-          const lastMessage = l.lastMessage || l.text || "";
-          const status = l.Status || l.status || "";
-          const leadType = l.LeadType || l.leadType || "";
-          const ts = l.Timestamp || l.ts || "";
-
-          return `
-            <tr>
-              <td>${id ? id : ""}</td>
-              <td>
-                <div class="name-cell">${name || "—"}</div>
-              </td>
-              <td class="phone-cell">${phone || "—"}</td>
-              <td>
-                <span class="${purposeClass(purpose)}">
-                  ${purpose ? purpose.toUpperCase() : "GENERAL"}
-                </span>
-              </td>
-              <td>
-                <div class="msg-text" title="${lastMessage ? lastMessage.replace(/"/g, "&quot;") : ""}">
-                  ${lastMessage || "—"}
-                </div>
-              </td>
-              <td>
-                <div class="status-pill ${String(status || "").toLowerCase()}">
-                  ${status || "—"}
-                </div>
-                <div class="leadtype-pill">
-                  ${leadType || ""}
-                </div>
-              </td>
-              <td class="small">${formatTime(ts)}</td>
-            </tr>
-          `;
+        document.getElementById("btnExportCsv").addEventListener("click", () => {
+          window.location.href = API_EXPORT_CSV;
         });
 
-        tbody.innerHTML = rows.join("");
+        document
+          .getElementById("tabRow")
+          .addEventListener("click", (ev) => {
+            const pill = ev.target.closest(".tab-pill");
+            if (!pill) return;
+            document
+              .querySelectorAll(".tab-pill")
+              .forEach((p) => p.classList.remove("active"));
+            pill.classList.add("active");
+            activeTab = pill.dataset.tab || "all";
+            applyFilters();
+          });
       }
 
-      function applySearchFilter() {
-        const q = (document.getElementById("search-box").value || "").toLowerCase();
-        const all = window.__ALL_LEADS__ || [];
-        if (!q) {
-          renderLeads(all);
-          return;
-        }
-        const filtered = all.filter((l) => {
-          const haystack =
-            [
-              l.ID,
-              l.Name,
-              l.Phone,
-              l.Status,
-              l.Purpose,
-              l.lastMessage,
-              l.LeadType,
-              l.text
-            ]
-              .map((x) => String(x || "").toLowerCase())
-              .join(" ");
-          return haystack.includes(q);
+      function bindUploadButtons() {
+        const csvBtn = document.getElementById("btnUploadCsv");
+        const syncBtn = document.getElementById("btnSyncCsv");
+        const templateBtn = document.getElementById("btnUploadTemplate");
+        const logoBtn = document.getElementById("btnUploadLogo");
+
+        csvBtn.addEventListener("click", async () => {
+          const fileInput = document.getElementById("csvFileInput");
+          if (!fileInput.files.length) {
+            alert("Please choose a CSV file first.");
+            return;
+          }
+          const fd = new FormData();
+          fd.append("file", fileInput.files[0]);
+          try {
+            const resp = await fetch(API_IMPORT_CSV, {
+              method: "POST",
+              body: fd,
+            });
+            const data = await resp.json();
+            console.log("CSV upload result:", data);
+            alert("CSV uploaded. Refreshing leads.");
+            loadLeads();
+          } catch (e) {
+            console.error(e);
+            alert("CSV upload failed. Check console logs.");
+          }
         });
-        renderLeads(filtered);
+
+        syncBtn.addEventListener("click", async () => {
+          try {
+            const resp = await fetch(API_SYNC_CSV, { method: "POST" });
+            const data = await resp.json();
+            console.log("Sync result:", data);
+            alert("Sync completed. Refreshing leads.");
+            loadLeads();
+          } catch (e) {
+            console.error(e);
+            alert("Sync failed. Check console logs.");
+          }
+        });
+
+        templateBtn.addEventListener("click", async () => {
+          const input = document.getElementById("templateJsonInput");
+          if (!input.files.length) {
+            alert("Choose a JSON file first.");
+            return;
+          }
+          const fd = new FormData();
+          fd.append("file", input.files[0]);
+          try {
+            const resp = await fetch(API_UPLOAD_TEMPLATE, {
+              method: "POST",
+              body: fd,
+            });
+            const data = await resp.json();
+            console.log("Template upload:", data);
+            alert("Template uploaded.");
+          } catch (e) {
+            console.error(e);
+            alert("Template upload failed.");
+          }
+        });
+
+        logoBtn.addEventListener("click", async () => {
+          const input = document.getElementById("logoPngInput");
+          if (!input.files.length) {
+            alert("Choose a PNG file first.");
+            return;
+          }
+          const fd = new FormData();
+          fd.append("file", input.files[0]);
+          try {
+            const resp = await fetch(API_UPLOAD_LOGO, {
+              method: "POST",
+              body: fd,
+            });
+            const data = await resp.json();
+            console.log("Logo upload:", data);
+            alert("Logo uploaded.");
+          } catch (e) {
+            console.error(e);
+            alert("Logo upload failed.");
+          }
+        });
       }
 
-      document.getElementById("search-box").addEventListener("input", () => {
-        applySearchFilter();
+      document.addEventListener("DOMContentLoaded", () => {
+        bindFilters();
+        bindUploadButtons();
+        loadLeads();
       });
-
-      fetchLeads();
-      setInterval(fetchLeads, 30_000);
     </script>
   </body>
 </html>
