@@ -2,396 +2,397 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Mr.Car • Signature CRM</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="./styles.css" />
+    <title>MR.CAR – WhatsApp Leads CRM</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        background: radial-gradient(circle at top, #1e293b 0, #020617 60%);
+        min-height: 100vh;
+      }
+      .page {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px 16px 40px;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 26px;
+        letter-spacing: 0.03em;
+      }
+      .subtitle {
+        margin: 0 0 18px;
+        font-size: 13px;
+        color: #9ca3af;
+      }
+      .card {
+        background: rgba(15, 23, 42, 0.92);
+        border-radius: 14px;
+        padding: 16px 18px;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        backdrop-filter: blur(14px);
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .toolbar-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .badge {
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.4);
+        color: #bfdbfe;
+      }
+      .search-input {
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        background: rgba(15, 23, 42, 0.9);
+        color: #e5e7eb;
+        font-size: 13px;
+        min-width: 220px;
+      }
+      .search-input::placeholder {
+        color: #6b7280;
+      }
+      .btn {
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        padding: 5px 11px;
+        font-size: 12px;
+        background: rgba(15, 23, 42, 0.95);
+        color: #e5e7eb;
+        cursor: pointer;
+      }
+      .btn:hover {
+        background: rgba(30, 64, 175, 0.9);
+        border-color: rgba(59, 130, 246, 0.9);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 6px;
+        font-size: 13px;
+      }
+      thead {
+        background: rgba(15, 23, 42, 0.9);
+      }
+      th, td {
+        text-align: left;
+        padding: 6px 8px;
+        border-bottom: 1px solid rgba(31, 41, 55, 0.9);
+        vertical-align: top;
+      }
+      th {
+        font-weight: 600;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #9ca3af;
+        white-space: nowrap;
+      }
+      tr:nth-child(even) td {
+        background: rgba(15, 23, 42, 0.72);
+      }
+      tr:nth-child(odd) td {
+        background: rgba(15, 23, 42, 0.55);
+      }
+      .purpose-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .purpose-new {
+        background: rgba(34, 197, 94, 0.1);
+        border: 1px solid rgba(34, 197, 94, 0.8);
+        color: #bbf7d0;
+      }
+      .purpose-used {
+        background: rgba(249, 115, 22, 0.12);
+        border: 1px solid rgba(249, 115, 22, 0.85);
+        color: #fed7aa;
+      }
+      .purpose-loan {
+        background: rgba(59, 130, 246, 0.12);
+        border: 1px solid rgba(59, 130, 246, 0.9);
+        color: #bfdbfe;
+      }
+      .purpose-sell {
+        background: rgba(244, 63, 94, 0.18);
+        border: 1px solid rgba(244, 63, 94, 0.95);
+        color: #fecaca;
+      }
+      .purpose-default {
+        background: rgba(75, 85, 99, 0.15);
+        border: 1px solid rgba(75, 85, 99, 0.9);
+        color: #e5e7eb;
+      }
+      .msg-text {
+        max-width: 320px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #e5e7eb;
+      }
+      .small {
+        font-size: 11px;
+        color: #9ca3af;
+      }
+      .name-cell {
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .phone-cell {
+        font-family: monospace;
+      }
+      .status-pill {
+        display: inline-flex;
+        border-radius: 999px;
+        padding: 2px 7px;
+        font-size: 11px;
+        border: 1px solid rgba(148, 163, 184, 0.7);
+        color: #e5e7eb;
+      }
+      .status-pill.auto-ingested {
+        border-color: rgba(52, 211, 153, 0.9);
+        color: #a7f3d0;
+      }
+      .status-pill.new {
+        border-color: rgba(59, 130, 246, 0.9);
+        color: #bfdbfe;
+      }
+      .leadtype-pill {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #9ca3af;
+      }
+      .footer {
+        margin-top: 10px;
+        font-size: 10px;
+        color: #6b7280;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      @media (max-width: 768px) {
+        .msg-text {
+          max-width: 180px;
+        }
+        .page {
+          padding: 16px 10px 32px;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div class="dashboard-root">
-      <!-- Top bar -->
-      <header class="dashboard-header">
-        <div class="header-left">
-          <div class="brand-title">
-            <span class="brand-main">Mr.Car</span>
-            <span class="brand-sub">Signature CRM</span>
+    <div class="page">
+      <h1>MR.CAR – WhatsApp Leads</h1>
+      <p class="subtitle">
+        Live leads from WhatsApp bot. <strong>Purpose</strong> = routing (New / Used / Loan / Sell). 
+        <strong>Enquiry</strong> = exact message text from customer.
+      </p>
+
+      <div class="card">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <span class="badge" id="lead-count-badge">Leads: 0</span>
+            <span class="small" id="last-sync-label">Last sync: –</span>
           </div>
-          <div class="brand-tags">
-            <button class="tag-pill active" data-lead-type="">All</button>
-            <button class="tag-pill" data-lead-type="new">New Car</button>
-            <button class="tag-pill" data-lead-type="used">Used Car</button>
-            <button class="tag-pill" data-lead-type="finance">Finance</button>
-            <button class="tag-pill" data-lead-type="sell">Sell</button>
-          </div>
-        </div>
-        <div class="header-right">
-          <button id="btn-refresh" class="btn ghost">Refresh</button>
-          <button id="btn-export-csv" class="btn primary">Export CSV</button>
-        </div>
-      </header>
-
-      <!-- Main layout -->
-      <main class="dashboard-content">
-        <!-- LEFT: tools -->
-        <aside class="dashboard-sidebar">
-          <section class="card">
-            <h2 class="card-title">Leads tools</h2>
-            <p class="card-subtitle">Import & manage leads from CSV.</p>
-
-            <label class="file-input">
-              <span>Upload CSV</span>
-              <input type="file" id="csv-file-input" accept=".csv" />
-            </label>
-
-            <button id="btn-upload-csv" class="btn full-width">
-              Sync CSV
-            </button>
-
-            <div class="hint">
-              <p>Expected columns:</p>
-              <ul>
-                <li>ID</li>
-                <li>Name</li>
-                <li>Phone</li>
-                <li>Status</li>
-                <li>Timestamp</li>
-              </ul>
-            </div>
-          </section>
-
-          <section class="card">
-            <h2 class="card-title">Upload Template</h2>
-            <p class="card-subtitle">JSON mapping file (optional advanced).</p>
-            <label class="file-input">
-              <span>Choose Template JSON</span>
-              <input type="file" id="template-file-input" accept=".json" />
-            </label>
-          </section>
-
-          <section class="card">
-            <h2 class="card-title">Upload Logo</h2>
-            <p class="card-subtitle">Replace Mr.Car logo (PNG).</p>
-            <label class="file-input">
-              <span>Choose Logo PNG</span>
-              <input type="file" id="logo-file-input" accept=".png" />
-            </label>
-          </section>
-
-          <section class="card card-small">
-            <h3 class="card-title">Pro tools</h3>
-            <ul class="pro-list">
-              <li>CSV import mapped to ID, Name, Phone, Status, Timestamp</li>
-              <li>Template uploads for field mappings</li>
-              <li>Logo replacement (PNG)</li>
-            </ul>
-          </section>
-        </aside>
-
-        <!-- RIGHT: leads -->
-        <section class="dashboard-main">
-          <!-- Summary -->
-          <div class="summary-row">
-            <div class="summary-pill">
-              <span class="summary-label">Total leads</span>
-              <span id="summary-total" class="summary-value">0</span>
-            </div>
-            <div class="summary-pill">
-              <span class="summary-label">Auto-ingested</span>
-              <span id="summary-auto" class="summary-value">0</span>
-            </div>
-            <div class="summary-pill">
-              <span class="summary-label">New / Open</span>
-              <span id="summary-new" class="summary-value">0</span>
-            </div>
-          </div>
-
-          <!-- Filters -->
-          <div class="toolbar-row">
+          <div>
             <input
-              id="search-input"
-              class="input"
+              id="search-box"
+              class="search-input"
               type="text"
-              placeholder="Search by name, phone or ID"
+              placeholder="Search name / phone / enquiry / purpose…"
             />
-            <select id="status-filter" class="select">
-              <option value="">All statuses</option>
-              <option value="new">New</option>
-              <option value="auto-ingested">Auto-ingested</option>
-              <option value="in-progress">In-progress</option>
-              <option value="closed">Closed</option>
-            </select>
-            <input id="from-date" type="date" class="input" />
-            <input id="to-date" type="date" class="input" />
           </div>
+        </div>
 
-          <!-- Table -->
-          <div class="table-wrapper">
-            <table class="leads-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Name</th>
-                  <th>Phone</th>
-                  <th>Purpose</th>
-                  <th>Status</th>
-                  <th>Timestamp</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="leads-tbody"></tbody>
-            </table>
-            <div id="empty-state" class="empty-state">
-              No leads yet. Once the bot receives WhatsApp messages, auto-ingested
-              leads will appear here.
-            </div>
-          </div>
-        </section>
-      </main>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Customer</th>
+                <th>Phone</th>
+                <th>Purpose</th>
+                <th>Enquiry (Last Message)</th>
+                <th>Status / Type</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="leads-tbody">
+              <tr>
+                <td colspan="7" class="small">Loading leads…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="footer">
+          <span>✨ Tip: Purpose is auto-detected from chat (default = NEW if not specified).</span>
+          <span id="backend-source" class="small"></span>
+        </div>
+      </div>
     </div>
 
     <script>
-      const API_BASE = '';
-// --- Convert UTC ISO timestamp to IST display ---
-function formatIst(tsRaw) {
-  if (!tsRaw) return '';
-  const d = new Date(tsRaw);
-  if (isNaN(d.getTime())) return tsRaw; // fallback if bad date
-
-  return d.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-}
-      const tbody = document.getElementById('leads-tbody');
-      const emptyState = document.getElementById('empty-state');
-      const searchInput = document.getElementById('search-input');
-      const statusFilter = document.getElementById('status-filter');
-      const fromDateInput = document.getElementById('from-date');
-      const toDateInput = document.getElementById('to-date');
-      const summaryTotal = document.getElementById('summary-total');
-      const summaryAuto = document.getElementById('summary-auto');
-      const summaryNew = document.getElementById('summary-new');
-      const btnRefresh = document.getElementById('btn-refresh');
-      const btnExport = document.getElementById('btn-export-csv');
-      const tagButtons = Array.from(
-        document.querySelectorAll('[data-lead-type]')
-      );
-
-      let allLeads = [];
-      let activeLeadType = ''; // '', 'new', 'used', 'finance', 'sell'
-
       async function fetchLeads() {
+        const tbody = document.getElementById("leads-tbody");
+        const badge = document.getElementById("lead-count-badge");
+        const lastSyncLabel = document.getElementById("last-sync-label");
+        const backendSource = document.getElementById("backend-source");
+
         try {
-          const res = await fetch(API_BASE + '/crm/leads');
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const data = await res.json();
-          allLeads = Array.isArray(data.leads || data) ? data.leads || data : [];
-          renderLeads();
+          const res = await fetch("/api/leads");
+          const json = await res.json();
+
+          const leads = (json && json.leads) || [];
+          const sourceLabel = json.ok === true ? "API: /api/leads" : "API error";
+          backendSource.textContent = sourceLabel;
+
+          renderLeads(leads);
+
+          badge.textContent = "Leads: " + leads.length;
+          lastSyncLabel.textContent =
+            "Last sync: " + new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+          window.__ALL_LEADS__ = leads;
         } catch (e) {
-          console.error('Failed to load leads', e);
+          tbody.innerHTML =
+            '<tr><td colspan="7" class="small">Failed to load leads. Check server /api/leads.</td></tr>';
+          console.error("fetchLeads error", e);
         }
       }
 
-function renderLeads() {
-  const q = (searchInput.value || '').trim().toLowerCase();
-  const status = statusFilter.value;
-  const fromVal = fromDateInput.value;
-  const toVal = toDateInput.value;
+      function purposeClass(purpose) {
+        const p = String(purpose || "").toLowerCase();
+        if (p === "new") return "purpose-chip purpose-new";
+        if (p === "used") return "purpose-chip purpose-used";
+        if (p === "loan") return "purpose-chip purpose-loan";
+        if (p === "sell") return "purpose-chip purpose-sell";
+        return "purpose-chip purpose-default";
+      }
 
-  const fromMs = fromVal ? Date.parse(fromVal) : null;
-  const toMs = toVal ? Date.parse(toVal + 'T23:59:59Z') : null;
-
-  const filtered = allLeads.filter((lead) => {
-    const rawId = lead.id || lead.ID || '';
-    const name = String(lead.name || lead.Name || 'UNKNOWN');
-    const phone = String(lead.phone || lead.Phone || '');
-    const st = String(lead.status || lead.Status || '').toLowerCase();
-    const leadType = String(lead.leadType || lead['Lead Type'] || '').toLowerCase();
-    const enquiry =
-      lead.enquiry ||
-      lead.enquiryPurpose ||
-      lead.purpose ||
-      lead.carEnquired ||
-      lead['Car Enquired'] ||
-      '';
-
-    const idLower = String(rawId).toLowerCase();
-    const nameLower = name.toLowerCase();
-    const phoneLower = phone.toLowerCase();
-    const enquiryLower = String(enquiry).toLowerCase();
-
-    const matchesSearch =
-      !q ||
-      idLower.includes(q) ||
-      nameLower.includes(q) ||
-      phoneLower.includes(q) ||
-      enquiryLower.includes(q);
-
-    const matchesStatus = !status || st === status.toLowerCase();
-    const matchesLeadType =
-      !activeLeadType || leadType === activeLeadType.toLowerCase();
-
-    // --- Date filter (uses raw ISO, display will be IST) ---
-    const tsRaw = lead.timestamp || lead.Timestamp || '';
-    const tsMs = tsRaw ? Date.parse(tsRaw) : null;
-    let matchesDate = true;
-    if (fromMs !== null && tsMs !== null) matchesDate = matchesDate && tsMs >= fromMs;
-    if (toMs !== null && tsMs !== null) matchesDate = matchesDate && tsMs <= toMs;
-
-    return matchesSearch && matchesStatus && matchesLeadType && matchesDate;
-  });
-
-  // Clear table
-  tbody.innerHTML = '';
-
-  // Render rows
-  filtered.forEach((lead) => {
-    const rawId = lead.id || lead.ID || '';
-    const phone = String(lead.phone || lead.Phone || '');
-    const name = lead.name || lead.Name || 'UNKNOWN';
-    const status = lead.status || lead.Status || '';
-
-    const enquiry =
-      lead.enquiry ||
-      lead.enquiryPurpose ||
-      lead.purpose ||
-      lead.carEnquired ||
-      lead['Car Enquired'] ||
-      '';
-
-    const tsRaw = lead.timestamp || lead.Timestamp || '';
-    const tsDisplay = formatIst(tsRaw);
-
-    // Hide ID if it's exactly equal to phone (avoid duplicate)
-    let idDisplay = rawId;
-    if (rawId && phone && String(rawId) === String(phone)) {
-      idDisplay = '';
-    }
-
-    const waLink = phone
-      ? `https://wa.me/${encodeURIComponent(phone)}`
-      : '';
-    const actionHtml = waLink
-      ? `<a href="${waLink}" target="_blank" rel="noopener noreferrer" class="wa-link">Open in WhatsApp</a>`
-      : '';
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${idDisplay}</td>
-      <td>${name}</td>
-      <td>${phone}</td>
-      <td>${enquiry || ''}</td>
-      <td><span class="status-chip status-${(status || '').toLowerCase()}">${status || ''}</span></td>
-      <td>${tsDisplay}</td>
-      <td>${actionHtml}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  // Empty state text
-  if (!filtered.length) {
-    if (activeLeadType) {
-      emptyState.textContent = `No ${activeLeadType} leads yet. New ${activeLeadType} enquiries will appear here once the bot tags them.`;
-    } else {
-      emptyState.textContent =
-        'No leads match the current filters. Clear filters or wait for new WhatsApp enquiries.';
-    }
-    emptyState.style.display = 'block';
-  } else {
-    emptyState.style.display = 'none';
-  }
-
-  // Summary pills
-  const total = allLeads.length;
-  const autoCount = allLeads.filter(
-    (l) =>
-      String(l.status || l.Status || '').toLowerCase() === 'auto-ingested'
-  ).length;
-  const newCount = allLeads.filter(
-    (l) => String(l.status || l.Status || '').toLowerCase() === 'new'
-  ).length;
-
-  summaryTotal.textContent = total;
-  summaryAuto.textContent = autoCount;
-  summaryNew.textContent = newCount;
-}
-      async function exportCsv() {
+      function formatTime(ts) {
+        if (!ts) return "";
         try {
-          const res = await fetch(API_BASE + '/crm/leads');
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const data = await res.json();
-          const leads = Array.isArray(data.leads || data) ? data.leads || data : [];
-
-          if (!leads.length) return;
-
-          const cols = [
-            'ID',
-            'Name',
-            'Phone',
-            'Purpose',
-            'Status',
-            'Timestamp'
-          ];
-          const header = cols.join(',');
-          const rows = leads.map((l) => {
-            const rawId = l.id || l.ID || '';
-            const phone = l.phone || l.Phone || '';
-            let idOut = rawId;
-            if (rawId && phone && String(rawId) === String(phone)) {
-              idOut = ''; // hide duplicate
-            }
-
-            const status = l.status || l.Status || '';
-            const ts = l.timestamp || l.Timestamp || '';
-            const enquiry =
-              l.enquiry ||
-              l.enquiryPurpose ||
-              l.purpose ||
-              l.carEnquired ||
-              l['Car Enquired'] ||
-              '';
-
-            const row = [idOut, l.name || l.Name || '', phone, enquiry, status, ts];
-            return row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',');
-          });
-
-          const csv = [header, ...rows].join('\n');
-          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'mr-car-leads.csv';
-          a.click();
-          URL.revokeObjectURL(url);
-        } catch (e) {
-          console.error('Export CSV failed', e);
+          const d = typeof ts === "number" ? new Date(ts) : new Date(String(ts));
+          if (!isFinite(d.getTime())) return "";
+          return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+        } catch {
+          return "";
         }
       }
 
-      // Events
-      searchInput.addEventListener('input', renderLeads);
-      statusFilter.addEventListener('change', renderLeads);
-      fromDateInput.addEventListener('change', renderLeads);
-      toDateInput.addEventListener('change', renderLeads);
-      btnRefresh.addEventListener('click', fetchLeads);
-      btnExport.addEventListener('click', exportCsv);
+      function renderLeads(leads) {
+        const tbody = document.getElementById("leads-tbody");
+        if (!leads || !leads.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="7" class="small">No leads found.</td></tr>';
+          return;
+        }
 
-      tagButtons.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          activeLeadType = btn.dataset.leadType || '';
-          tagButtons.forEach((b) =>
-            b.classList.toggle('active', b === btn)
-          );
-          renderLeads();
+        const rows = leads.map((l) => {
+          const id = l.ID || "";
+          const name = l.Name || "";
+          const phone = l.Phone || "";
+          const purpose = l.Purpose || l.purpose || "";
+          const lastMessage = l.lastMessage || l.text || "";
+          const status = l.Status || l.status || "";
+          const leadType = l.LeadType || l.leadType || "";
+          const ts = l.Timestamp || l.ts || "";
+
+          return `
+            <tr>
+              <td>${id ? id : ""}</td>
+              <td>
+                <div class="name-cell">${name || "—"}</div>
+              </td>
+              <td class="phone-cell">${phone || "—"}</td>
+              <td>
+                <span class="${purposeClass(purpose)}">
+                  ${purpose ? purpose.toUpperCase() : "GENERAL"}
+                </span>
+              </td>
+              <td>
+                <div class="msg-text" title="${lastMessage ? lastMessage.replace(/"/g, "&quot;") : ""}">
+                  ${lastMessage || "—"}
+                </div>
+              </td>
+              <td>
+                <div class="status-pill ${String(status || "").toLowerCase()}">
+                  ${status || "—"}
+                </div>
+                <div class="leadtype-pill">
+                  ${leadType || ""}
+                </div>
+              </td>
+              <td class="small">${formatTime(ts)}</td>
+            </tr>
+          `;
         });
+
+        tbody.innerHTML = rows.join("");
+      }
+
+      function applySearchFilter() {
+        const q = (document.getElementById("search-box").value || "").toLowerCase();
+        const all = window.__ALL_LEADS__ || [];
+        if (!q) {
+          renderLeads(all);
+          return;
+        }
+        const filtered = all.filter((l) => {
+          const haystack =
+            [
+              l.ID,
+              l.Name,
+              l.Phone,
+              l.Status,
+              l.Purpose,
+              l.lastMessage,
+              l.LeadType,
+              l.text
+            ]
+              .map((x) => String(x || "").toLowerCase())
+              .join(" ");
+          return haystack.includes(q);
+        });
+        renderLeads(filtered);
+      }
+
+      document.getElementById("search-box").addEventListener("input", () => {
+        applySearchFilter();
       });
 
-      // Initial load + auto-refresh
       fetchLeads();
-      setInterval(fetchLeads, 30000);
+      setInterval(fetchLeads, 30_000);
     </script>
   </body>
 </html>
