@@ -2217,18 +2217,35 @@ if (value.statuses && !value.messages) {
     }
     // ---- END RAG BLOCK ----
 
-    // save lead locally + CRM (non-blocking)
+        // save lead locally + CRM (non-blocking)
     try {
+      const lastServiceValue = getLastService(from) || null;
+      let purpose = 'general_query';
+
+      // Prefer lastService (NEW / USED / SELL / LOAN)
+      if (lastServiceValue) {
+        purpose = String(lastServiceValue).toLowerCase();
+      } else if (msgText) {
+        // Fallback: infer from text if service not set
+        const tLow = msgText.toLowerCase();
+        if (/used|pre[-\s]?owned|second[-\s]?hand/.test(tLow)) purpose = 'used';
+        else if (/sell my car|sell car|selling my car/.test(tLow)) purpose = 'sell';
+        else if (/loan|finance|emi|bullet/.test(tLow)) purpose = 'loan';
+        else if (/new car|on[-\s]?road|onroad|booking|price|quote/.test(tLow)) purpose = 'new';
+      }
+
       const lead = {
         bot: 'MR_CAR_AUTO',
         channel: 'whatsapp',
         from,
         name,
         lastMessage: msgText,
-        service: getLastService(from) || null,
+        service: lastServiceValue,
+        purpose,          // 👈 this is what CRM reads for the Purpose column
         tags: [],
         meta: {}
       };
+
       postLeadToCRM(lead).catch(() => {});
       let existing = safeJsonRead(LEADS_FILE);
       if (Array.isArray(existing)) {
