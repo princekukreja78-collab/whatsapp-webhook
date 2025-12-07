@@ -1932,9 +1932,16 @@ app.get('/webhook', (req, res) => {
 // -------------- CRM API ROUTES ---------------
 app.get('/crm/leads', async (req, res) => {
   try {
-    // 1) Prefer in-memory leads if present
-    if (globalThis.leads && Array.isArray(globalThis.leads) && globalThis.leads.length) {
-      return res.json({ ok: true, leads: globalThis.leads });
+    // 1) Prefer canonical CRM helper if available (from crm_helpers.cjs)
+    try {
+      if (typeof getAllLeads === 'function') {
+        const leads = await getAllLeads();
+        if (Array.isArray(leads) && leads.length) {
+          return res.json({ ok: true, leads });
+        }
+      }
+    } catch (e) {
+      console.warn('crm/leads: getAllLeads failed, falling back to file.', e && e.message ? e.message : e);
     }
 
     // 2) Fallback: try reading from LEADS_FILE (crm_leads.json)
@@ -1961,6 +1968,7 @@ app.get('/crm/leads', async (req, res) => {
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 // ---------- ADMIN TEST ALERT ----------
 app.post('/admin/test_alert', async (req, res) => {
