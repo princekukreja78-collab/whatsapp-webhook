@@ -1934,6 +1934,36 @@ if (value.statuses && !value.messages) {
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
     }
+    // ---- Admin alert for real incoming messages ----
+    try {
+      // Only if ADMIN_WA is set, we have a sender, and it’s not the admin number itself
+      if (ADMIN_WA && from && from !== ADMIN_WA) {
+        // Basic filters: if you want alerts only for text/interactive, uncomment next line:
+        // if (!(type === 'text' || type === 'interactive')) { /* skip */ } else {
+
+        const lines = [
+          '🚨 *New WhatsApp message*',
+          `From: ${name} (${from})`,
+          `Type: ${type}`,
+          msgText ? `Message: ${msgText}` : null,
+        ].filter(Boolean);
+
+        const body = lines.join('\n');
+
+        // Use the same helper that /admin/test_alert uses
+        await waSendText(ADMIN_WA, body);
+
+        if (DEBUG) {
+          console.log('Admin alert sent for incoming message', { from });
+        }
+        // } // <-- closing brace if you add type filter above
+      }
+    } catch (err) {
+      console.warn(
+        'Admin alert send failed:',
+        err && err.message ? err.message : err
+      );
+    }
 
     // ---- RAG EMBEDDING + VECTOR SEARCH BLOCK ----
     let queryEmbedding = null;
