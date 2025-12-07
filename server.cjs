@@ -808,13 +808,36 @@ function calcEmiSimple(p, annualRatePct, months) {
 }
 
 // ---------------- pricing loader (NEW CARS) ----------------
-const SHEET_URLS = {
-  HOT:      SHEET_HOT_DEALS_CSV_URL || '',
-  TOYOTA:   SHEET_TOYOTA_CSV_URL || '',
-  HYUNDAI:  SHEET_HYUNDAI_CSV_URL || '',
-  MERCEDES: SHEET_MERCEDES_CSV_URL || '',
-  BMW:      SHEET_BMW_CSV_URL || ''
-};
+// Auto-detect all SHEET_*_CSV_URL env vars, so new brands work without code change.
+const SHEET_URLS = (() => {
+  const urls = {};
+
+  // 1) Keep explicit mapping for known brands (backwards-compatible)
+  const explicit = {
+    HOT:      process.env.SHEET_HOT_DEALS_CSV_URL,
+    TOYOTA:   process.env.SHEET_TOYOTA_CSV_URL,
+    HYUNDAI:  process.env.SHEET_HYUNDAI_CSV_URL,
+    MERCEDES: process.env.SHEET_MERCEDES_CSV_URL,
+    BMW:      process.env.SHEET_BMW_CSV_URL
+  };
+
+  for (const [brand, val] of Object.entries(explicit)) {
+    if (val) urls[brand] = val.trim();
+  }
+
+  // 2) Auto-discover any SHEET_<BRAND>_CSV_URL (e.g. SHEET_MAHINDRA_CSV_URL)
+  for (const [envKey, value] of Object.entries(process.env)) {
+    if (!value) continue;
+    const m = envKey.match(/^SHEET_([A-Z0-9]+)_CSV_URL$/);
+    if (!m) continue;
+    const brandKey = m[1]; // e.g. TOYOTA, HYUNDAI, BMW, MAHINDRA, MG
+    if (!urls[brandKey]) {
+      urls[brandKey] = value.trim();
+    }
+  }
+
+  return urls;
+})();
 
 const PRICING_CACHE = { tables: null, ts: 0 };
 const PRICING_CACHE_MS = 3 * 60 * 1000;
@@ -851,6 +874,84 @@ function detectExShowIdx(idxMap) {
   const lowerKeys = keys.map(k => k.toLowerCase());
   const i = lowerKeys.findIndex(k => k.includes('ex') && k.includes('showroom'));
   if (i >= 0) return idxMap[keys[i]];
+  return -1;
+}
+// ---- NEW CAR HELPERS: fuel type + on-road price column ----
+function pickFuelIndex(idxMap) {
+  const keys = Object.keys(idxMap || {});
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if (kl.includes('fuel') && kl.includes('type')) {
+      return idxMap[k];
+    }
+  }
+  return -1;
+}
+
+// audience = 'individual' | 'corporate', cityToken e.g. 'DELHI'
+function pickOnRoadPriceIndex(idxMap, cityToken, audience) {
+  const keys = Object.keys(idxMap || {});
+  const cityLower = String(cityToken || '').toLowerCase();
+  const aud = String(audience || '').toLowerCase();
+
+  let best = null;
+
+  function scoreKey(k) {
+    const kl = k.toLowerCase();
+    let s = 0;
+
+    // Strong signals: "on road" + city
+    if (kl.includes('on road') || (kl.includes('on') && kl.includes('road'))) s += 5;
+    if (cityLower && kl.includes(cityLower)) s += 4;
+
+    // Audience-specific scoring
+    if (aud) {
+      if (aud === 'corporate') {
+        if (kl.includes('corporate') || kl.includes('company') || kl.includes('firm') || kl.includes('corp')) {
+          s += 6;
+        }
+      } else if (aud === 'individual') {
+        if (kl.includes('individual') || kl.includes('retail') || kl.includes('personal')) {
+          s += 6;
+        }
+      }
+    } else {
+      // No explicit audience → slight bias to individual
+      if (kl.includes('individual') || kl.includes('retail') || kl.includes('personal')) s += 2;
+      if (kl.includes('corporate') || kl.includes('company') || kl.includes('firm') || kl.includes('corp')) s -= 1;
+    }
+
+    return s;
+  }
+
+  for (const k of keys) {
+    const s = scoreKey(k);
+    if (s <= 0) continue;
+    if (!best || s > best.score) {
+      best = { key: k, score: s };
+    }
+  }
+
+  if (best) {
+    return idxMap[best.key];
+  }
+
+  // Fallback: any column with city + 'road'
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if (cityLower && kl.includes(cityLower) && kl.includes('road')) {
+      return idxMap[k];
+    }
+  }
+
+  // Final fallback: any 'on road' column
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if (kl.includes('on road') || (kl.includes('on') && kl.includes('road'))) {
+      return idxMap[k];
+    }
+  }
+
   return -1;
 }
 
@@ -1020,6 +1121,109 @@ async function buildUsedCarQuoteFreeText({ query }) {
 
   const qLower = (query || '').toLowerCase();
   const tokens = qLower.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
+  // ---- Budget-based search for used cars (± ₹10 lakh) ----
+  let budgetRs = 0;
+
+  // Find a number like "20 lakh", "20 lac", "20 l", or a plain "2000000"
+  const mBudget = qLower.match(/(\d+(\.\d+)?)\s*(lakh|lakhs|lac|lacs|l\b|rs|₹|rupees)?/);
+  if (mBudget) {
+    const num = parseFloat(mBudget[1]);
+    if (num > 0) {
+      // If the number is small (e.g., 20), treat as lakhs → 20 * 1,00,000
+      budgetRs = num < 1000 ? num * 100000 : num;
+    }
+  }
+
+  // Helper for simple INR formatting
+  function fmtINR(v) {
+    const n = Math.round(Number(v) || 0);
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  if (budgetRs > 0 && expectedIdx >= 0) {
+    const min = budgetRs - 1000000; // - 10 lakh
+    const max = budgetRs + 1000000; // + 10 lakh
+
+    const budgetMatches = [];
+
+    for (let r = 0; r < data.length; r++) {
+      const row = data[r];
+
+      let expectedVal = 0;
+      if (expectedIdx >= 0) {
+        const exStr = String(row[expectedIdx] || '');
+        expectedVal = Number(exStr.replace(/[,₹\s]/g, '')) || 0;
+      }
+      if (!expectedVal) continue;
+      if (expectedVal < min || expectedVal > max) continue;
+
+      budgetMatches.push({ row, expectedVal });
+    }
+
+    if (budgetMatches.length) {
+      // Sort by price closest to requested budget
+      budgetMatches.sort((a, b) => {
+        const da = Math.abs(a.expectedVal - budgetRs);
+        const db = Math.abs(b.expectedVal - budgetRs);
+        return da - db;
+      });
+
+      const lines = [];
+      lines.push(`*PRE-OWNED OPTIONS AROUND YOUR BUDGET*`);
+      lines.push(
+        `(Showing cars roughly between ₹${fmtINR(min)} and ₹${fmtINR(max)})`
+      );
+
+      const limit = Math.min(10, budgetMatches.length);
+      for (let i = 0; i < limit; i++) {
+        const { row, expectedVal } = budgetMatches[i];
+
+        const makeDisp  = (row[makeIdx]  || '').toString().toUpperCase();
+        const modelDisp = (row[modelIdx] || '').toString().toUpperCase();
+        const subDisp   = subModelIdx >= 0 && row[subModelIdx]
+          ? row[subModelIdx].toString().toUpperCase()
+          : '';
+        const yearDisp  = yearIdx >= 0 && row[yearIdx] ? String(row[yearIdx]) : '';
+        const regPlace  = regIdx >= 0 && row[regIdx] ? String(row[regIdx]) : '';
+
+        const titleParts = [];
+        if (makeDisp)  titleParts.push(makeDisp);
+        if (modelDisp) titleParts.push(modelDisp);
+        if (subDisp)   titleParts.push(subDisp);
+
+        const infoParts = [];
+        if (yearDisp)  infoParts.push(yearDisp);
+        if (regPlace)  infoParts.push(regPlace);
+
+        const lineTitle = titleParts.length
+          ? `*${titleParts.join(' ')}*`
+          : '*PRE-OWNED CAR*';
+
+        const lineInfo = infoParts.length
+          ? ` (${infoParts.join(' | ')})`
+          : '';
+
+        lines.push(
+          `${i + 1}. ${lineTitle}${lineInfo}\n   Expected: ₹${fmtINR(expectedVal)}`
+        );
+      }
+
+      // Pick first available picture (if any)
+      let picLink = '';
+      if (pictureIdx >= 0) {
+        for (const bm of budgetMatches) {
+          const link = bm.row[pictureIdx];
+          if (link) {
+            picLink = String(link);
+            break;
+          }
+        }
+      }
+
+      return { text: lines.join('\n'), picLink };
+    }
+    // If no cars found in that price band, fall through to normal text-based matching below
+  }
 
   const matches = [];
   for (let r = 0; r < data.length; r++) {
@@ -1476,6 +1680,10 @@ async function tryQuickNewCarQuote(msgText, to) {
     const profile =
       (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
 
+    // map profile → audience for price selection
+    const audience =
+      /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
+
     // broaden raw: normalize 'auto' / 'automatic' to 'at' to match your variant suffix scheme
     let raw = t
       .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/g, ' ')
@@ -1503,7 +1711,8 @@ async function tryQuickNewCarQuote(msgText, to) {
       return new RegExp('\\b' + escaped.join('[\\s\\W_]*') + '\\b', 'i');
     }
 
-    // iterate brands/tables
+    const cityToken = city.split(' ')[0].toUpperCase();
+
     const allMatches = [];
     for (const [brand, tab] of Object.entries(tables)) {
       if (!tab || !tab.data) continue;
@@ -1515,6 +1724,9 @@ async function tryQuickNewCarQuote(msgText, to) {
       const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
       const idxVarKw = header.findIndex(h => h.includes('VARIANT_KEYWORDS') || h.includes('KEYWORD'));
       const idxSuffixCol = header.findIndex(h => h.includes('SUFFIX'));
+      const fuelIdx = pickFuelIndex(idxMap);
+      const exIdx = detectExShowIdx(idxMap);
+      const globalPriceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience);
 
       for (const row of tab.data) {
         const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
@@ -1546,12 +1758,20 @@ async function tryQuickNewCarQuote(msgText, to) {
           suffixNorm = normForMatch(row[idxSuffixCol]);
         }
 
+        let fuelNorm = '';
+        let fuelCell = '';
+        if (fuelIdx >= 0 && row[fuelIdx] != null) {
+          fuelCell = String(row[fuelIdx] || '');
+          fuelNorm = normForMatch(fuelCell.toLowerCase());
+        }
+
         for (const tok of tokens) {
           if (!tok) continue;
           if (modelNorm && modelNorm.includes(tok)) score += 5;
           if (variantNorm && variantNorm.includes(tok)) score += 8;
           if (suffixNorm && suffixNorm.includes(tok)) score += 10;
           if (varKwNorm && varKwNorm.includes(tok)) score += 15;
+          if (fuelNorm && fuelNorm.includes(tok)) score += 6; // petrol / diesel / hybrid / cng
         }
 
         // improved suffix detection for ZX/VX/GX/ZXO/VXO/GXO (loose)
@@ -1582,16 +1802,10 @@ async function tryQuickNewCarQuote(msgText, to) {
 
         if (score <= 0) continue;
 
-        // pick price
-        let priceIdx = -1;
-        const cityToken = city.split(' ')[0].toUpperCase();
-        for (const k of Object.keys(idxMap)) {
-          if (k.includes('ON ROAD') && k.includes(cityToken)) {
-            priceIdx = idxMap[k];
-            break;
-          }
-        }
+        // pick on-road price column (Delhi INDIVIDUAL / CORPORATE)
+        let priceIdx = globalPriceIdx;
         if (priceIdx < 0) {
+          // Fallback: first numeric cell in row
           for (let i = 0; i < row.length; i++) {
             const v = String(row[i] || '').replace(/[,₹\s]/g, '');
             if (v && /^\d+$/.test(v)) {
@@ -1600,14 +1814,24 @@ async function tryQuickNewCarQuote(msgText, to) {
             }
           }
         }
+
         const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
         const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
         if (!onroad) continue;
 
-        const exIdx = detectExShowIdx(idxMap);
         const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
 
-        allMatches.push({ brand, row, idxModel, idxVariant, idxMap, onroad, exShow, score });
+        allMatches.push({
+          brand,
+          row,
+          idxModel,
+          idxVariant,
+          idxMap,
+          onroad,
+          exShow,
+          score,
+          fuel: fuelCell
+        });
       }
     }
 
@@ -1625,7 +1849,6 @@ async function tryQuickNewCarQuote(msgText, to) {
       const seenTitles = new Set();
       for (const m of allMatches) {
         const row = m.row;
-        const headerMap = m.idxMap || {};
         const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
         const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
         const titleParts = [];
@@ -1664,12 +1887,14 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     const modelName  = best.idxModel   >= 0 ? String(best.row[best.idxModel]   || '').toUpperCase() : '';
     const variantStr = best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
+    const fuelStr    = best.fuel ? String(best.fuel).toUpperCase() : '';
 
     const lines = [];
     lines.push(`*${best.brand}* ${modelName} ${variantStr}`);
     lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
+    if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
     if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
-    if (best.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(best.onroad)}`);
+    if (best.onroad) lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
     if (loanAmt) {
       lines.push(
         `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
@@ -1688,7 +1913,6 @@ async function tryQuickNewCarQuote(msgText, to) {
     return false;
   }
 }
-
 // ---------------- webhook verify & health ----------------
 app.get('/healthz', (req, res) => {
   res.json({ ok: true, t: Date.now(), debug: DEBUG });
