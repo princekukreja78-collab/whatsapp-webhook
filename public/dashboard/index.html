@@ -150,7 +150,21 @@
 
     <script>
       const API_BASE = '';
+// --- Convert UTC ISO timestamp to IST display ---
+function formatIst(tsRaw) {
+  if (!tsRaw) return '';
+  const d = new Date(tsRaw);
+  if (isNaN(d.getTime())) return tsRaw; // fallback if bad date
 
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
       const tbody = document.getElementById('leads-tbody');
       const emptyState = document.getElementById('empty-state');
       const searchInput = document.getElementById('search-input');
@@ -181,124 +195,129 @@
         }
       }
 
-      function renderLeads() {
-        const q = (searchInput.value || '').trim().toLowerCase();
-        const status = statusFilter.value;
-        const fromVal = fromDateInput.value;
-        const toVal = toDateInput.value;
+function renderLeads() {
+  const q = (searchInput.value || '').trim().toLowerCase();
+  const status = statusFilter.value;
+  const fromVal = fromDateInput.value;
+  const toVal = toDateInput.value;
 
-        const fromMs = fromVal ? Date.parse(fromVal) : null;
-        const toMs = toVal ? Date.parse(toVal + 'T23:59:59Z') : null;
+  const fromMs = fromVal ? Date.parse(fromVal) : null;
+  const toMs = toVal ? Date.parse(toVal + 'T23:59:59Z') : null;
 
-        const filtered = allLeads.filter((lead) => {
-          const rawId = lead.id || lead.ID || '';
-          const name = String(lead.name || lead.Name || 'UNKNOWN');
-          const phone = String(lead.phone || lead.Phone || '');
-          const st = String(lead.status || lead.Status || '').toLowerCase();
-          const leadType = String(lead.leadType || lead['Lead Type'] || '').toLowerCase();
-          const enquiry =
-            lead.enquiry ||
-            lead.enquiryPurpose ||
-            lead.purpose ||
-            lead.carEnquired ||
-            lead['Car Enquired'] ||
-            '';
+  const filtered = allLeads.filter((lead) => {
+    const rawId = lead.id || lead.ID || '';
+    const name = String(lead.name || lead.Name || 'UNKNOWN');
+    const phone = String(lead.phone || lead.Phone || '');
+    const st = String(lead.status || lead.Status || '').toLowerCase();
+    const leadType = String(lead.leadType || lead['Lead Type'] || '').toLowerCase();
+    const enquiry =
+      lead.enquiry ||
+      lead.enquiryPurpose ||
+      lead.purpose ||
+      lead.carEnquired ||
+      lead['Car Enquired'] ||
+      '';
 
-          const idLower = String(rawId).toLowerCase();
-          const nameLower = name.toLowerCase();
-          const phoneLower = phone.toLowerCase();
-          const enquiryLower = String(enquiry).toLowerCase();
+    const idLower = String(rawId).toLowerCase();
+    const nameLower = name.toLowerCase();
+    const phoneLower = phone.toLowerCase();
+    const enquiryLower = String(enquiry).toLowerCase();
 
-          const matchesSearch =
-            !q ||
-            idLower.includes(q) ||
-            nameLower.includes(q) ||
-            phoneLower.includes(q) ||
-            enquiryLower.includes(q);
+    const matchesSearch =
+      !q ||
+      idLower.includes(q) ||
+      nameLower.includes(q) ||
+      phoneLower.includes(q) ||
+      enquiryLower.includes(q);
 
-          const matchesStatus = !status || st === status.toLowerCase();
-          const matchesLeadType =
-            !activeLeadType || leadType === activeLeadType.toLowerCase();
+    const matchesStatus = !status || st === status.toLowerCase();
+    const matchesLeadType =
+      !activeLeadType || leadType === activeLeadType.toLowerCase();
 
-          // Date filter
-          const tsRaw = lead.timestamp || lead.Timestamp || '';
-          const tsMs = tsRaw ? Date.parse(tsRaw) : null;
-          let matchesDate = true;
-          if (fromMs !== null && tsMs !== null) matchesDate = matchesDate && tsMs >= fromMs;
-          if (toMs !== null && tsMs !== null) matchesDate = matchesDate && tsMs <= toMs;
+    // --- Date filter (uses raw ISO, display will be IST) ---
+    const tsRaw = lead.timestamp || lead.Timestamp || '';
+    const tsMs = tsRaw ? Date.parse(tsRaw) : null;
+    let matchesDate = true;
+    if (fromMs !== null && tsMs !== null) matchesDate = matchesDate && tsMs >= fromMs;
+    if (toMs !== null && tsMs !== null) matchesDate = matchesDate && tsMs <= toMs;
 
-          return matchesSearch && matchesStatus && matchesLeadType && matchesDate;
-        });
+    return matchesSearch && matchesStatus && matchesLeadType && matchesDate;
+  });
 
-        tbody.innerHTML = '';
-        filtered.forEach((lead) => {
-          const rawId = lead.id || lead.ID || '';
-          const phone = String(lead.phone || lead.Phone || '');
-          const name = lead.name || lead.Name || 'UNKNOWN';
-          const status = lead.status || lead.Status || '';
-          const ts = lead.timestamp || lead.Timestamp || '';
+  // Clear table
+  tbody.innerHTML = '';
 
-          const enquiry =
-            lead.enquiry ||
-            lead.enquiryPurpose ||
-            lead.purpose ||
-            lead.carEnquired ||
-            lead['Car Enquired'] ||
-            '';
+  // Render rows
+  filtered.forEach((lead) => {
+    const rawId = lead.id || lead.ID || '';
+    const phone = String(lead.phone || lead.Phone || '');
+    const name = lead.name || lead.Name || 'UNKNOWN';
+    const status = lead.status || lead.Status || '';
 
-          // Hide ID if it's exactly equal to phone (to avoid duplicate number)
-          let idDisplay = rawId;
-          if (rawId && phone && String(rawId) === String(phone)) {
-            idDisplay = '';
-          }
+    const enquiry =
+      lead.enquiry ||
+      lead.enquiryPurpose ||
+      lead.purpose ||
+      lead.carEnquired ||
+      lead['Car Enquired'] ||
+      '';
 
-          const waLink = phone
-            ? `https://wa.me/${encodeURIComponent(phone)}`
-            : '';
-          const actionHtml = waLink
-            ? `<a href="${waLink}" target="_blank" rel="noopener noreferrer" class="wa-link">Open in WhatsApp</a>`
-            : '';
+    const tsRaw = lead.timestamp || lead.Timestamp || '';
+    const tsDisplay = formatIst(tsRaw);
 
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>${idDisplay}</td>
-            <td>${name}</td>
-            <td>${phone}</td>
-            <td>${enquiry || ''}</td>
-            <td><span class="status-chip status-${(status || '').toLowerCase()}">${status || ''}</span></td>
-            <td>${ts}</td>
-            <td>${actionHtml}</td>
-          `;
-          tbody.appendChild(tr);
-        });
+    // Hide ID if it's exactly equal to phone (avoid duplicate)
+    let idDisplay = rawId;
+    if (rawId && phone && String(rawId) === String(phone)) {
+      idDisplay = '';
+    }
 
-        if (!filtered.length) {
-          if (activeLeadType) {
-            emptyState.textContent = `No ${activeLeadType} leads yet. New ${activeLeadType} enquiries will appear here once the bot tags them.`;
-          } else {
-            emptyState.textContent =
-              'No leads match the current filters. Clear filters or wait for new WhatsApp enquiries.';
-          }
-          emptyState.style.display = 'block';
-        } else {
-          emptyState.style.display = 'none';
-        }
+    const waLink = phone
+      ? `https://wa.me/${encodeURIComponent(phone)}`
+      : '';
+    const actionHtml = waLink
+      ? `<a href="${waLink}" target="_blank" rel="noopener noreferrer" class="wa-link">Open in WhatsApp</a>`
+      : '';
 
-        // Summary
-        const total = allLeads.length;
-        const autoCount = allLeads.filter(
-          (l) =>
-            String(l.status || l.Status || '').toLowerCase() === 'auto-ingested'
-        ).length;
-        const newCount = allLeads.filter(
-          (l) => String(l.status || l.Status || '').toLowerCase() === 'new'
-        ).length;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${idDisplay}</td>
+      <td>${name}</td>
+      <td>${phone}</td>
+      <td>${enquiry || ''}</td>
+      <td><span class="status-chip status-${(status || '').toLowerCase()}">${status || ''}</span></td>
+      <td>${tsDisplay}</td>
+      <td>${actionHtml}</td>
+    `;
+    tbody.appendChild(tr);
+  });
 
-        summaryTotal.textContent = total;
-        summaryAuto.textContent = autoCount;
-        summaryNew.textContent = newCount;
-      }
+  // Empty state text
+  if (!filtered.length) {
+    if (activeLeadType) {
+      emptyState.textContent = `No ${activeLeadType} leads yet. New ${activeLeadType} enquiries will appear here once the bot tags them.`;
+    } else {
+      emptyState.textContent =
+        'No leads match the current filters. Clear filters or wait for new WhatsApp enquiries.';
+    }
+    emptyState.style.display = 'block';
+  } else {
+    emptyState.style.display = 'none';
+  }
 
+  // Summary pills
+  const total = allLeads.length;
+  const autoCount = allLeads.filter(
+    (l) =>
+      String(l.status || l.Status || '').toLowerCase() === 'auto-ingested'
+  ).length;
+  const newCount = allLeads.filter(
+    (l) => String(l.status || l.Status || '').toLowerCase() === 'new'
+  ).length;
+
+  summaryTotal.textContent = total;
+  summaryAuto.textContent = autoCount;
+  summaryNew.textContent = newCount;
+}
       async function exportCsv() {
         try {
           const res = await fetch(API_BASE + '/crm/leads');
