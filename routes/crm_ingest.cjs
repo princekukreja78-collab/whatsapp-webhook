@@ -67,6 +67,26 @@ module.exports = async (req, res) => {
       body.ts ||
       nowIso;
 
+    // --- NEW: normalise enquiry / purpose ---
+    const enquiry =
+      body.enquiry ||                          // from auto_ingest.cjs
+      body.enquiryPurpose ||
+      body['Car Enquired'] ||
+      body.carEnquired ||
+      firstText;
+
+    // --- NEW: normalise leadType (new / used / finance / sell / etc.) ---
+    let leadType =
+      body.leadType ||
+      body.lead_type ||
+      body['Lead Type'] ||
+      '';
+
+    if (!leadType) {
+      // fallback for older payloads
+      leadType = firstText ? 'whatsapp_query' : 'auto-ingested';
+    }
+
     // Normalized lead shape for dashboard + sheet
     const lead = {
       // Sheet / CONTACT SHEET headers (UPPER)
@@ -75,18 +95,11 @@ module.exports = async (req, res) => {
       Phone: phone,
       Status: status,
       Timestamp: tsIso,
-      'Car Enquired':
-        body['Car Enquired'] ||
-        body.carEnquired ||
-        firstText,
+      'Car Enquired': enquiry,
       Budget: body.Budget || body.budget || '',
       'Last AI Reply': body['Last AI Reply'] || body.lastAiReply || body.last_ai_reply || '',
       'AI Quote': body['AI Quote'] || body.aiQuote || body.ai_quote || '',
-      'Lead Type':
-        body['Lead Type'] ||
-        body.leadType ||
-        body.lead_type ||
-        (firstText ? 'whatsapp_query' : 'auto-ingested'),
+      'Lead Type': leadType,
 
       // Dashboard JS (lowercase / snake-case) compatibility
       id,
@@ -95,6 +108,8 @@ module.exports = async (req, res) => {
       status,
       timestamp: tsIso,
       ts: nowTs,
+      enquiry,
+      leadType,
 
       // keep raw payload for debugging
       raw: body,
@@ -110,6 +125,7 @@ module.exports = async (req, res) => {
       Name: lead.Name,
       Status: lead.Status,
       CarEnquired: lead['Car Enquired'],
+      LeadType: lead.leadType
     });
 
     return res.json({ ok: true, lead });
