@@ -1826,16 +1826,15 @@ app.post('/webhook', async (req, res) => {
           msg.interactive?.list_reply?.title ||
           "";
 
-        const autoIngest = require("./routes/auto_ingest.cjs");
+        await autoIngest({
+  bot: "MR.CAR",
+  channel: "whatsapp",
+  from: senderForAuto,
+  name: senderNameForAuto,
+  lastMessage: lastMsgForAuto,
+  meta: { source: "webhook-auto" }
+});
 
-        autoIngest({
-          bot: "MR.CAR",
-          channel: "whatsapp",
-          from: senderForAuto,
-          name: senderNameForAuto,
-          lastMessage: lastMsgForAuto,
-          meta: { source: "webhook-auto" }
-        });
 // --- Admin Alert: New Lead Received (IST time) ---
 try {
   if (ADMIN_WA && senderForAuto !== ADMIN_WA) {
