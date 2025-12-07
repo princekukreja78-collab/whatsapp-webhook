@@ -15,13 +15,13 @@
             <span class="brand-main">Mr.Car</span>
             <span class="brand-sub">Signature CRM</span>
           </div>
-<div class="brand-tags">
-  <button class="tag-pill active" data-lead-type="">All</button>
-  <button class="tag-pill" data-lead-type="new">New Car</button>
-  <button class="tag-pill" data-lead-type="used">Used Car</button>
-  <button class="tag-pill" data-lead-type="finance">Finance</button>
-  <button class="tag-pill" data-lead-type="sell">Sell</button>
-</div>
+          <div class="brand-tags">
+            <button class="tag-pill active" data-lead-type="">All</button>
+            <button class="tag-pill" data-lead-type="new">New Car</button>
+            <button class="tag-pill" data-lead-type="used">Used Car</button>
+            <button class="tag-pill" data-lead-type="finance">Finance</button>
+            <button class="tag-pill" data-lead-type="sell">Sell</button>
+          </div>
         </div>
         <div class="header-right">
           <button id="btn-refresh" class="btn ghost">Refresh</button>
@@ -29,7 +29,7 @@
         </div>
       </header>
 
-      <!-- Main two-column layout -->
+      <!-- Main layout -->
       <main class="dashboard-content">
         <!-- LEFT: tools -->
         <aside class="dashboard-sidebar">
@@ -86,9 +86,9 @@
           </section>
         </aside>
 
-        <!-- RIGHT: leads table + summary -->
+        <!-- RIGHT: leads -->
         <section class="dashboard-main">
-          <!-- Summary stats -->
+          <!-- Summary -->
           <div class="summary-row">
             <div class="summary-pill">
               <span class="summary-label">Total leads</span>
@@ -119,9 +119,11 @@
               <option value="in-progress">In-progress</option>
               <option value="closed">Closed</option>
             </select>
+            <input id="from-date" type="date" class="input" />
+            <input id="to-date" type="date" class="input" />
           </div>
 
-          <!-- Leads table -->
+          <!-- Table -->
           <div class="table-wrapper">
             <table class="leads-table">
               <thead>
@@ -129,13 +131,13 @@
                   <th>ID</th>
                   <th>Name</th>
                   <th>Phone</th>
+                  <th>Purpose</th>
                   <th>Status</th>
                   <th>Timestamp</th>
+                  <th>Action</th>
                 </tr>
               </thead>
-              <tbody id="leads-tbody">
-                <!-- rows injected via JS -->
-              </tbody>
+              <tbody id="leads-tbody"></tbody>
             </table>
             <div id="empty-state" class="empty-state">
               No leads yet. Once the bot receives WhatsApp messages, auto-ingested
@@ -153,22 +155,26 @@
       const emptyState = document.getElementById('empty-state');
       const searchInput = document.getElementById('search-input');
       const statusFilter = document.getElementById('status-filter');
+      const fromDateInput = document.getElementById('from-date');
+      const toDateInput = document.getElementById('to-date');
       const summaryTotal = document.getElementById('summary-total');
       const summaryAuto = document.getElementById('summary-auto');
       const summaryNew = document.getElementById('summary-new');
       const btnRefresh = document.getElementById('btn-refresh');
       const btnExport = document.getElementById('btn-export-csv');
-const tagButtons = Array.from(document.querySelectorAll('[data-lead-type]'));
+      const tagButtons = Array.from(
+        document.querySelectorAll('[data-lead-type]')
+      );
 
-let allLeads = [];
-let activeLeadType = ''; // matches data-lead-type
+      let allLeads = [];
+      let activeLeadType = ''; // '', 'new', 'used', 'finance', 'sell'
 
       async function fetchLeads() {
         try {
           const res = await fetch(API_BASE + '/crm/leads');
           if (!res.ok) throw new Error('HTTP ' + res.status);
           const data = await res.json();
-          allLeads = Array.isArray(data.leads || data) ? (data.leads || data) : [];
+          allLeads = Array.isArray(data.leads || data) ? data.leads || data : [];
           renderLeads();
         } catch (e) {
           console.error('Failed to load leads', e);
@@ -178,81 +184,158 @@ let activeLeadType = ''; // matches data-lead-type
       function renderLeads() {
         const q = (searchInput.value || '').trim().toLowerCase();
         const status = statusFilter.value;
+        const fromVal = fromDateInput.value;
+        const toVal = toDateInput.value;
 
-const filtered = allLeads.filter((lead) => {
-  const id = String(lead.id || lead.ID || '').toLowerCase();
-  const name = String(lead.name || lead.Name || '').toLowerCase();
-  const phone = String(lead.phone || lead.Phone || '').toLowerCase();
-  const st = String(lead.status || lead.Status || '').toLowerCase();
-  const leadType = String(lead.leadType || lead['Lead Type'] || '').toLowerCase();
+        const fromMs = fromVal ? Date.parse(fromVal) : null;
+        const toMs = toVal ? Date.parse(toVal + 'T23:59:59Z') : null;
 
-  const matchesSearch =
-    !q || id.includes(q) || name.includes(q) || phone.includes(q);
+        const filtered = allLeads.filter((lead) => {
+          const rawId = lead.id || lead.ID || '';
+          const name = String(lead.name || lead.Name || 'UNKNOWN');
+          const phone = String(lead.phone || lead.Phone || '');
+          const st = String(lead.status || lead.Status || '').toLowerCase();
+          const leadType = String(lead.leadType || lead['Lead Type'] || '').toLowerCase();
+          const enquiry =
+            lead.enquiry ||
+            lead.enquiryPurpose ||
+            lead.purpose ||
+            lead.carEnquired ||
+            lead['Car Enquired'] ||
+            '';
 
-  const matchesStatus = !status || st === status.toLowerCase();
+          const idLower = String(rawId).toLowerCase();
+          const nameLower = name.toLowerCase();
+          const phoneLower = phone.toLowerCase();
+          const enquiryLower = String(enquiry).toLowerCase();
 
-  const matchesLeadType = !activeLeadType || leadType === activeLeadType;
+          const matchesSearch =
+            !q ||
+            idLower.includes(q) ||
+            nameLower.includes(q) ||
+            phoneLower.includes(q) ||
+            enquiryLower.includes(q);
 
-  return matchesSearch && matchesStatus && matchesLeadType;
-});
+          const matchesStatus = !status || st === status.toLowerCase();
+          const matchesLeadType =
+            !activeLeadType || leadType === activeLeadType.toLowerCase();
+
+          // Date filter
+          const tsRaw = lead.timestamp || lead.Timestamp || '';
+          const tsMs = tsRaw ? Date.parse(tsRaw) : null;
+          let matchesDate = true;
+          if (fromMs !== null && tsMs !== null) matchesDate = matchesDate && tsMs >= fromMs;
+          if (toMs !== null && tsMs !== null) matchesDate = matchesDate && tsMs <= toMs;
+
+          return matchesSearch && matchesStatus && matchesLeadType && matchesDate;
+        });
 
         tbody.innerHTML = '';
         filtered.forEach((lead) => {
-          const tr = document.createElement('tr');
-
-          const id = lead.id || lead.ID || '';
+          const rawId = lead.id || lead.ID || '';
+          const phone = String(lead.phone || lead.Phone || '');
           const name = lead.name || lead.Name || 'UNKNOWN';
-          const phone = lead.phone || lead.Phone || '';
           const status = lead.status || lead.Status || '';
           const ts = lead.timestamp || lead.Timestamp || '';
 
+          const enquiry =
+            lead.enquiry ||
+            lead.enquiryPurpose ||
+            lead.purpose ||
+            lead.carEnquired ||
+            lead['Car Enquired'] ||
+            '';
+
+          // Hide ID if it's exactly equal to phone (to avoid duplicate number)
+          let idDisplay = rawId;
+          if (rawId && phone && String(rawId) === String(phone)) {
+            idDisplay = '';
+          }
+
+          const waLink = phone
+            ? `https://wa.me/${encodeURIComponent(phone)}`
+            : '';
+          const actionHtml = waLink
+            ? `<a href="${waLink}" target="_blank" rel="noopener noreferrer" class="wa-link">Open in WhatsApp</a>`
+            : '';
+
+          const tr = document.createElement('tr');
           tr.innerHTML = `
-            <td>${id}</td>
+            <td>${idDisplay}</td>
             <td>${name}</td>
             <td>${phone}</td>
-            <td>${status}</td>
+            <td>${enquiry || ''}</td>
+            <td><span class="status-chip status-${(status || '').toLowerCase()}">${status || ''}</span></td>
             <td>${ts}</td>
+            <td>${actionHtml}</td>
           `;
           tbody.appendChild(tr);
         });
 
-        emptyState.style.display = filtered.length ? 'none' : 'block';
+        if (!filtered.length) {
+          if (activeLeadType) {
+            emptyState.textContent = `No ${activeLeadType} leads yet. New ${activeLeadType} enquiries will appear here once the bot tags them.`;
+          } else {
+            emptyState.textContent =
+              'No leads match the current filters. Clear filters or wait for new WhatsApp enquiries.';
+          }
+          emptyState.style.display = 'block';
+        } else {
+          emptyState.style.display = 'none';
+        }
 
         // Summary
         const total = allLeads.length;
-        const auto = allLeads.filter(
-          (l) => String(l.status || l.Status || '').toLowerCase() === 'auto-ingested'
+        const autoCount = allLeads.filter(
+          (l) =>
+            String(l.status || l.Status || '').toLowerCase() === 'auto-ingested'
         ).length;
-        const newly = allLeads.filter(
+        const newCount = allLeads.filter(
           (l) => String(l.status || l.Status || '').toLowerCase() === 'new'
         ).length;
 
         summaryTotal.textContent = total;
-        summaryAuto.textContent = auto;
-        summaryNew.textContent = newly;
+        summaryAuto.textContent = autoCount;
+        summaryNew.textContent = newCount;
       }
 
-      // Export CSV – simply opens the /crm/leads endpoint as CSV if supported,
-      // or lets the user manually save JSON.
       async function exportCsv() {
         try {
           const res = await fetch(API_BASE + '/crm/leads');
           if (!res.ok) throw new Error('HTTP ' + res.status);
           const data = await res.json();
-          const leads = Array.isArray(data.leads || data) ? (data.leads || data) : [];
+          const leads = Array.isArray(data.leads || data) ? data.leads || data : [];
 
           if (!leads.length) return;
 
-          const cols = ['ID', 'Name', 'Phone', 'Status', 'Timestamp'];
+          const cols = [
+            'ID',
+            'Name',
+            'Phone',
+            'Purpose',
+            'Status',
+            'Timestamp'
+          ];
           const header = cols.join(',');
           const rows = leads.map((l) => {
-            const row = [
-              l.id || l.ID || '',
-              l.name || l.Name || '',
-              l.phone || l.Phone || '',
-              l.status || l.Status || '',
-              l.timestamp || l.Timestamp || '',
-            ];
+            const rawId = l.id || l.ID || '';
+            const phone = l.phone || l.Phone || '';
+            let idOut = rawId;
+            if (rawId && phone && String(rawId) === String(phone)) {
+              idOut = ''; // hide duplicate
+            }
+
+            const status = l.status || l.Status || '';
+            const ts = l.timestamp || l.Timestamp || '';
+            const enquiry =
+              l.enquiry ||
+              l.enquiryPurpose ||
+              l.purpose ||
+              l.carEnquired ||
+              l['Car Enquired'] ||
+              '';
+
+            const row = [idOut, l.name || l.Name || '', phone, enquiry, status, ts];
             return row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',');
           });
 
@@ -272,23 +355,23 @@ const filtered = allLeads.filter((lead) => {
       // Events
       searchInput.addEventListener('input', renderLeads);
       statusFilter.addEventListener('change', renderLeads);
+      fromDateInput.addEventListener('change', renderLeads);
+      toDateInput.addEventListener('change', renderLeads);
       btnRefresh.addEventListener('click', fetchLeads);
       btnExport.addEventListener('click', exportCsv);
-tagButtons.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    activeLeadType = btn.dataset.leadType || '';
 
-    tagButtons.forEach((b) => {
-      b.classList.toggle('active', b === btn);
-    });
+      tagButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          activeLeadType = btn.dataset.leadType || '';
+          tagButtons.forEach((b) =>
+            b.classList.toggle('active', b === btn)
+          );
+          renderLeads();
+        });
+      });
 
-    renderLeads();
-  });
-});
-
-      // Initial load
+      // Initial load + auto-refresh
       fetchLeads();
-      // Optional: auto-refresh every 30s
       setInterval(fetchLeads, 30000);
     </script>
   </body>

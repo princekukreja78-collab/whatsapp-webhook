@@ -1,22 +1,77 @@
 // routes/auto_ingest.cjs
-// Auto-ingest helper for MR.CAR → posts leads to CRM /crm/ingest
+// Central auto-ingest helper: called from webhook when a WhatsApp event arrives.
+// - Normalises basic lead fields
+// - Adds status, timestamp, leadType and enquiry
+// - POSTs to /crm/ingest (local or via CRM_URL)
 
 const fetch = (global.fetch) ? global.fetch : require('node-fetch');
 
-module.exports = async function autoIngest(enriched = {}) {
-  // Prefer CRM_URL from env (Render: ngrok URL; Local: optional override)
-  // Fallback: local server at 127.0.0.1:PORT (default 10000)
-  const portEnv = process.env.PORT || 10000;
-  const baseEnv = (process.env.CRM_URL || '').trim();
-  const baseUrl = (baseEnv || `http://127.0.0.1:${portEnv}`).replace(/\/+$/, '');
-
-  const url = `${baseUrl}/crm/ingest`;
+module.exports = async function autoIngest(opts) {
+  const DEBUG =
+    process.env.DEBUG === 'true' ||
+    process.env.DEBUG === '1' ||
+    process.env.DEBUG_VARIANT === 'true';
 
   try {
+    const nowIso = new Date().toISOString();
+
+    const fromRaw = (opts && opts.from) ? String(opts.from) : '';
+    const phone   = fromRaw.replace(/\D/g, '') || null;
+    const name    = (opts && opts.name) || 'UNKNOWN';
+    const lastMsg = (opts && opts.lastMessage ? String(opts.lastMessage) : '').trim();
+    const meta    = (opts && opts.meta) || {};
+
+    // --- Detect leadType from explicit meta or last message text ---
+    let leadType = (meta.leadType || '').toLowerCase();
+
+    if (!leadType && lastMsg) {
+      const lm = lastMsg.toLowerCase();
+      if (lm.includes('new car')) {
+        leadType = 'new';
+      } else if (lm.includes('used car') || lm.includes('pre-owned') || lm.includes('pre owned')) {
+        leadType = 'used';
+      } else if (lm.includes('loan') || lm.includes('emi') || lm.includes('finance')) {
+        leadType = 'finance';
+      } else if (lm.includes('sell') || lm.includes('sell my car')) {
+        leadType = 'sell';
+      }
+    }
+
+    // --- Build payload for /crm/ingest ---
+    const payload = {
+      // "id": if equal to phone, we'll hide duplicate in UI
+      id: phone || undefined,
+      name,
+      phone,
+      status: 'auto-ingested',
+      timestamp: nowIso,
+
+      // enquiry / purpose fields used by dashboard:
+      leadType,                            // 'new' | 'used' | 'finance' | 'sell' | ''
+      enquiry: lastMsg || undefined,       // last WhatsApp message text
+
+      // generic meta:
+      bot: opts.bot || 'MR.CAR',
+      channel: opts.channel || 'whatsapp',
+      meta
+    };
+
+    // --- Compute CRM base URL ---
+    const portEnv = process.env.PORT || 10000;
+    const rawBase =
+      (process.env.CRM_URL && process.env.CRM_URL.trim()) ||
+      `http://127.0.0.1:${portEnv}`;
+
+    const url = `${rawBase.replace(/\/+$/, '')}/crm/ingest`;
+
+    if (DEBUG) {
+      console.log('AUTO-INGEST: POST', url, 'payload:', payload);
+    }
+
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(enriched)
+      body: JSON.stringify(payload)
     });
 
     if (!res.ok) {
@@ -27,15 +82,15 @@ module.exports = async function autoIngest(enriched = {}) {
         res.statusText,
         text
       );
-    } else {
-      console.log('AUTO-INGEST: posted to', url, 'for', enriched.from || 'UNKNOWN');
+    } else if (DEBUG) {
+      const text = await res.text().catch(() => '');
+      console.log('AUTO-INGEST: /crm/ingest OK', res.status, text);
     }
-  } catch (e) {
+  } catch (err) {
     console.warn(
-      'AUTO-INGEST: posting to',
-      url,
-      'failed',
-      e && e.message ? e.message : e
+      'AUTO-INGEST: posting to /crm/ingest failed',
+      err && err.message ? err.message : err
     );
   }
 };
+

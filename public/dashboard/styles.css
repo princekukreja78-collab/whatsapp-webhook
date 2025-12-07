@@ -30,6 +30,12 @@ body {
   gap: 16px;
 }
 
+.header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .brand-title {
   display: flex;
   flex-direction: column;
@@ -46,6 +52,7 @@ body {
   font-size: 14px;
   opacity: 0.9;
 }
+
 .brand-tags {
   margin-top: 6px;
   display: flex;
@@ -69,7 +76,6 @@ body {
   border-color: #2f7bff;
   opacity: 1;
 }
-
 
 .header-right {
   display: flex;
@@ -242,6 +248,7 @@ body {
 /* Toolbar row */
 .toolbar-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 6px;
 }
@@ -282,6 +289,43 @@ body {
   background: #f3f4ff;
 }
 
+/* Status chips */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #374151;
+}
+
+.status-auto-ingested {
+  background: #f3f4ff;
+  border-color: #e0e7ff;
+  color: #1d4ed8;
+}
+
+.status-new {
+  background: #ecfeff;
+  border-color: #a5f3fc;
+  color: #0369a1;
+}
+
+.status-in-progress {
+  background: #fffbeb;
+  border-color: #facc15;
+  color: #854d0e;
+}
+
+.status-closed {
+  background: #ecfdf3;
+  border-color: #4ade80;
+  color: #166534;
+}
+
 /* Empty state */
 .empty-state {
   padding: 14px 12px;
@@ -297,6 +341,18 @@ body {
   color: rgba(245, 247, 255, 0.82);
 }
 
+/* WhatsApp link */
+.wa-link {
+  font-size: 12px;
+  color: #10b981;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.wa-link:hover {
+  text-decoration: underline;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .dashboard-header {
@@ -309,7 +365,7 @@ body {
   }
 
   .dashboard-main {
-    order: -1; /* show leads first on mobile */
+    order: -1; /* leads first on mobile */
   }
 }
 
