@@ -2225,20 +2225,19 @@ if (value.statuses && !value.messages) {
     }
     // ---- END RAG BLOCK ----
 
-        // save lead locally + CRM (non-blocking)
+         // save lead locally + CRM (non-blocking)
     try {
+      // derive service + purpose once
       const lastServiceValue = getLastService(from) || null;
       let purpose = 'general_query';
 
-      // Prefer lastService (NEW / USED / SELL / LOAN)
       if (lastServiceValue) {
         purpose = String(lastServiceValue).toLowerCase();
       } else if (msgText) {
-        // Fallback: infer from text if service not set
         const tLow = msgText.toLowerCase();
-        if (/used|pre[-\s]?owned|second[-\s]?hand/.test(tLow)) purpose = 'used';
-        else if (/sell my car|sell car|selling my car/.test(tLow)) purpose = 'sell';
-        else if (/loan|finance|emi|bullet/.test(tLow)) purpose = 'loan';
+        if (/used|pre[-\s]?owned|second[-\s]?hand/.test(tLow))         purpose = 'used';
+        else if (/sell my car|sell car|selling my car/.test(tLow))      purpose = 'sell';
+        else if (/loan|finance|emi|bullet/.test(tLow))                  purpose = 'loan';
         else if (/new car|on[-\s]?road|onroad|booking|price|quote/.test(tLow)) purpose = 'new';
       }
 
@@ -2249,12 +2248,15 @@ if (value.statuses && !value.messages) {
         name,
         lastMessage: msgText,
         service: lastServiceValue,
-        purpose,          // 👈 this is what CRM reads for the Purpose column
+        purpose,                // ✅ send to CRM core
         tags: [],
         meta: {}
       };
 
+      // send to central CRM (non-blocking)
       postLeadToCRM(lead).catch(() => {});
+
+      // also log a normalized copy into local file for /api/leads fallback
       let existing = safeJsonRead(LEADS_FILE);
       if (Array.isArray(existing)) {
         // ok
@@ -2263,10 +2265,24 @@ if (value.statuses && !value.messages) {
       } else {
         existing = [];
       }
-      existing.unshift({ from, name, text: msgText, ts: Date.now() });
+
+      existing.unshift({
+        ID: from,
+        Name: name,
+        Phone: from,
+        Status: 'auto-ingested',
+        Purpose: purpose,
+        lastMessage: msgText,
+        LeadType: 'whatsapp_query',
+        Timestamp: new Date().toISOString()
+      });
+
       existing = existing.slice(0, 1000);
       fs.writeFileSync(LEADS_FILE, JSON.stringify(existing, null, 2), 'utf8');
-      if (DEBUG) console.log('✅ Lead saved:', from, (msgText || '').slice(0, 120));
+
+      if (DEBUG) {
+        console.log('✅ Lead saved (local + CRM):', from, purpose, (msgText || '').slice(0, 120));
+      }
     } catch (e) {
       console.warn('lead save failed', e && e.message ? e.message : e);
     }
