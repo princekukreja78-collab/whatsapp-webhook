@@ -2645,33 +2645,6 @@ app.post('/webhook', async (req, res) => {
     } catch (e) {
       console.warn("AUTO-INGEST FAILED:", e?.message || e);
     }
-// ------------------------------------------------------------------
-// STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
-// ------------------------------------------------------------------
-try {
-  // Prefer parsed msgText + from from this webhook
-  const smartText = (typeof msgText === 'string' && msgText.trim())
-    ? msgText.trim()
-    : (lastMsgForAuto || '');
-
-  const smartFrom = from || senderForAuto || null;
-
-  if (smartText && smartFrom) {
-    const handled = await trySmartNewCarIntent(smartText, smartFrom);
-    if (handled) {
-      if (DEBUG) console.log("SMART NEW CAR INTENT handled.", { from: smartFrom, text: smartText });
-      return res.sendStatus(200);
-    }
-  } else if (DEBUG) {
-    console.log("SMART NEW CAR INTENT skipped (missing smartText or smartFrom)", {
-      smartText,
-      smartFrom
-    });
-  }
-} catch (e) {
-  console.warn("Smart intent engine failed:", e?.message || e);
-}
-
     // ---- WhatsApp delivery status tracking ----
 if (value.statuses && !value.messages) {
   for (const st of value.statuses) {
@@ -2750,6 +2723,38 @@ if (value.statuses && !value.messages) {
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
     }
+    // ------------------------------------------------------------------
+    // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
+    // ------------------------------------------------------------------
+    try {
+      const smartText = (typeof msgText === 'string' && msgText.trim())
+        ? msgText.trim()
+        : '';
+
+      const smartFrom = from || null;
+
+      if (smartText && smartFrom) {
+        const handled = await trySmartNewCarIntent(smartText, smartFrom);
+        if (handled) {
+          if (DEBUG) {
+            console.log("SMART NEW CAR INTENT handled.", {
+              from: smartFrom,
+              text: smartText
+            });
+          }
+          // We already replied from trySmartNewCarIntent
+          return res.sendStatus(200);
+        }
+      } else if (DEBUG) {
+        console.log("SMART NEW CAR INTENT skipped (missing smartText or smartFrom)", {
+          smartText,
+          smartFrom
+        });
+      }
+    } catch (e) {
+      console.warn("Smart intent engine failed:", e?.message || e);
+    }
+
     // ---- Admin alert for real incoming messages ----
     try {
       // Only if ADMIN_WA is set, we have a sender, and it’s not the admin number itself
