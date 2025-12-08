@@ -292,6 +292,39 @@ const OpenAI = require("openai");
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY
 });
+// === AI Vision: analyze car fault from an image using OpenAI ===
+async function analyzeCarImageFaultWithOpenAI(imageUrl, userText) {
+  const prompt = `
+You are an experienced car service advisor.
+
+The customer has sent a photo of their car and said:
+"${userText}"
+
+Tasks:
+- Look at the image and describe any visible damage, dents, scratches, leaks, smoke, tyre wear, rust, or misalignment.
+- If nothing clear is visible, say that clearly.
+- Give 2–3 possible causes in simple language.
+- Suggest whether it is likely safe to drive or they should visit a workshop urgently.
+- Always end with: "This is an approximate opinion based only on the photo. A physical inspection at the workshop is recommended."
+`.trim();
+
+  const response = await openai.responses.create({
+    model: "gpt-4.1-mini", // or "gpt-4o-mini" if that's what you're using
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: prompt },
+          { type: "input_image", image_url: { url: imageUrl } }
+        ]
+      }
+    ]
+  });
+
+  // Node SDK v4: easiest is to use output_text
+  const text = response.output_text || "";
+  return text.trim();
+}
 
 const { findRelevantChunks } = require("./vector_search.cjs");
 const { getRAG } = require("./rag_loader.cjs");
@@ -1773,6 +1806,11 @@ async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
   const t = String(msgText || "").toLowerCase().trim();
 
+  // If user is clearly asking for technical specs, let main new-car flow handle it
+  if (/\b(spec|specs|specification|specifications)\b/i.test(t)) {
+    return false; // don't consume, allow tryQuickNewCarQuote to run
+  }
+
   // ------------------------------
   // DICTIONARIES
   // ------------------------------
@@ -2260,23 +2298,23 @@ async function tryQuickNewCarQuote(msgText, to) {
         `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
       );
     }
-    lines.push('\n*Terms & Conditions Apply ✅*');
-       // --- SPEC SHEET: first try RAG, then fallback to Signature AI ---
+        lines.push('\n*Terms & Conditions Apply ✅*');
+
+    // --- SPEC SHEET: first try RAG, then fallback to Signature AI ---
     try {
-      // trigger only when user clearly asks for specs
-      const specIntent = /(specs?|specification[s]?|full\s+specs?|technical\s+specs?)/i;
+      // 🔥 Make "specs / specification / features" all work
+      const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
 
       if (specIntent.test(t)) {
         const specQuery = `${best.brand} ${modelName} ${variantStr} full technical specifications for India (engine, bhp, torque, seating, dimensions, tyres, safety, mileage).`;
 
         let specText = "";
 
-        // 1️⃣ Try direct RAG / vector search first (your internal knowledge)
+        // 1️⃣ Try direct RAG / vector search first
         try {
           if (typeof findRelevantChunks === "function") {
             const chunks = await findRelevantChunks(specQuery, 4);
             if (Array.isArray(chunks) && chunks.length) {
-              // join top chunks into a spec-style answer
               const joined = chunks
                 .map(c => (c.text || c.content || "").trim())
                 .filter(Boolean)
@@ -2291,7 +2329,7 @@ async function tryQuickNewCarQuote(msgText, to) {
           if (DEBUG) console.warn("Spec RAG (chunks) failed:", ragErr && (ragErr.message || ragErr));
         }
 
-        // 2️⃣ If RAG did not give a good answer → fallback to Signature AI
+        // 2️⃣ Fallback → Signature AI
         if (!specText && typeof SignatureAI_RAG === "function") {
           const specPrompt = `
 You are Mr.Car Signature AI.
@@ -2320,7 +2358,6 @@ Keep it concise, readable on WhatsApp and avoid marketing fluff.
           }
         }
 
-        // 3️⃣ Append specs if we got anything
         if (specText) {
           lines.push("");
           lines.push("*Key Specifications (approx., India spec)*");
@@ -2478,7 +2515,20 @@ app.post('/webhook', async (req, res) => {
     try {
       const msg     = value.messages?.[0];
       const contact = value.contacts?.[0];
+// ---- 1. FORWARD ANY PHOTO USER SENDS TO ADMIN ----
+try {
+  if (msg && msg.type === "image" && msg.image?.id && ADMIN_WA && msg.from !== ADMIN_WA) {
+    await waForwardImage(
+      ADMIN_WA,
+      msg.image.id,
+      `📷 Customer sent an image\nFrom: ${msg.from}\nName: ${contact?.profile?.name || "UNKNOWN"}`
+    );
 
+    if (DEBUG) console.log("Forwarded user image to admin WA:", msg.image.id);
+  }
+} catch (err) {
+  console.warn("Forward image to admin failed:", err?.message || err);
+}
       if (msg && msg.from) {
         const senderForAuto     = msg.from;
         const senderNameForAuto = contact?.profile?.name || senderForAuto;
@@ -2487,6 +2537,33 @@ app.post('/webhook', async (req, res) => {
           msg.interactive?.button_reply?.title ||
           msg.interactive?.list_reply?.title ||
           "";
+  // ---- AI VISION: if photo + problem words, run fault analysis ----
+  try {
+    if (msg.type === "image" && msg.image?.id) {
+      const caption = msg.image?.caption || "";
+      const combinedText = `${lastMsgForAuto} ${caption}`.toLowerCase();
+
+      const faultIntent = /\b(issue|problem|fault|damage|dent|scratch|leak|oil|noise|sound|smoke|crack|broken|rust)\b/.test(combinedText);
+
+      if (faultIntent) {
+        const mediaUrl = await getMediaUrl(msg.image.id);
+        if (mediaUrl) {
+          const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
+          await waSendText(
+            senderForAuto,
+            `*Preliminary check based on your photo:*\n\n${analysis}`
+          );
+          setLastService(senderForAuto, "FAULT_ANALYSIS");
+          // If you want to stop further processing for this message:
+          // return res.sendStatus(200);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("AI vision fault analysis failed:", err && (err.message || err));
+    // Don't break the rest of the flow; just continue.
+  }
+
 // ------------------------------------------------------------------
 // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
 // ------------------------------------------------------------------
@@ -3227,6 +3304,53 @@ async function waSendImage(to, mediaId, caption="") {
   const j = await r.json();
   return j;
 }
+
+// === Get a temporary media URL from WhatsApp for a given media_id ===
+async function getMediaUrl(mediaId) {
+  const metaUrl = `https://graph.facebook.com/v21.0/${mediaId}`;
+  const resp = await fetch(metaUrl, {
+    headers: {
+      Authorization: `Bearer ${META_TOKEN}`
+    }
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`getMediaUrl failed: ${resp.status} ${txt}`);
+  }
+
+  const json = await resp.json();
+  return json.url || null;
+}
+
+// === Forward existing WhatsApp media to another number ===
+async function waForwardImage(to, mediaId, caption = "") {
+  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "image",
+    image: {
+      id: mediaId,
+      caption
+    }
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${META_TOKEN}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await resp.json();
+  if (DEBUG) console.log("waForwardImage →", JSON.stringify(data));
+  return data;
+}
+
 
 // === uploadMediaToWhatsApp: upload a local file to WhatsApp Cloud and return media_id ===
 async function uploadMediaToWhatsApp(localPath) {
