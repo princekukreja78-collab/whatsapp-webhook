@@ -308,21 +308,22 @@ Tasks:
 - Always end with: "This is an approximate opinion based only on the photo. A physical inspection at the workshop is recommended."
 `.trim();
 
-  const response = await openai.responses.create({
-    model: "gpt-4.1-mini", // or "gpt-4o-mini" if that's what you're using
-    input: [
+  const model = process.env.OPENAI_VISION_MODEL || "gpt-4o-mini";
+
+  const completion = await openai.chat.completions.create({
+    model,
+    messages: [
       {
         role: "user",
         content: [
-          { type: "input_text", text: prompt },
-          { type: "input_image", image_url: { url: imageUrl } }
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: imageUrl } }
         ]
       }
     ]
   });
 
-  // Node SDK v4: easiest is to use output_text
-  const text = response.output_text || "";
+  const text = completion?.choices?.[0]?.message?.content || "";
   return text.trim();
 }
 
@@ -2511,24 +2512,11 @@ app.post('/webhook', async (req, res) => {
       value  = {};
     }
 
-    /* AUTO-INGEST using actual WhatsApp message fields */
+          /* AUTO-INGEST using actual WhatsApp message fields + photo forward + AI vision */
     try {
       const msg     = value.messages?.[0];
       const contact = value.contacts?.[0];
-// ---- 1. FORWARD ANY PHOTO USER SENDS TO ADMIN ----
-try {
-  if (msg && msg.type === "image" && msg.image?.id && ADMIN_WA && msg.from !== ADMIN_WA) {
-    await waForwardImage(
-      ADMIN_WA,
-      msg.image.id,
-      `📷 Customer sent an image\nFrom: ${msg.from}\nName: ${contact?.profile?.name || "UNKNOWN"}`
-    );
 
-    if (DEBUG) console.log("Forwarded user image to admin WA:", msg.image.id);
-  }
-} catch (err) {
-  console.warn("Forward image to admin failed:", err?.message || err);
-}
       if (msg && msg.from) {
         const senderForAuto     = msg.from;
         const senderNameForAuto = contact?.profile?.name || senderForAuto;
@@ -2537,32 +2525,83 @@ try {
           msg.interactive?.button_reply?.title ||
           msg.interactive?.list_reply?.title ||
           "";
-  // ---- AI VISION: if photo + problem words, run fault analysis ----
-  try {
-    if (msg.type === "image" && msg.image?.id) {
-      const caption = msg.image?.caption || "";
-      const combinedText = `${lastMsgForAuto} ${caption}`.toLowerCase();
 
-      const faultIntent = /\b(issue|problem|fault|damage|dent|scratch|leak|oil|noise|sound|smoke|crack|broken|rust)\b/.test(combinedText);
+        // ---- 1. FORWARD ANY PHOTO USER SENDS TO ADMIN ----
+        try {
+          if (msg.type === "image" && msg.image?.id && ADMIN_WA && senderForAuto !== ADMIN_WA) {
+            await waForwardImage(
+              ADMIN_WA,
+              msg.image.id,
+              `📷 Customer sent an image\nFrom: ${senderForAuto}\nName: ${senderNameForAuto || "UNKNOWN"}`
+            );
+            if (DEBUG) console.log("Forwarded user image to admin WA:", msg.image.id);
+          }
+        } catch (err) {
+          console.warn("Forward image to admin failed:", err?.message || err);
+        }
 
-      if (faultIntent) {
-        const mediaUrl = await getMediaUrl(msg.image.id);
-        if (mediaUrl) {
-          const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
-          await waSendText(
-            senderForAuto,
-            `*Preliminary check based on your photo:*\n\n${analysis}`
+        // ---- 2. AI VISION: if photo + problem words, run fault analysis (non-blocking) ----
+        try {
+          if (msg.type === "image" && msg.image?.id) {
+            const caption = msg.image?.caption || "";
+            const combinedText = `${lastMsgForAuto} ${caption}`.toLowerCase();
+
+            const faultIntent =
+              /\b(issue|problem|fault|damage|dent|scratch|leak|oil|noise|sound|smoke|crack|broken|rust)\b/.test(combinedText);
+
+            if (faultIntent) {
+              const mediaUrl = await getMediaUrl(msg.image.id);
+              if (mediaUrl) {
+                const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
+                await waSendText(
+                  senderForAuto,
+                  `*Preliminary check based on your photo:*\n\n${analysis}`
+                );
+                setLastService(senderForAuto, "FAULT_ANALYSIS");
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("AI vision fault analysis failed:", err?.message || err);
+          // Do not return; let rest of flow continue
+        }
+
+        // ---- 3. AUTO-INGEST TO CRM (existing behaviour) ----
+        await autoIngest({
+          bot: "MR.CAR",
+          channel: "whatsapp",
+          from: senderForAuto,
+          name: senderNameForAuto,
+          lastMessage: lastMsgForAuto,
+          meta: { source: "webhook-auto" }
+        });
+
+        // ---- 4. ADMIN TEXT ALERT (existing behaviour) ----
+        try {
+          if (ADMIN_WA && senderForAuto !== ADMIN_WA) {
+            const body =
+              `🔔 *New Lead Received*\n\n` +
+              `👤 Name: ${senderNameForAuto}\n` +
+              `📱 Phone: ${senderForAuto}\n` +
+              `💬 Message: ${lastMsgForAuto || 'No text'}\n` +
+              `⏰ Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
+
+            await waSendText(ADMIN_WA, body);
+
+            if (DEBUG) {
+              console.log('Admin alert sent for incoming message', { from: senderForAuto });
+            }
+          }
+        } catch (err) {
+          console.warn(
+            'Admin alert send failed:',
+            err && err.message ? err.message : err
           );
-          setLastService(senderForAuto, "FAULT_ANALYSIS");
-          // If you want to stop further processing for this message:
-          // return res.sendStatus(200);
         }
       }
+    } catch (e) {
+      console.warn("AUTO-INGEST FAILED:", e?.message || e);
     }
-  } catch (err) {
-    console.warn("AI vision fault analysis failed:", err && (err.message || err));
-    // Don't break the rest of the flow; just continue.
-  }
 
 // ------------------------------------------------------------------
 // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
@@ -2575,36 +2614,7 @@ try {
 } catch (e) {
   console.warn("Smart intent engine failed:", e?.message || e);
 }
-        await autoIngest({
-  bot: "MR.CAR",
-  channel: "whatsapp",
-  from: senderForAuto,
-  name: senderNameForAuto,
-  lastMessage: lastMsgForAuto,
-  meta: { source: "webhook-auto" }
-});
-
-// --- Admin Alert: New Lead Received (IST time) ---
-try {
-  if (ADMIN_WA && senderForAuto !== ADMIN_WA) {
-    await waSendText(
-      ADMIN_WA,
-      `🔔 *New Lead Received*\n\n` +
-      `👤 Name: ${senderNameForAuto}\n` +
-      `📱 Phone: ${senderForAuto}\n` +
-      `💬 Message: ${lastMsgForAuto || 'No text'}\n` +
-      `⏰ Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
-    );
-  }
-} catch (e) {
-  console.warn("Admin alert failed:", e?.message || e);
-}
-
-      }
-    } catch (e) {
-      console.warn("AUTO-INGEST FAILED:", e?.message || e);
-    }
-
+        
     // ---- WhatsApp delivery status tracking ----
 if (value.statuses && !value.messages) {
   for (const st of value.statuses) {
