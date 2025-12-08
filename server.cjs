@@ -1619,6 +1619,215 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
     return null;
   }
 }
+// ============================================================================
+// SMART NEW-CAR INTENT ENGINE — SAFE ADDITIVE BLOCK
+// Place ABOVE tryQuickNewCarQuote()
+// This does NOT modify existing logic; only handles new intents FIRST
+// ============================================================================
+
+async function trySmartNewCarIntent(msgText, to) {
+  if (!msgText) return false;
+  const t = msgText.toLowerCase().trim();
+
+  // ------------------------------
+  // DICTIONARIES
+  // ------------------------------
+  const MODEL_MAP = {
+    "fortuner": ["fortu", "fortner", "4tuner", "fourtuner"],
+    "innova crysta": ["crysta", "inova"],
+    "innova hycross": ["hycross", "hykros"],
+    "hyryder": ["hyrider", "hy rider"],
+    "venue": ["veneu"],
+    "creta": ["kreta"],
+    "city": ["honda city"],
+    "xuv700": ["700", "x7", "mahindra 700"],
+    "scorpio n": ["scorpion", "scropio"],
+    "thar": ["thaar"],
+    "gle": ["g l e", "gle300", "gle350"],
+    "gls": ["g l s"],
+    "xc40": ["xc 40", "40"],
+    "xc60": ["xc 60", "60"],
+    "x5": ["x 5"],
+    "x7": ["x 7"]
+  };
+
+  const FEATURE_TOPICS = [
+    "adas","cvt","at","mt","diesel","hybrid","ev","awd","4x4","cruise","toyota safety sense",
+    "airbags","turbo","sunroof","engine","mileage","bs6","e20"
+  ];
+
+  const WAITING_PERIODS = {
+    "fortuner": "4–12 weeks depending on color & variant.",
+    "innova hycross": "8–20 weeks (higher for ZX(O) Hybrid).",
+    "scorpio n": "4–16 weeks.",
+    "xuv700": "6–20 weeks.",
+    "creta": "2–6 weeks.",
+    "venue": "1–4 weeks.",
+    "hyryder": "6–10 weeks."
+  };
+
+  // ------------------------------
+  // 1️⃣ COMPARISON INTENT
+  // ------------------------------
+  if (/vs|compare|better|difference between/.test(t)) {
+    const foundModels = [];
+
+    for (const [model, aliases] of Object.entries(MODEL_MAP)) {
+      if (t.includes(model) || aliases.some(a => t.includes(a))) {
+        foundModels.push(model);
+      }
+    }
+
+    if (foundModels.length >= 2) {
+      const m1 = foundModels[0];
+      const m2 = foundModels[1];
+
+      const comparison = await SignatureAI_RAG(
+        `Provide a clean customer-friendly comparison between ${m1} and ${m2} covering:
+         - Price
+         - Engine & performance
+         - Mileage
+         - Features & safety
+         - Comfort & space
+         - Best for which type of customer`
+      );
+
+      await waSendText(to, `*${m1} vs ${m2} — Detailed Comparison*\n\n${comparison}`);
+      setLastService(to, "NEW");
+      return true;
+    }
+
+    // Comparison requested but only one model detected
+    await waSendText(to, "Please tell me the two car models you want me to compare (e.g., *Creta vs Hyryder*).");
+    return true;
+  }
+
+  // ------------------------------
+  // 2️⃣ BUDGET INTENT (SUV / Sedan / Hatch)
+  // ------------------------------
+  let budget = null;
+  const budgetMatch = t.match(/\b(\d{1,2})\s?(lakh|lac|lacs|lakhs)\b/);
+  if (budgetMatch) budget = Number(budgetMatch[1]) * 100000;
+
+  const priceNumber = t.match(/\b(\d{5,7})\b/);
+  if (!budget && priceNumber) {
+    const v = Number(priceNumber[1]);
+    if (v >= 300000 && v <= 4000000) budget = v;
+  }
+
+  const wantsSUV = /\bsuv\b/.test(t);
+  const wantsSedan = /\bsedan\b/.test(t);
+  const wantsHatch = /\bhatch|hatchback\b/.test(t);
+
+  if (budget) {
+    const CARS = [
+      { model:"Toyota Glanza",        type:"HATCH", price:750000 },
+      { model:"Toyota Hyryder",       type:"SUV",   price:1200000 },
+      { model:"Toyota Rumion",        type:"MPV",   price:1100000 },
+      { model:"Hyundai Creta",        type:"SUV",   price:1150000 },
+      { model:"Hyundai Venue",        type:"SUV",   price:900000 },
+      { model:"Honda City",           type:"SEDAN", price:1200000 },
+      { model:"Maruti Brezza",        type:"SUV",   price:900000 },
+      { model:"Kia Sonet",            type:"SUV",   price:900000 },
+      { model:"Kia Carens",           type:"MPV",   price:1100000 }
+    ];
+
+    const picks = CARS.filter(c => c.price <= budget &&
+      (
+        (wantsSUV && c.type === "SUV") ||
+        (wantsSedan && c.type === "SEDAN") ||
+        (wantsHatch && c.type === "HATCH") ||
+        (!wantsSUV && !wantsSedan && !wantsHatch)
+      )
+    );
+
+    if (picks.length > 0) {
+      let out = [`*Best New Car Options Under ₹${fmtMoney(budget)}*`];
+      if (wantsSUV) out.push("• Segment: *SUV*");
+      else if (wantsSedan) out.push("• Segment: *Sedan*");
+      else if (wantsHatch) out.push("• Segment: *Hatchback*");
+
+      out.push("");
+
+      picks.slice(0,6).forEach(c=>{
+        out.push(`• *${c.model}* — starts at ₹${fmtMoney(c.price)}`);
+      });
+
+      out.push("\nTell me the model name for exact on-road price, offers & EMI.");
+
+      await waSendText(to, out.join("\n"));
+      setLastService(to, "NEW");
+      return true;
+    }
+
+    await waSendText(to, `Your budget is *₹${fmtMoney(budget)}*. Do you prefer *SUV*, *Sedan* or *Hatchback*?`);
+    return true;
+  }
+
+  // ------------------------------
+  // 3️⃣ FEATURE EXPLANATION MODE (RAG)
+  // ------------------------------
+  for (const ft of FEATURE_TOPICS) {
+    if (t.includes(ft)) {
+      const expl = await SignatureAI_RAG(
+        `Explain "${ft}" in simple car-buyer language.`
+      );
+      await waSendText(to, `*${ft.toUpperCase()} Explained:*\n${expl}`);
+      setLastService(to, "NEW");
+      return true;
+    }
+  }
+
+  // ------------------------------
+  // 4️⃣ RECOMMENDATION MODE
+  // ------------------------------
+  if (/which car should i buy|recommend|suggest.*car|help me choose/.test(t)) {
+    await waSendText(to,
+      "*I'd love to recommend a perfect new car for you!*\n\n" +
+      "Please tell me:\n" +
+      "1) Your *budget*\n" +
+      "2) Preferred *body type* (SUV / Sedan / Hatchback)\n" +
+      "3) *City*\n\n" +
+      "I’ll suggest the best 3 options with on-road pricing."
+    );
+    return true;
+  }
+
+  // ------------------------------
+  // 5️⃣ WAITING PERIOD & DELIVERY
+  // ------------------------------
+  for (const [model, wait] of Object.entries(WAITING_PERIODS)) {
+    if (t.includes(model.split(" ")[0])) {
+      await waSendText(to,
+        `*${model.toUpperCase()} Waiting Period*\n${wait}\n\n` +
+        "Please tell me your preferred *color* and *variant* to check fastest delivery."
+      );
+      setLastService(to, "NEW");
+      return true;
+    }
+  }
+
+  // ------------------------------
+  // 6️⃣ FINANCE / EMI MODE
+  // ------------------------------
+  if (/emi|finance|loan|0 down|zero down/.test(t)) {
+    await waSendText(to,
+      "To calculate your EMI, please tell me:\n" +
+      "• Car model (e.g., Fortuner ZX, Creta SX, City VX)\n" +
+      "• City\n" +
+      "• Individual or Corporate profile\n\n" +
+      "I'll instantly calculate the 60-month EMI and down payment."
+    );
+    return true;
+  }
+
+  // If no smart intent detected → let main function run
+  return false;
+}
+
+// ============================================================================
+// END OF SMART BLOCK
+// ============================================================================
 
 // ---------------- tryQuickNewCarQuote ----------------
 async function tryQuickNewCarQuote(msgText, to) {
@@ -2057,7 +2266,17 @@ app.post('/webhook', async (req, res) => {
           msg.interactive?.button_reply?.title ||
           msg.interactive?.list_reply?.title ||
           "";
-
+// ------------------------------------------------------------------
+// STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
+// ------------------------------------------------------------------
+try {
+  if (await trySmartNewCarIntent(lastMsgForAuto, senderForAuto)) {
+    if (DEBUG) console.log("SMART NEW CAR INTENT handled.");
+    return res.sendStatus(200); 
+  }
+} catch (e) {
+  console.warn("Smart intent engine failed:", e?.message || e);
+}
         await autoIngest({
   bot: "MR.CAR",
   channel: "whatsapp",
