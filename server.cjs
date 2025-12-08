@@ -292,38 +292,76 @@ const OpenAI = require("openai");
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY
 });
-// === AI Vision: analyze car fault from an image using OpenAI ===
-async function analyzeCarImageFaultWithOpenAI(imageUrl, userText) {
-  const prompt = `
-You are an experienced car service advisor.
+// === AI Vision: Analyze car image for faults + repaint + upgrades + PPF advice ===
+async function analyzeCarImageFaultWithOpenAI(imageUrl, userText = "") {
+  const model = process.env.OPENAI_VISION_MODEL || process.env.ENGINE_USED || "gpt-4o-mini";
 
-The customer has sent a photo of their car and said:
-"${userText}"
+  const systemPrompt = `
+You are *MR.CAR* – a professional car evaluator, bodyshop and detailing advisor.
+You ONLY see 1–2 photos plus a short text from the customer.
 
-Tasks:
-- Look at the image and describe any visible damage, dents, scratches, leaks, smoke, tyre wear, rust, or misalignment.
-- If nothing clear is visible, say that clearly.
-- Give 2–3 possible causes in simple language.
-- Suggest whether it is likely safe to drive or they should visit a workshop urgently.
-- Always end with: "This is an approximate opinion based only on the photo. A physical inspection at the workshop is recommended."
+Your goals:
+1) Identify visible issues or risks (mechanical, body, tires, lights, glass, rust, leaks, etc.).
+2) Comment on *paint condition* and *possible repainting*:
+   - Look for colour mismatch between panels.
+   - Uneven orange-peel texture or waviness on one panel vs others.
+   - Masking/paint lines near rubber, chrome, badges, door handles.
+   - Overspray on rubbers or trims.
+   - Unusual panel gaps or alignment.
+   - Scratches/buff marks indicating heavy polishing.
+   You are NOT a lab – clearly state this is a visual opinion, not 100% proof.
+3) Give *PPF / coating / detailing* advice:
+   - When is PPF advisable? (highway usage, new car, expensive colour, lots of chips risk)
+   - Suggest whether full body PPF, frontal kit (bumper+bonnet+mirrors), or only high-contact areas.
+   - Mention cheaper alternatives like ceramic/graphene coating, wax, or only repaint+polish if needed.
+4) Give *upgrade suggestions*:
+   - If interior visible: suggest seat cover type (fabric, PU, leather), colour combos (eg. black–tan, black–red) and possible carbon-fibre or piano-black trim areas (steering, central console, door switch panels).
+   - If exterior mainly visible: suggest alloys, dechroming, black roof, mild spoilers, projector/LED headlamp upgrades – BUT keep it classy, not boy-racer.
+5) If the user text mentions "problem", "noise", "check engine", "warning light", etc., treat that as a service concern and first address that.
+
+Output format (very important):
+1) *Quick Summary* – 2–3 lines.
+2) *Visible Issues / Faults* – bullet points (or "None clearly visible").
+3) *Repaint / Bodywork Opinion* – explain if any panel looks possibly repainted and WHY, with low/medium/high confidence.
+4) *PPF / Protection Advice* – what you recommend (eg. "frontal kit PPF", "only touch-ups and polish", etc.).
+5) *Interior / Exterior Upgrade Ideas* – concise, 3–5 bullets max.
+6) *Disclaimer* – remind that this is based only on photos and is not a physical inspection.
 `.trim();
 
-  const model = process.env.OPENAI_VISION_MODEL || "gpt-4o-mini";
+  const userPrompt = `
+User context/message (may be empty):
+"${userText || "N/A"}"
+
+Now analyse the attached car photo(s) and respond in the requested format.
+`.trim();
 
   const completion = await openai.chat.completions.create({
     model,
     messages: [
       {
+        role: "system",
+        content: systemPrompt
+      },
+      {
         role: "user",
         content: [
-          { type: "text", text: prompt },
-          { type: "image_url", image_url: { url: imageUrl } }
+          { type: "text", text: userPrompt },
+          {
+            type: "image_url",
+            image_url: { url: imageUrl }
+          }
         ]
       }
     ]
   });
 
-  const text = completion?.choices?.[0]?.message?.content || "";
+  const text =
+    (completion.choices &&
+      completion.choices[0] &&
+      completion.choices[0].message &&
+      completion.choices[0].message.content) ||
+    "Sorry, I could not clearly understand this photo. Please send a clearer image.";
+
   return text.trim();
 }
 
@@ -2607,19 +2645,33 @@ app.post('/webhook', async (req, res) => {
     } catch (e) {
       console.warn("AUTO-INGEST FAILED:", e?.message || e);
     }
-
 // ------------------------------------------------------------------
 // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
 // ------------------------------------------------------------------
 try {
-  if (await trySmartNewCarIntent(lastMsgForAuto, senderForAuto)) {
-    if (DEBUG) console.log("SMART NEW CAR INTENT handled.");
-    return res.sendStatus(200); 
+  // Prefer parsed msgText + from from this webhook
+  const smartText = (typeof msgText === 'string' && msgText.trim())
+    ? msgText.trim()
+    : (lastMsgForAuto || '');
+
+  const smartFrom = from || senderForAuto || null;
+
+  if (smartText && smartFrom) {
+    const handled = await trySmartNewCarIntent(smartText, smartFrom);
+    if (handled) {
+      if (DEBUG) console.log("SMART NEW CAR INTENT handled.", { from: smartFrom, text: smartText });
+      return res.sendStatus(200);
+    }
+  } else if (DEBUG) {
+    console.log("SMART NEW CAR INTENT skipped (missing smartText or smartFrom)", {
+      smartText,
+      smartFrom
+    });
   }
 } catch (e) {
   console.warn("Smart intent engine failed:", e?.message || e);
 }
-        
+
     // ---- WhatsApp delivery status tracking ----
 if (value.statuses && !value.messages) {
   for (const st of value.statuses) {
