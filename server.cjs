@@ -2261,11 +2261,39 @@ async function tryQuickNewCarQuote(msgText, to) {
       );
     }
     lines.push('\n*Terms & Conditions Apply ✅*');
-    // --- OPTIONAL: add detailed specs when user seems to ask for them ---
+       // --- SPEC SHEET: first try RAG, then fallback to Signature AI ---
     try {
-      const specIntent = /\b(specs?|specification|specifications|features|details?|engine|bhp|power|torque|seating|seat|dimension|dimensions|tyre|tire)\b/i;
-      if (specIntent.test(String(msgText || ''))) {
-        const specPrompt = `
+      // trigger only when user clearly asks for specs
+      const specIntent = /(specs?|specification[s]?|full\s+specs?|technical\s+specs?)/i;
+
+      if (specIntent.test(t)) {
+        const specQuery = `${best.brand} ${modelName} ${variantStr} full technical specifications for India (engine, bhp, torque, seating, dimensions, tyres, safety, mileage).`;
+
+        let specText = "";
+
+        // 1️⃣ Try direct RAG / vector search first (your internal knowledge)
+        try {
+          if (typeof findRelevantChunks === "function") {
+            const chunks = await findRelevantChunks(specQuery, 4);
+            if (Array.isArray(chunks) && chunks.length) {
+              // join top chunks into a spec-style answer
+              const joined = chunks
+                .map(c => (c.text || c.content || "").trim())
+                .filter(Boolean)
+                .join("\n");
+
+              if (joined && joined.length > 80) {
+                specText = joined;
+              }
+            }
+          }
+        } catch (ragErr) {
+          if (DEBUG) console.warn("Spec RAG (chunks) failed:", ragErr && (ragErr.message || ragErr));
+        }
+
+        // 2️⃣ If RAG did not give a good answer → fallback to Signature AI
+        if (!specText && typeof SignatureAI_RAG === "function") {
+          const specPrompt = `
 You are Mr.Car Signature AI.
 
 Give a clean, bullet-point technical specification sheet for:
@@ -2280,17 +2308,27 @@ Include (India-spec, approximate ok):
 - Tyre & wheel size
 - Key safety features (airbags, ABS, ESP, ADAS if applicable)
 Keep it concise, readable on WhatsApp and avoid marketing fluff.
-        `.trim();
+          `.trim();
 
-        const specText = await SignatureAI_RAG(specPrompt);
-        if (specText && specText.trim()) {
-          lines.push('');
-          lines.push('*Key Specifications (approx., India spec)*');
-          lines.push(specText.trim());
+          try {
+            const aiSpec = await SignatureAI_RAG(specPrompt);
+            if (aiSpec && aiSpec.trim().length > 40) {
+              specText = aiSpec.trim();
+            }
+          } catch (aiErr) {
+            if (DEBUG) console.warn("Spec SignatureAI_RAG failed:", aiErr && (aiErr.message || aiErr));
+          }
+        }
+
+        // 3️⃣ Append specs if we got anything
+        if (specText) {
+          lines.push("");
+          lines.push("*Key Specifications (approx., India spec)*");
+          lines.push(specText);
         }
       }
     } catch (err) {
-      if (DEBUG) console.warn('Spec RAG failed:', err && (err.message || err));
+      if (DEBUG) console.warn("Spec block failed:", err && (err.message || err));
     }
 
     await waSendText(to, lines.join('\n'));
