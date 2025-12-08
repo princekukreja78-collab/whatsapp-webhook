@@ -374,6 +374,8 @@ const express = require('express');
 const app = express();
 const FormData = require('form-data');
 const crmIngestHandler = require('./routes/crm_ingest.cjs');
+const autoIngest = require('./routes/auto_ingest.cjs');
+
 
 // ---- Delivery status tracking (CRM + console) ----
 const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
@@ -3377,22 +3379,80 @@ async function waSendImage(to, mediaId, caption="") {
   return j;
 }
 
-// === Get a temporary media URL from WhatsApp for a given media_id ===
+// === WhatsApp media helper: download and expose via our server ===
 async function getMediaUrl(mediaId) {
-  const metaUrl = `https://graph.facebook.com/v21.0/${mediaId}`;
-  const resp = await fetch(metaUrl, {
-    headers: {
-      Authorization: `Bearer ${META_TOKEN}`
+  try {
+    if (!mediaId) throw new Error("No mediaId provided");
+
+    if (!META_TOKEN) {
+      throw new Error("META_TOKEN missing – cannot fetch media");
     }
-  });
 
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`getMediaUrl failed: ${resp.status} ${txt}`);
+    const GRAPH_API_BASE = process.env.GRAPH_API_BASE || "https://graph.facebook.com/v21.0";
+    const baseUrl = process.env.PUBLIC_BASE_URL || "";
+
+    if (!baseUrl) {
+      throw new Error("PUBLIC_BASE_URL not set – cannot expose media URL");
+    }
+
+    // 1) First call: get media metadata (URL) from Graph API
+    const metaResp = await fetch(`${GRAPH_API_BASE}/${mediaId}`, {
+      headers: {
+        Authorization: `Bearer ${META_TOKEN}`
+      }
+    });
+
+    if (!metaResp.ok) {
+      const errText = await metaResp.text();
+      throw new Error(`Media meta fetch failed: ${metaResp.status} ${errText}`);
+    }
+
+    const metaJson = await metaResp.json();
+    const waUrl = metaJson.url;
+    if (!waUrl) throw new Error("No url field in media meta");
+
+    // 2) Second call: download actual binary from that URL
+    const fileResp = await fetch(waUrl, {
+      headers: {
+        Authorization: `Bearer ${META_TOKEN}`
+      }
+    });
+
+    if (!fileResp.ok) {
+      const errText = await fileResp.text();
+      throw new Error(`Media download failed: ${fileResp.status} ${errText}`);
+    }
+
+    const contentType = fileResp.headers.get("content-type") || "image/jpeg";
+    const arrayBuf = await fileResp.arrayBuffer();
+    const buf = Buffer.from(arrayBuf);
+
+    // Decide file extension
+    let ext = "jpg";
+    if (contentType.includes("png")) ext = "png";
+    else if (contentType.includes("jpeg")) ext = "jpg";
+    else if (contentType.includes("webp")) ext = "webp";
+
+    // Ensure uploads directory exists
+    const uploadsDir = path.join(__dirname, "public", "uploads");
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    // Save file locally
+    const fileName = `wa_${mediaId}.${ext}`;
+    const filePath = path.join(uploadsDir, fileName);
+    await fs.promises.writeFile(filePath, buf);
+
+    // Public URL for OpenAI
+    const publicUrl = `${baseUrl}/uploads/${fileName}`;
+    if (DEBUG) console.log("getMediaUrl: stored media at", publicUrl);
+
+    return publicUrl;
+  } catch (err) {
+    console.warn("getMediaUrl failed:", err?.message || err);
+    return null;
   }
-
-  const json = await resp.json();
-  return json.url || null;
 }
 
 // === Forward existing WhatsApp media to another number ===
