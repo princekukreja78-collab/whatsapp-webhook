@@ -2540,25 +2540,30 @@ app.post('/webhook', async (req, res) => {
           console.warn("Forward image to admin failed:", err?.message || err);
         }
 
-        // ---- 2. AI VISION: if photo + problem words, run fault analysis (non-blocking) ----
+               // ---- 2. AI VISION: TEMP – run for ANY image to test pipeline ----
         try {
           if (msg.type === "image" && msg.image?.id) {
             const caption = msg.image?.caption || "";
-            const combinedText = `${lastMsgForAuto} ${caption}`.toLowerCase();
+            const combinedText = `${lastMsgForAuto || ""} ${caption || ""}`.toLowerCase();
 
-            const faultIntent =
-              /\b(issue|problem|fault|damage|dent|scratch|leak|oil|noise|sound|smoke|crack|broken|rust)\b/.test(combinedText);
+            if (DEBUG) {
+              console.log("AI VISION candidate image:", {
+                caption,
+                lastMsgForAuto,
+                combinedText
+              });
+            }
 
-            if (faultIntent) {
-              const mediaUrl = await getMediaUrl(msg.image.id);
-              if (mediaUrl) {
-                const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
-                await waSendText(
-                  senderForAuto,
-                  `*Preliminary check based on your photo:*\n\n${analysis}`
-                );
-                setLastService(senderForAuto, "FAULT_ANALYSIS");
-              }
+            const mediaUrl = await getMediaUrl(msg.image.id);
+            if (mediaUrl) {
+              const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
+              await waSendText(
+                senderForAuto,
+                `*Preliminary check based on your photo:*\n\n${analysis}`
+              );
+              setLastService(senderForAuto, "FAULT_ANALYSIS");
+            } else if (DEBUG) {
+              console.log("AI VISION: no mediaUrl returned for image id:", msg.image.id);
             }
           }
         } catch (err) {
