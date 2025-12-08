@@ -1857,19 +1857,44 @@ async function tryQuickNewCarQuote(msgText, to) {
     if (!tables || Object.keys(tables).length === 0) return false;
 
     const t = String(msgText || '').toLowerCase();
-    const tUpper = t.toUpperCase();
+const tUpper = t.toUpperCase();
 
-    // brand guess from free text — only used to narrow search
-    let brandGuess = null;
-    if (/\b(bmw)\b/.test(t)) {
-      brandGuess = 'BMW';
-    } else if (/\b(mercedes|merc|benz)\b/.test(t)) {
-      brandGuess = 'MERCEDES';
-    } else if (/\b(hyundai|creta|verna|venue|alcazar|tucson|exter|grand i10|i20)\b/.test(t)) {
-      brandGuess = 'HYUNDAI';
-    } else if (/\b(toyota|fortuner|innova|crysta|legender|hyryder|hycross|glanza|camry|rumion|urban cruiser)\b/.test(t)) {
-      brandGuess = 'TOYOTA';
+// --- Brand hints from model short-codes (for "GLA", "GLS", "E200", "X5" etc.) ---
+const SHORT_BRAND_HINTS = {
+  MERCEDES: ['gla', 'gle', 'gls', 'e200', 'e220', 'c200', 'c220', 's350', 's400', 's450', 's500', 'maybach', 'eqs'],
+  BMW:      ['x1', 'x3', 'x5', 'x7', '320d', '330i', '520d', '530i', '730ld'],
+  VOLVO:    ['xc40', 'xc60', 'xc90', 'c40'],
+  TOYOTA:   ['hycross', 'hyryder', 'crysta', 'fortuner', 'glanza', 'rumion', 'legender'],
+  MAHINDRA: ['xuv700', 'scorpio n', 'thar'],
+  AUDI:     ['a4', 'a6', 'a8', 'q3', 'q5', 'q7']
+};
+
+// brand guess from free text — only used to narrow search
+let brandGuess = null;
+
+// 1) explicit brand words
+if (/\bbmw\b/.test(t)) {
+  brandGuess = 'BMW';
+} else if (/\b(mercedes|merc|benz)\b/.test(t)) {
+  brandGuess = 'MERCEDES';
+} else if (/\b(hyundai|creta|verna|venue|alcazar|tucson|exter|grand i10|i20)\b/.test(t)) {
+  brandGuess = 'HYUNDAI';
+} else if (/\b(toyota|fortuner|innova|crysta|legender|hyryder|hycross|glanza|camry|rumion|urban cruiser)\b/.test(t)) {
+  brandGuess = 'TOYOTA';
+}
+
+// 2) if still unknown, infer from model short-codes (GLA/GLS/E200/X5 etc.)
+if (!brandGuess) {
+  outerBrandLoop: for (const [brandName, aliases] of Object.entries(SHORT_BRAND_HINTS)) {
+    for (const a of aliases) {
+      const pat = new RegExp(`\\b${a}\\b`, 'i');
+      if (pat.test(t)) {
+        brandGuess = brandName; // e.g. MERCEDES
+        break outerBrandLoop;
+      }
     }
+  }
+}
 
     let cityMatch =
       (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/) || [])[1] ||
@@ -1904,9 +1929,14 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     if (!raw) return false;
 
-    const modelGuess = raw.split(' ').slice(0, 4).join(' ');
-    const userNorm = normForMatch(raw);
-    const tokens = userNorm.split(' ').filter(Boolean);
+// base model guess (first few tokens)
+let modelGuess = raw.split(' ').slice(0, 4).join(' ');
+const userNorm = normForMatch(raw);
+const tokens = userNorm.split(' ').filter(Boolean);
+
+// for short codes like "gla", "gls", "e200", "x5" etc.
+const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
+const isShortModelToken = modelTok && modelTok.length <= 4;
 
     // variant list limit
     const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 12);
@@ -1924,8 +1954,12 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     const allMatches = [];
     for (const [brand, tab] of Object.entries(tables)) {
-      if (!tab || !tab.data) continue;
-      if (brandGuess && brand !== brandGuess) continue;
+  if (!tab || !tab.data) continue;
+
+  const brandKey = String(brand || '').toUpperCase();
+
+  // strong brand lock: if we have a guess, ignore all other brands completely
+  if (brandGuess && brandKey !== brandGuess.toUpperCase()) continue;
 
       const header = tab.header.map(h => String(h || '').toUpperCase());
       const idxMap = tab.idxMap || toHeaderIndexMap(header);
@@ -1939,10 +1973,18 @@ async function tryQuickNewCarQuote(msgText, to) {
 
       for (const row of tab.data) {
         const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
-        const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
-        const modelNorm = normForMatch(modelCell);
-        const variantNorm = normForMatch(variantCell);
+const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
+const modelNorm = normForMatch(modelCell);
+const variantNorm = normForMatch(variantCell);
 
+// --- HARD FILTER for very short model tokens (GLA/GLS/E200/X5 etc.) ---
+if (brandGuess && isShortModelToken) {
+  const modelWords = modelNorm.split(' ').filter(Boolean); // ex: ["gla","200","4","matic"]
+  if (!modelWords.includes(modelTok)) {
+    // this row does not contain the short model as a full word → skip
+    continue;
+  }
+}
         let score = 0;
 
         // stronger signals for exact substring matches (keeps prior behaviour)
@@ -2031,7 +2073,7 @@ async function tryQuickNewCarQuote(msgText, to) {
         const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
 
         allMatches.push({
-          brand,
+          brand: brandKey,
           row,
           idxModel,
           idxVariant,
