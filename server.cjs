@@ -2261,6 +2261,37 @@ async function tryQuickNewCarQuote(msgText, to) {
       );
     }
     lines.push('\n*Terms & Conditions Apply ✅*');
+    // --- OPTIONAL: add detailed specs when user seems to ask for them ---
+    try {
+      const specIntent = /\b(specs?|specification|specifications|features|details?|engine|bhp|power|torque|seating|seat|dimension|dimensions|tyre|tire)\b/i;
+      if (specIntent.test(String(msgText || ''))) {
+        const specPrompt = `
+You are Mr.Car Signature AI.
+
+Give a clean, bullet-point technical specification sheet for:
+${best.brand} ${modelName} ${variantStr}
+
+Include (India-spec, approximate ok):
+- Engine type & displacement
+- Power (BHP / kW) and torque (Nm)
+- Transmission (MT / AT / CVT / DCT) and drive type (FWD / RWD / AWD / 4x4)
+- Fuel type and claimed mileage
+- Seating capacity
+- Tyre & wheel size
+- Key safety features (airbags, ABS, ESP, ADAS if applicable)
+Keep it concise, readable on WhatsApp and avoid marketing fluff.
+        `.trim();
+
+        const specText = await SignatureAI_RAG(specPrompt);
+        if (specText && specText.trim()) {
+          lines.push('');
+          lines.push('*Key Specifications (approx., India spec)*');
+          lines.push(specText.trim());
+        }
+      }
+    } catch (err) {
+      if (DEBUG) console.warn('Spec RAG failed:', err && (err.message || err));
+    }
 
     await waSendText(to, lines.join('\n'));
     await sendNewCarButtons(to);
