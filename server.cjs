@@ -137,6 +137,147 @@ function rowHasSuffix(variantNorm, suffixNorm, varKwNorm) {
 }
 
 /* ===== END SUFFIX MATCH PATCH ===== */
+// ============================================================================
+// GLOBAL CAR BRAND & MODEL DICTIONARY + HELPERS
+// ============================================================================
+
+// Brand hints: any of these tokens in user text strongly suggest that brand
+const BRAND_HINTS = {
+  MERCEDES: [
+    'mercedes','merc','benz',
+    'gla','gle','gls',
+    'e200','e 200','e220','e 220','e250','e 250','e300','e 300','e350','e 350',
+    'e class','e-class','eclass',
+    'c class','c-class','cclass','c200','c 200','c220',
+    's class','s-class','sclass','s350','s 350','s450','s 450','maybach','eqs'
+  ],
+  BMW: [
+    'bmw','b m w','beemer','bemer',
+    'x1','x 1','x3','x 3','x5','x 5','x7','x 7',
+    '3 series','3-series','3series','320d','320 d','330i','330 i',
+    '5 series','5-series','5series','520d','520 d','530i','530 i',
+    '7 series','7-series','7series','730ld','730 ld'
+  ],
+  AUDI: [
+    'audi','odi','awdi',
+    'a3','a 3','a4','a 4','a6','a 6','a8','a 8',
+    'q3','q 3','q5','q 5','q7','q 7'
+  ],
+  VOLVO: [
+    'volvo','wolvo','vulvo',
+    'xc40','xc 40','xc60','xc 60','xc90','xc 90','c40','c 40','recharge'
+  ],
+  TOYOTA: [
+    'toyota','toyata',
+    'innova','crysta','hycross','hykros','hy ryder','hyryder',
+    'fortuner','fortu','legender','glanza','camry','rumion'
+  ],
+  HYUNDAI: [
+    'hyundai','hundai',
+    'creta','venue','exter','alcazar','tucson','verna','i20','i 20','grand i10','i10'
+  ],
+  KIA: [
+    'kia','seltos','sonet','carens','ev6'
+  ],
+  MAHINDRA: [
+    'mahindra','mahindara','m&m',
+    'xuv700','xuv 700','700','xuv300','xuv 300','scorpio','scorpio n','thar','bolero'
+  ],
+  MARUTI: [
+    'maruti','suzuki','maruti suzuki',
+    'swift','baleno','brezza','fronx','ciaz','dzire','ertiga'
+  ],
+  HONDA: [
+    'honda','city','amaz','amaze','elevate','wrv'
+  ]
+};
+
+// Model aliases: map a "canonical model name" → list of ways people type it.
+// Keep this focused on ambiguous / popular models only.
+const MODEL_ALIASES = {
+  'mercedes gla': ['gla','gla 200','gla 220d'],
+  'mercedes gls': ['gls','gls 450','gls 600','gls maybach'],
+  'mercedes e class': ['e class','e-class','eclass','e200','e 200','e220d','e 220d','e350'],
+  'mercedes c class': ['c class','c-class','cclass','c200','c 200','c220'],
+  'mercedes s class': ['s class','s-class','sclass','s350','s 350','s450','s 450'],
+  'bmw 3 series': ['3 series','3-series','3series','320d','320 d','330i','330 i'],
+  'bmw 5 series': ['5 series','5-series','5series','520d','520 d','530i','530 i'],
+  'bmw 7 series': ['7 series','7-series','7series','730ld','730 ld'],
+  'bmw x1': ['x1','x 1'],
+  'bmw x3': ['x3','x 3'],
+  'bmw x5': ['x5','x 5'],
+  'bmw x7': ['x7','x 7'],
+  'audi q3': ['q3','q 3'],
+  'audi q5': ['q5','q 5'],
+  'audi q7': ['q7','q 7'],
+  'volvo xc40': ['xc40','xc 40'],
+  'volvo xc60': ['xc60','xc 60'],
+  'volvo xc90': ['xc90','xc 90'],
+  'toyota innova hycross': ['hycross','innova hycross','hycros','hykros'],
+  'toyota innova crysta': ['crysta','innova crysta'],
+  'toyota fortuner': ['fortuner','fortu','legender'],
+  'toyota hyryder': ['hyryder','hy ryder'],
+  'hyundai creta': ['creta'],
+  'hyundai venue': ['venue'],
+  'kia seltos': ['seltos'],
+  'kia sonet': ['sonet'],
+  'mahindra xuv700': ['xuv700','xuv 700','700'],
+  'mahindra scorpio n': ['scorpio n','scorpion','scropio n'],
+  'mahindra thar': ['thar','thaar']
+};
+
+// -------- Helper: detect brand from free text --------
+function detectBrandFromText(text) {
+  const t = String(text || '').toLowerCase();
+  // 1) direct brand words
+  if (/\bbmw\b/.test(t)) return 'BMW';
+  if (/\baudi\b/.test(t)) return 'AUDI';
+  if (/\b(mercedes|merc|benz)\b/.test(t)) return 'MERCEDES';
+  if (/\b(volvo|wolvo|vulvo)\b/.test(t)) return 'VOLVO';
+  if (/\b(toyota|toyata)\b/.test(t)) return 'TOYOTA';
+  if (/\b(hyundai|hundai)\b/.test(t)) return 'HYUNDAI';
+  if (/\bkia\b/.test(t)) return 'KIA';
+  if (/\bmahindra\b/.test(t)) return 'MAHINDRA';
+  if (/\bmaruti\b|\bsuzuki\b/.test(t)) return 'MARUTI';
+  if (/\bhonda\b/.test(t)) return 'HONDA';
+
+  // 2) brand hints (model short codes etc.)
+  outer: for (const [brand, hints] of Object.entries(BRAND_HINTS)) {
+    for (const h of hints) {
+      const pat = new RegExp(`\\b${h.replace(/\s+/g, '\\s*')}\\b`, 'i');
+      if (pat.test(t)) {
+        return brand; // e.g. "MERCEDES"
+      }
+    }
+  }
+
+  return null;
+}
+
+// -------- Helper: detect possible models in free text (for comparison, logging, etc.) --------
+function detectModelsFromText(text) {
+  const t = String(text || '').toLowerCase();
+  const found = [];
+
+  for (const [canonical, aliases] of Object.entries(MODEL_ALIASES)) {
+    const canPat = new RegExp(`\\b${canonical.replace(/\s+/g, '\\s*')}\\b`, 'i');
+    if (canPat.test(t)) {
+      found.push(canonical);
+      continue;
+    }
+    for (const a of aliases) {
+      const pat = new RegExp(`\\b${a.replace(/\s+/g, '\\s*')}\\b`, 'i');
+      if (pat.test(t)) {
+        found.push(canonical);
+        break;
+      }
+    }
+  }
+
+  // remove duplicates
+  return Array.from(new Set(found));
+}
+
 // server.cjs — MR.CAR webhook (New + Used, multi-bot CRM core)
 // - Greeting => service list (no quick buttons).
 // - New-car quote => New-car buttons only.
@@ -1624,59 +1765,37 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
 // Place ABOVE tryQuickNewCarQuote()
 // This does NOT modify existing logic; only handles new intents FIRST
 // ============================================================================
+// ============================================================================
+// SMART NEW-CAR INTENT ENGINE — SAFE ADDITIVE BLOCK
+// ============================================================================
 
 async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
-  const t = msgText.toLowerCase().trim();
+  const t = String(msgText || "").toLowerCase().trim();
 
   // ------------------------------
   // DICTIONARIES
   // ------------------------------
-  const MODEL_MAP = {
-    "fortuner": ["fortu", "fortner", "4tuner", "fourtuner"],
-    "innova crysta": ["crysta", "inova"],
-    "innova hycross": ["hycross", "hykros"],
-    "hyryder": ["hyrider", "hy rider"],
-    "venue": ["veneu"],
-    "creta": ["kreta"],
-    "city": ["honda city"],
-    "xuv700": ["700", "x7", "mahindra 700"],
-    "scorpio n": ["scorpion", "scropio"],
-    "thar": ["thaar"],
-    "gle": ["g l e", "gle300", "gle350"],
-    "gls": ["g l s"],
-    "xc40": ["xc 40", "40"],
-    "xc60": ["xc 60", "60"],
-    "x5": ["x 5"],
-    "x7": ["x 7"]
-  };
-
   const FEATURE_TOPICS = [
     "adas","cvt","at","mt","diesel","hybrid","ev","awd","4x4","cruise","toyota safety sense",
     "airbags","turbo","sunroof","engine","mileage","bs6","e20"
   ];
 
   const WAITING_PERIODS = {
-    "fortuner": "4–12 weeks depending on color & variant.",
-    "innova hycross": "8–20 weeks (higher for ZX(O) Hybrid).",
-    "scorpio n": "4–16 weeks.",
-    "xuv700": "6–20 weeks.",
-    "creta": "2–6 weeks.",
-    "venue": "1–4 weeks.",
-    "hyryder": "6–10 weeks."
+    "toyota fortuner": "4–12 weeks depending on color & variant.",
+    "toyota innova hycross": "8–20 weeks (higher for ZX(O) Hybrid).",
+    "mahindra scorpio n": "4–16 weeks.",
+    "mahindra xuv700": "6–20 weeks.",
+    "hyundai creta": "2–6 weeks.",
+    "hyundai venue": "1–4 weeks.",
+    "toyota hyryder": "6–10 weeks."
   };
 
   // ------------------------------
   // 1️⃣ COMPARISON INTENT
   // ------------------------------
   if (/vs|compare|better|difference between/.test(t)) {
-    const foundModels = [];
-
-    for (const [model, aliases] of Object.entries(MODEL_MAP)) {
-      if (t.includes(model) || aliases.some(a => t.includes(a))) {
-        foundModels.push(model);
-      }
-    }
+    const foundModels = detectModelsFromText(t);   // uses global MODEL_ALIASES
 
     if (foundModels.length >= 2) {
       const m1 = foundModels[0];
@@ -1692,13 +1811,19 @@ async function trySmartNewCarIntent(msgText, to) {
          - Best for which type of customer`
       );
 
-      await waSendText(to, `*${m1} vs ${m2} — Detailed Comparison*\n\n${comparison}`);
+      await waSendText(
+        to,
+        `*${m1} vs ${m2} — Detailed Comparison*\n\n${comparison}`
+      );
       setLastService(to, "NEW");
       return true;
     }
 
-    // Comparison requested but only one model detected
-    await waSendText(to, "Please tell me the two car models you want me to compare (e.g., *Creta vs Hyryder*).");
+    // Comparison requested but not enough models detected
+    await waSendText(
+      to,
+      "Please tell me the two car models you want me to compare (e.g., *Creta vs Hyryder* or *E Class vs 5 Series*)."
+    );
     return true;
   }
 
@@ -1706,13 +1831,15 @@ async function trySmartNewCarIntent(msgText, to) {
   // 2️⃣ BUDGET INTENT (SUV / Sedan / Hatch)
   // ------------------------------
   let budget = null;
-  const budgetMatch = t.match(/\b(\d{1,2})\s?(lakh|lac|lacs|lakhs)\b/);
-  if (budgetMatch) budget = Number(budgetMatch[1]) * 100000;
-
-  const priceNumber = t.match(/\b(\d{5,7})\b/);
-  if (!budget && priceNumber) {
-    const v = Number(priceNumber[1]);
-    if (v >= 300000 && v <= 4000000) budget = v;
+  const budgetMatch = t.match(/\b(\d{1,2})\s?(lakh|lakhs|lac|lacs)\b/);
+  if (budgetMatch) {
+    budget = Number(budgetMatch[1]) * 100000;
+  } else {
+    const priceNumber = t.match(/\b(\d{5,7})\b/);
+    if (priceNumber) {
+      const v = Number(priceNumber[1]);
+      if (v >= 300000 && v <= 4000000) budget = v;
+    }
   }
 
   const wantsSUV = /\bsuv\b/.test(t);
@@ -1732,35 +1859,44 @@ async function trySmartNewCarIntent(msgText, to) {
       { model:"Kia Carens",           type:"MPV",   price:1100000 }
     ];
 
-    const picks = CARS.filter(c => c.price <= budget &&
+    const picks = CARS.filter(c =>
+      c.price <= budget &&
       (
         (wantsSUV && c.type === "SUV") ||
         (wantsSedan && c.type === "SEDAN") ||
         (wantsHatch && c.type === "HATCH") ||
-        (!wantsSUV && !wantsSedan && !wantsHatch)
+        (!wantsSUV && !wantsSedan && !wantsHatch)  // any body type if none specified
       )
     );
 
     if (picks.length > 0) {
-      let out = [`*Best New Car Options Under ₹${fmtMoney(budget)}*`];
+      const out = [];
+      out.push(`*Best New Car Options Under ₹${fmtMoney(budget)}*`);
+
       if (wantsSUV) out.push("• Segment: *SUV*");
       else if (wantsSedan) out.push("• Segment: *Sedan*");
       else if (wantsHatch) out.push("• Segment: *Hatchback*");
+      else out.push("• Segment: *Any*");
 
       out.push("");
 
-      picks.slice(0,6).forEach(c=>{
+      picks.slice(0, 6).forEach(c => {
         out.push(`• *${c.model}* — starts at ₹${fmtMoney(c.price)}`);
       });
 
-      out.push("\nTell me the model name for exact on-road price, offers & EMI.");
+      out.push("");
+      out.push("Tell me the model name for exact *on-road price*, *offers* and *EMI*.");
 
       await waSendText(to, out.join("\n"));
       setLastService(to, "NEW");
       return true;
     }
 
-    await waSendText(to, `Your budget is *₹${fmtMoney(budget)}*. Do you prefer *SUV*, *Sedan* or *Hatchback*?`);
+    await waSendText(
+      to,
+      `I noted your budget of *₹${fmtMoney(budget)}*.\nDo you prefer *SUV*, *Sedan* or *Hatchback*?`
+    );
+    setLastService(to, "NEW");
     return true;
   }
 
@@ -1770,9 +1906,12 @@ async function trySmartNewCarIntent(msgText, to) {
   for (const ft of FEATURE_TOPICS) {
     if (t.includes(ft)) {
       const expl = await SignatureAI_RAG(
-        `Explain "${ft}" in simple car-buyer language.`
+        `Explain "${ft}" in simple car-buyer language (2–3 short paragraphs, India context).`
       );
-      await waSendText(to, `*${ft.toUpperCase()} Explained:*\n${expl}`);
+      await waSendText(
+        to,
+        `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`
+      );
       setLastService(to, "NEW");
       return true;
     }
@@ -1781,14 +1920,15 @@ async function trySmartNewCarIntent(msgText, to) {
   // ------------------------------
   // 4️⃣ RECOMMENDATION MODE
   // ------------------------------
-  if (/which car should i buy|recommend|suggest.*car|help me choose/.test(t)) {
-    await waSendText(to,
-      "*I'd love to recommend a perfect new car for you!*\n\n" +
+  if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t)) {
+    await waSendText(
+      to,
+      "*I'll help you pick the right new car.*\n\n" +
       "Please tell me:\n" +
-      "1) Your *budget*\n" +
-      "2) Preferred *body type* (SUV / Sedan / Hatchback)\n" +
-      "3) *City*\n\n" +
-      "I’ll suggest the best 3 options with on-road pricing."
+      "1️⃣ Your *budget* (e.g., 10 lakh)\n" +
+      "2️⃣ Preferred *body type* (SUV / Sedan / Hatchback)\n" +
+      "3️⃣ Your *city*\n\n" +
+      "I’ll suggest the best 2–3 options with on-road pricing."
     );
     return true;
   }
@@ -1796,11 +1936,13 @@ async function trySmartNewCarIntent(msgText, to) {
   // ------------------------------
   // 5️⃣ WAITING PERIOD & DELIVERY
   // ------------------------------
-  for (const [model, wait] of Object.entries(WAITING_PERIODS)) {
-    if (t.includes(model.split(" ")[0])) {
-      await waSendText(to,
-        `*${model.toUpperCase()} Waiting Period*\n${wait}\n\n` +
-        "Please tell me your preferred *color* and *variant* to check fastest delivery."
+  for (const [modelName, wait] of Object.entries(WAITING_PERIODS)) {
+    const key = modelName.split(" ")[1] || modelName; // e.g. "fortuner" from "toyota fortuner"
+    if (t.includes(key.toLowerCase())) {
+      await waSendText(
+        to,
+        `*${modelName.toUpperCase()} — Waiting Period*\n${wait}\n\n` +
+        "Tell me your preferred *color* and *variant* to check the closest delivery timeline."
       );
       setLastService(to, "NEW");
       return true;
@@ -1811,24 +1953,24 @@ async function trySmartNewCarIntent(msgText, to) {
   // 6️⃣ FINANCE / EMI MODE
   // ------------------------------
   if (/emi|finance|loan|0 down|zero down/.test(t)) {
-    await waSendText(to,
-      "To calculate your EMI, please tell me:\n" +
-      "• Car model (e.g., Fortuner ZX, Creta SX, City VX)\n" +
+    await waSendText(
+      to,
+      "To calculate your *EMI*, please tell me:\n" +
+      "• Car model (e.g., *Fortuner ZX*, *Creta SX*, *City VX*)\n" +
       "• City\n" +
       "• Individual or Corporate profile\n\n" +
-      "I'll instantly calculate the 60-month EMI and down payment."
+      "I’ll share the approx 60-month EMI and typical down payment."
     );
     return true;
   }
 
-  // If no smart intent detected → let main function run
+  // If no smart intent detected → let main flow handle it
   return false;
 }
 
 // ============================================================================
 // END OF SMART BLOCK
 // ============================================================================
-
 // ---------------- tryQuickNewCarQuote ----------------
 async function tryQuickNewCarQuote(msgText, to) {
   try {
@@ -1857,45 +1999,12 @@ async function tryQuickNewCarQuote(msgText, to) {
     if (!tables || Object.keys(tables).length === 0) return false;
 
     const t = String(msgText || '').toLowerCase();
-const tUpper = t.toUpperCase();
+    const tUpper = t.toUpperCase();
 
-// --- Brand hints from model short-codes (for "GLA", "GLS", "E200", "X5" etc.) ---
-const SHORT_BRAND_HINTS = {
-  MERCEDES: ['gla', 'gle', 'gls', 'e200', 'e220', 'c200', 'c220', 's350', 's400', 's450', 's500', 'maybach', 'eqs'],
-  BMW:      ['x1', 'x3', 'x5', 'x7', '320d', '330i', '520d', '530i', '730ld'],
-  VOLVO:    ['xc40', 'xc60', 'xc90', 'c40'],
-  TOYOTA:   ['hycross', 'hyryder', 'crysta', 'fortuner', 'glanza', 'rumion', 'legender'],
-  MAHINDRA: ['xuv700', 'scorpio n', 'thar'],
-  AUDI:     ['a4', 'a6', 'a8', 'q3', 'q5', 'q7']
-};
+    // --- unified brand detection (uses global helper) ---
+    let brandGuess = detectBrandFromText(t);
 
-// brand guess from free text — only used to narrow search
-let brandGuess = null;
-
-// 1) explicit brand words
-if (/\bbmw\b/.test(t)) {
-  brandGuess = 'BMW';
-} else if (/\b(mercedes|merc|benz)\b/.test(t)) {
-  brandGuess = 'MERCEDES';
-} else if (/\b(hyundai|creta|verna|venue|alcazar|tucson|exter|grand i10|i20)\b/.test(t)) {
-  brandGuess = 'HYUNDAI';
-} else if (/\b(toyota|fortuner|innova|crysta|legender|hyryder|hycross|glanza|camry|rumion|urban cruiser)\b/.test(t)) {
-  brandGuess = 'TOYOTA';
-}
-
-// 2) if still unknown, infer from model short-codes (GLA/GLS/E200/X5 etc.)
-if (!brandGuess) {
-  outerBrandLoop: for (const [brandName, aliases] of Object.entries(SHORT_BRAND_HINTS)) {
-    for (const a of aliases) {
-      const pat = new RegExp(`\\b${a}\\b`, 'i');
-      if (pat.test(t)) {
-        brandGuess = brandName; // e.g. MERCEDES
-        break outerBrandLoop;
-      }
-    }
-  }
-}
-
+    // city detection
     let cityMatch =
       (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/) || [])[1] ||
       null;
@@ -1929,14 +2038,14 @@ if (!brandGuess) {
 
     if (!raw) return false;
 
-// base model guess (first few tokens)
-let modelGuess = raw.split(' ').slice(0, 4).join(' ');
-const userNorm = normForMatch(raw);
-const tokens = userNorm.split(' ').filter(Boolean);
+    // base model guess (first few tokens)
+    let modelGuess = raw.split(' ').slice(0, 4).join(' ');
+    const userNorm = normForMatch(raw);
+    const tokens = userNorm.split(' ').filter(Boolean);
 
-// for short codes like "gla", "gls", "e200", "x5" etc.
-const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
-const isShortModelToken = modelTok && modelTok.length <= 4;
+    // short token (like "gla", "gls", "x5", "e200")
+    const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
+    const isShortModelToken = modelTok && modelTok.length <= 4;
 
     // variant list limit
     const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 12);
@@ -1954,12 +2063,12 @@ const isShortModelToken = modelTok && modelTok.length <= 4;
 
     const allMatches = [];
     for (const [brand, tab] of Object.entries(tables)) {
-  if (!tab || !tab.data) continue;
+      if (!tab || !tab.data) continue;
 
-  const brandKey = String(brand || '').toUpperCase();
+      const brandKey = String(brand || '').toUpperCase();
 
-  // strong brand lock: if we have a guess, ignore all other brands completely
-  if (brandGuess && brandKey !== brandGuess.toUpperCase()) continue;
+      // strong brand lock: if we know the brand, ignore other sheets
+      if (brandGuess && brandKey !== brandGuess.toUpperCase()) continue;
 
       const header = tab.header.map(h => String(h || '').toUpperCase());
       const idxMap = tab.idxMap || toHeaderIndexMap(header);
@@ -1973,18 +2082,18 @@ const isShortModelToken = modelTok && modelTok.length <= 4;
 
       for (const row of tab.data) {
         const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
-const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
-const modelNorm = normForMatch(modelCell);
-const variantNorm = normForMatch(variantCell);
+        const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
+        const modelNorm = normForMatch(modelCell);
+        const variantNorm = normForMatch(variantCell);
 
-// --- HARD FILTER for very short model tokens (GLA/GLS/E200/X5 etc.) ---
-if (brandGuess && isShortModelToken) {
-  const modelWords = modelNorm.split(' ').filter(Boolean); // ex: ["gla","200","4","matic"]
-  if (!modelWords.includes(modelTok)) {
-    // this row does not contain the short model as a full word → skip
-    continue;
-  }
-}
+        // HARD FILTER for very short model tokens (GLA/GLS/E200/X5 etc.)
+        if (brandGuess && isShortModelToken) {
+          const modelWords = modelNorm.split(' ').filter(Boolean);
+          if (!modelWords.includes(modelTok)) {
+            continue; // row is NOT this model → SKIP
+          }
+        }
+
         let score = 0;
 
         // stronger signals for exact substring matches (keeps prior behaviour)
@@ -2164,6 +2273,7 @@ if (brandGuess && isShortModelToken) {
     return false;
   }
 }
+
 // ---------------- webhook verify & health ----------------
 app.get('/healthz', (req, res) => {
   res.json({ ok: true, t: Date.now(), debug: DEBUG });
