@@ -2205,7 +2205,26 @@ if (brandGuess) {
   const mentionBrands = [];
   const allBrands = Object.keys(tables || {});
   const txt = t.toLowerCase();
+// --- strengthened multi-brand detection ---
+for (const b of allBrands) {
+  const bNorm = b.toLowerCase();
+  // exact brand word match → very strong signal
+  if (txt.includes(bNorm)) {
+    mentionBrands.push(b);
+  }
+  // remove spaces: "landrover" = "land rover"
+  if (txt.replace(/\s+/g, '').includes(bNorm.replace(/\s+/g, ''))) {
+    mentionBrands.push(b);
+  }
+}
 
+// If multiple brands found → pick the strongest one
+if (mentionBrands.length === 1) {
+  brandGuess = mentionBrands[0];
+} else if (mentionBrands.length > 1) {
+  // choose brand mention with longest overlap
+  brandGuess = mentionBrands.sort((a, b) => b.length - a.length)[0];
+}
   for (const b of allBrands) {
     const bLow = String(b || '').toLowerCase();
     if (!bLow) continue;
@@ -2453,15 +2472,23 @@ if (!allMatches.length) {
       }
 
       if (distinct.length > 1) {
-        const lines = [];
-        lines.push(`*Available variants (${distinct.length}) — ${coreTokens[0].toUpperCase()}*`);
-        for (let i = 0; i < distinct.length; i++) {
-          const d = distinct[i];
-          lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
-        }
-        lines.push('');
-        lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
-        await waSendText(to, lines.join('\n'));
+       const lines = [];
+lines.push(`*Available variants (${distinct.length}) — ${coreTokens[0].toUpperCase()}*`);
+
+// show budget if user provided one
+if (userBudget) {
+  lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/1000)/1000}L - ${Math.round((budgetMax||userBudget)/1000)/1000}L)`);
+  lines.push(''); // blank line
+}
+
+for (let i = 0; i < distinct.length; i++) {
+  const d = distinct[i];
+  lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
+}
+lines.push('');
+lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
+await waSendText(to, lines.join('\n'));
+
         setLastService(to, 'NEW');
         return true;
       }
