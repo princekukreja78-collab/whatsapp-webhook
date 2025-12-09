@@ -169,7 +169,10 @@ const BRAND_HINTS = {
   TOYOTA: [
     'toyota','toyata',
     'innova','crysta','hycross','hykros','hy ryder','hyryder',
-    'fortuner','fortu','legender','glanza','camry','rumion'
+    'fortuner','fortu',
+'legender','legend',
+'glanza','camry','rumion'
+
   ],
   HYUNDAI: [
     'hyundai','hundai',
@@ -214,7 +217,8 @@ const MODEL_ALIASES = {
   'volvo xc90': ['xc90','xc 90'],
   'toyota innova hycross': ['hycross','innova hycross','hycros','hykros'],
   'toyota innova crysta': ['crysta','innova crysta'],
-  'toyota fortuner': ['fortuner','fortu','legender'],
+  'toyota fortuner': ['fortuner','fortu'],
+'toyota legender': ['legender','legend'],
   'toyota hyryder': ['hyryder','hy ryder'],
   'hyundai creta': ['creta'],
   'hyundai venue': ['venue'],
@@ -2206,6 +2210,13 @@ if (brandGuess) {
   // Build a simple alias map from your tables' keys:
   const brandAliasMap = {};
 
+// DUPLICATE REMOVED:   const commonModelToBrand = {
+// DUPLICATE REMOVED:     'fortuner': 'TOYOTA',
+// DUPLICATE REMOVED:     'legender': 'TOYOTA',
+// DUPLICATE REMOVED:     'hycross': 'TOYOTA'
+// DUPLICATE REMOVED:   };
+// DUPLICATE REMOVED: 
+// DUPLICATE REMOVED: 
   // small curated model -> brand map to fix common collisions (expand as needed)
   const commonModelToBrand = {
     'fortuner': 'TOYOTA',
@@ -2517,8 +2528,15 @@ if (userBudget) {
     const mid = (budgetMin + budgetMax) / 2;
     const rel = Math.abs(onroad - mid) / (mid || 1);
 
-    if (rel <= 0.30) priceScoreDelta -= Math.round(rel * 100);
-    else priceOk = false;
+    // allow up to 60% price float when no strict matches exist
+if (rel <= 0.30) {
+  priceScoreDelta -= Math.round(rel * 100);
+} else if (rel <= 0.60) {
+  priceScoreDelta -= Math.round(rel * 80);   // still consider, but lower score
+} else {
+  priceOk = false; // completely irrelevant model
+}
+
   }
 }
 
@@ -2538,46 +2556,55 @@ allMatches.push({
       }
     }
 
-    // ---------- BUDGET RELAXATION: if no strict matches, retry without budget filter ----------
-if (!allMatches.length) {
-  if (userBudget) {
-    if (DEBUG) console.log("No strict budget matches → relaxing budget filter.");
+   // ---------- RELAXED MATCHING (safe) ----------
+// Relax only if there are *very few* strict matches
+if (userBudget && allMatches.length < 3) {
 
-    for (const [brand, tab] of Object.entries(tables)) {
-      if (!tab || !tab.data) continue;
+  if (DEBUG) console.log("Relaxing budget filter because strict matches < 3.");
 
-      const brandKey2 = String(brand || '').toUpperCase();
-      // obey multi-brand detection if active
-      if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue;
+  const relaxedMatches = [];
 
-      const header2 = tab.header.map(h => String(h || '').toUpperCase());
-      const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
-      const priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
+  for (const [brand, tab] of Object.entries(tables)) {
+    if (!tab || !tab.data) continue;
 
-      for (const row2 of tab.data) {
-        const priceStr2 = priceIdx2 >= 0 ? String(row2[priceIdx2] || '') : '';
-        const onroad2 = Number(priceStr2.replace(/[,₹\s]/g, '')) || 0;
-        if (!onroad2) continue;
+    const brandKey2 = String(brand || '').toUpperCase();
 
-        allMatches.push({
-          brand: brandKey2,
-          row: row2,
-          idxModel: header2.findIndex(h => h.includes("MODEL") || h.includes("VEHICLE")),
-          idxVariant: header2.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX")),
-          idxMap: idxMap2,
-          onroad: onroad2,
-          exShow: 0,
-          score: 10, // low priority
-          fuel: ""
-        });
-      }
+    // respect brand lock — avoid mixing Toyota with Maruti etc.
+    if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue;
+
+    const header2 = tab.header.map(h => String(h || '').toUpperCase());
+    const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
+    const priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
+
+    for (const row2 of tab.data) {
+      const priceStr2 = priceIdx2 >= 0 ? String(row2[priceIdx2] || '') : '';
+      const onroad2 = Number(priceStr2.replace(/[,₹\s]/g, '')) || 0;
+      if (!onroad2) continue;
+
+      // lower priority so strict matches stay top-ranked
+      relaxedMatches.push({
+        brand: brandKey2,
+        row: row2,
+        idxModel: header2.findIndex(h => h.includes("MODEL") || h.includes("VEHICLE")),
+        idxVariant: header2.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX")),
+        idxMap: idxMap2,
+        onroad: onroad2,
+        exShow: 0,
+        score: 0,
+        fuel: ""
+      });
     }
   }
 
-  // still nothing? fail gracefully
-  if (!allMatches.length) return false;
+  // append relaxed matches AFTER strict matches
+  if (relaxedMatches.length) {
+    allMatches.push(...relaxedMatches);
+  }
+} else if (!userBudget && !allMatches.length) {
+  // no budget + no matches → fail cleanly
+  return false;
 }
-// ---------- END RELAXATION BLOCK ----------
+// ---------- END RELAXED MATCHING ----------
 
     // sort by score desc
     if (userBudget) {
@@ -2592,11 +2619,70 @@ if (!allMatches.length) {
 } else {
   allMatches.sort((a, b) => b.score - a.score);
 }
+// ---------------------------------------------------------
+// EXACT MODEL PROTECTION (prevents Hycross mixing into Legender/Fortuner)
+// ---------------------------------------------------------
+let exactModelHit = false;
+
+try {
+  const rawModel = best && best.idxModel >= 0
+    ? String(best.row[best.idxModel] || '').toUpperCase().trim()
+    : '';
+
+  const EXACT_MODELS = new Set([
+    'FORTUNER', 'LEGENDER',
+    'INNOVA HYCROSS', 'INNOVA CRYSTA',
+    'GLA', 'GLS', 'E CLASS', 'E200',
+    'X1', 'X3', 'X5', 'X7'
+  ]);
+
+  if (EXACT_MODELS.has(rawModel)) {
+    exactModelHit = true;
+  }
+} catch (e) {}
+
+// ---------------------------------------------------------
+// SPECIAL HANDLING: FORTUNER / LEGENDER — show only their own variants
+// ---------------------------------------------------------
+if (exactModelHit) {
+  const rawModel = best && best.idxModel >= 0
+    ? String(best.row[best.idxModel] || '').toUpperCase()
+    : '';
+
+  const isFortuner = rawModel.includes("FORTUNER");
+  const isLegender = rawModel.includes("LEGENDER");
+
+  if (isFortuner || isLegender) {
+
+    const rows = allMatches.filter(m => {
+      const mdl = String(m.row[m.idxModel] || '').toUpperCase();
+      if (isFortuner) return mdl.includes("FORTUNER");
+      if (isLegender) return mdl.includes("LEGENDER");
+      return false;
+    });
+
+    if (rows.length > 0) {
+
+      const title = isLegender ? "LEGENDER" : "FORTUNER";
+      const list = rows.map((m, i) => {
+        const mdl = String(m.row[m.idxModel]   || '');
+        const varr = String(m.row[m.idxVariant] || '');
+        return `${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`;
+      });
+
+      const out = [`*Available variants — ${title}*`, ...list];
+
+      await waSendText(to, out.join("\n"));
+      return true;
+    }
+  }
+}
 
     // if user asked only the brand/model (very short query) — show short variant list
     const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
     const coreTokens = tokens.filter(tk => tk && !genericWords.has(tk));
-    if (coreTokens.length === 1) {
+    // Do NOT enter variant-pooling mode for exact model matches
+if (coreTokens.length === 1 && !exactModelHit) {
       // gather top distinct variants for that model/brand
       const distinct = [];
       const seenTitles = new Set();
