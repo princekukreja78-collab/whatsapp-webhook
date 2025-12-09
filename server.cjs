@@ -1,12 +1,13 @@
 console.log("🚀 MR.CAR Webhook Server Booted (Verbose Logging ON)");
 
+/* Load .env early so process.env is populated for subsequent reads */
+require('dotenv').config({ debug: false });
+
+
 /* Canonical SIGNATURE_MODEL wired from env */
 const SIGNATURE_MODEL = process.env.OPENAI_MODEL || process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || process.env.ENGINE_USED || 'gpt-4o-mini';
-console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 /* Auto-insert: use OPENAI_MODEL or ENGINE_USED from env */
 console.log("MODEL SELECTED (SIGNATURE_MODEL)=", SIGNATURE_MODEL);
-console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
-require('dotenv').config({ debug: false });
 // --- Template names from env (text + media) ---
 const GREETING_TEMPLATE_NAME =
   process.env.GREETING_TEMPLATE_NAME || 'mr_car_broadcast_en';
@@ -90,8 +91,6 @@ function logOnceRag(msg) {
   }
   console.log(msg);
 }
-require('dotenv').config({ debug: false });
-
 /* ===== SUFFIX MATCH PATCH (ZXO / VXO / GXO with loose matching) ===== */
 
 // canonical list – longest-first will be applied below
@@ -285,8 +284,6 @@ function detectModelsFromText(text) {
 // - Used loan = 95% LTV of Expected Price, EMI, Bullet option.
 // - Loan menu: EMI Calculator, Loan Documents, Loan Eligibility.
 // - Central CRM core: /crm/leads (GET), /crm/ingest (POST) for all bots.
-
-require('dotenv').config();
 
 const OpenAI = require("openai");
 const openai = new OpenAI({
