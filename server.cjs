@@ -2201,9 +2201,81 @@ if (brandGuess) {
   // If user mentioned a brand, keep it fixed
   allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
 } else {
-  // Otherwise detect multiple brand names from the query
+    // Otherwise detect multiple brand names from the query
   const mentionBrands = [];
   const allBrands = Object.keys(tables || {});
+
+  // ----------------- STRENGTHEN BRAND DETECTION -----------------
+  // Build a simple alias map from your tables' keys:
+  const brandAliasMap = {};
+  for (const b of allBrands) {
+    if (!b) continue;
+    const raw = String(b).trim();
+    const lower = raw.toLowerCase();
+    const canonical = raw;
+
+    // whole-name
+    brandAliasMap[lower] = canonical;
+    // first token (toyota innova -> "toyota")
+    const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
+    if (first) brandAliasMap[first] = canonical;
+    // strip common company suffixes
+    const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
+    if (stripped) brandAliasMap[stripped] = canonical;
+    // short alias
+    if (first && first.length <= 6) brandAliasMap[first] = canonical;
+  }
+
+  // detect brands by token and by substring
+  const detectedBrands = new Set();
+  const txtLower = t.toLowerCase();
+
+  // 1) token-level detection (exact token matches to alias map)
+  for (const token of txtLower.split(/\s+/).filter(Boolean)) {
+    if (brandAliasMap[token]) detectedBrands.add(String(brandAliasMap[token]).toUpperCase());
+  }
+
+  // 2) substring detection (handles multi-word mentions like "toyota innova")
+  for (const b of allBrands) {
+    if (!b) continue;
+    const bLow = String(b).toLowerCase();
+    if (bLow.length > 2 && txtLower.includes(bLow)) {
+      detectedBrands.add(String(b).toUpperCase());
+    }
+  }
+
+  // 3) normalise fuzzy single-brand guesses from detectBrandFromText
+  if (brandGuess) {
+    const bgLow = String(brandGuess || '').toLowerCase();
+    const exactKey = allBrands.find(x => String(x).toLowerCase() === bgLow);
+    if (exactKey) {
+      brandGuess = String(exactKey).toUpperCase();
+      detectedBrands.add(brandGuess);
+    } else {
+      const partial = allBrands.find(x => String(x).toLowerCase().includes(bgLow));
+      if (partial) {
+        brandGuess = String(partial).toUpperCase();
+        detectedBrands.add(brandGuess);
+      }
+    }
+  }
+
+  // Finalize allowedBrandSet: prefer explicit detected brands, else fall back to brandGuess if present
+  if (detectedBrands.size > 0) {
+    allowedBrandSet = new Set(Array.from(detectedBrands));
+  } else if (brandGuess) {
+    allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
+  } else {
+    allowedBrandSet = null; // keep null to allow all brands
+  }
+
+  if (DEBUG) {
+    console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,8));
+    console.log("Detected brand candidates from text:", Array.from(detectedBrands));
+    console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
+  }
+  // ----------------- END brand strengthening -----------------
+
   const txt = t.toLowerCase();
 // --- strengthened multi-brand detection ---
 for (const b of allBrands) {
