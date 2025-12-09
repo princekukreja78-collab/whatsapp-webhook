@@ -1,0 +1,22 @@
+*** Begin Patch
+*** Update File: server.cjs
+@@
+ console.log("🚀 MR.CAR Webhook Server Booted (Verbose Logging ON)");
+ 
+-/* Canonical SIGNATURE_MODEL wired from env */
+-const SIGNATURE_MODEL = process.env.OPENAI_MODEL || process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || process.env.ENGINE_USED || 'gpt-4o-mini';
+-console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
+-/* Auto-insert: use OPENAI_MODEL or ENGINE_USED from env */
+-console.log("MODEL SELECTED (SIGNATURE_MODEL)=", SIGNATURE_MODEL);
+-console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
+-require('dotenv').config({ debug: false });
++/* Load .env early so process.env is populated for subsequent reads */
++require('dotenv').config({ debug: false });
++
++/* Canonical SIGNATURE_MODEL wired from env (loaded above) */
++const SIGNATURE_MODEL = process.env.OPENAI_MODEL || process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || process.env.ENGINE_USED || 'gpt-4o-mini';
++console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
+@@
+ const GREETING_TEMPLATE_NAME =
+   process.env.GREETING_TEMPLATE_NAME || 'mr_car_broadcast_en';
+*** End Patch

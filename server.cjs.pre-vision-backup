@@ -1,13 +1,12 @@
 console.log("🚀 MR.CAR Webhook Server Booted (Verbose Logging ON)");
 
-/* Load .env early so process.env is populated for subsequent reads */
-require('dotenv').config({ debug: false });
-
-
 /* Canonical SIGNATURE_MODEL wired from env */
 const SIGNATURE_MODEL = process.env.OPENAI_MODEL || process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || process.env.ENGINE_USED || 'gpt-4o-mini';
+console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 /* Auto-insert: use OPENAI_MODEL or ENGINE_USED from env */
 console.log("MODEL SELECTED (SIGNATURE_MODEL)=", SIGNATURE_MODEL);
+console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
+require('dotenv').config({ debug: false });
 // --- Template names from env (text + media) ---
 const GREETING_TEMPLATE_NAME =
   process.env.GREETING_TEMPLATE_NAME || 'mr_car_broadcast_en';
@@ -91,6 +90,8 @@ function logOnceRag(msg) {
   }
   console.log(msg);
 }
+require('dotenv').config({ debug: false });
+
 /* ===== SUFFIX MATCH PATCH (ZXO / VXO / GXO with loose matching) ===== */
 
 // canonical list – longest-first will be applied below
@@ -285,80 +286,44 @@ function detectModelsFromText(text) {
 // - Loan menu: EMI Calculator, Loan Documents, Loan Eligibility.
 // - Central CRM core: /crm/leads (GET), /crm/ingest (POST) for all bots.
 
+require('dotenv').config();
+
 const OpenAI = require("openai");
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY
 });
-// === AI Vision: Analyze car image for faults + repaint + upgrades + PPF advice ===
-async function analyzeCarImageFaultWithOpenAI(imageUrl, userText = "") {
-  const model = process.env.OPENAI_VISION_MODEL || process.env.ENGINE_USED || "gpt-4o-mini";
+// === AI Vision: analyze car fault from an image using OpenAI ===
+async function analyzeCarImageFaultWithOpenAI(imageUrl, userText) {
+  const prompt = `
+You are an experienced car service advisor.
 
-  const systemPrompt = `
-You are *MR.CAR* – a professional car evaluator, bodyshop and detailing advisor.
-You ONLY see 1–2 photos plus a short text from the customer.
+The customer has sent a photo of their car and said:
+"${userText}"
 
-Your goals:
-1) Identify visible issues or risks (mechanical, body, tires, lights, glass, rust, leaks, etc.).
-2) Comment on *paint condition* and *possible repainting*:
-   - Look for colour mismatch between panels.
-   - Uneven orange-peel texture or waviness on one panel vs others.
-   - Masking/paint lines near rubber, chrome, badges, door handles.
-   - Overspray on rubbers or trims.
-   - Unusual panel gaps or alignment.
-   - Scratches/buff marks indicating heavy polishing.
-   You are NOT a lab – clearly state this is a visual opinion, not 100% proof.
-3) Give *PPF / coating / detailing* advice:
-   - When is PPF advisable? (highway usage, new car, expensive colour, lots of chips risk)
-   - Suggest whether full body PPF, frontal kit (bumper+bonnet+mirrors), or only high-contact areas.
-   - Mention cheaper alternatives like ceramic/graphene coating, wax, or only repaint+polish if needed.
-4) Give *upgrade suggestions*:
-   - If interior visible: suggest seat cover type (fabric, PU, leather), colour combos (eg. black–tan, black–red) and possible carbon-fibre or piano-black trim areas (steering, central console, door switch panels).
-   - If exterior mainly visible: suggest alloys, dechroming, black roof, mild spoilers, projector/LED headlamp upgrades – BUT keep it classy, not boy-racer.
-5) If the user text mentions "problem", "noise", "check engine", "warning light", etc., treat that as a service concern and first address that.
-
-Output format (very important):
-1) *Quick Summary* – 2–3 lines.
-2) *Visible Issues / Faults* – bullet points (or "None clearly visible").
-3) *Repaint / Bodywork Opinion* – explain if any panel looks possibly repainted and WHY, with low/medium/high confidence.
-4) *PPF / Protection Advice* – what you recommend (eg. "frontal kit PPF", "only touch-ups and polish", etc.).
-5) *Interior / Exterior Upgrade Ideas* – concise, 3–5 bullets max.
-6) *Disclaimer* – remind that this is based only on photos and is not a physical inspection.
+Tasks:
+- Look at the image and describe any visible damage, dents, scratches, leaks, smoke, tyre wear, rust, or misalignment.
+- If nothing clear is visible, say that clearly.
+- Give 2–3 possible causes in simple language.
+- Suggest whether it is likely safe to drive or they should visit a workshop urgently.
+- Always end with: "This is an approximate opinion based only on the photo. A physical inspection at the workshop is recommended."
 `.trim();
 
-  const userPrompt = `
-User context/message (may be empty):
-"${userText || "N/A"}"
-
-Now analyse the attached car photo(s) and respond in the requested format.
-`.trim();
+  const model = process.env.OPENAI_VISION_MODEL || "gpt-4o-mini";
 
   const completion = await openai.chat.completions.create({
     model,
     messages: [
       {
-        role: "system",
-        content: systemPrompt
-      },
-      {
         role: "user",
         content: [
-          { type: "text", text: userPrompt },
-          {
-            type: "image_url",
-            image_url: { url: imageUrl }
-          }
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: imageUrl } }
         ]
       }
     ]
   });
 
-  const text =
-    (completion.choices &&
-      completion.choices[0] &&
-      completion.choices[0].message &&
-      completion.choices[0].message.content) ||
-    "Sorry, I could not clearly understand this photo. Please send a clearer image.";
-
+  const text = completion?.choices?.[0]?.message?.content || "";
   return text.trim();
 }
 
@@ -371,8 +336,6 @@ const express = require('express');
 const app = express();
 const FormData = require('form-data');
 const crmIngestHandler = require('./routes/crm_ingest.cjs');
-const autoIngest = require('./routes/auto_ingest.cjs');
-
 
 // ---- Delivery status tracking (CRM + console) ----
 const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
@@ -2102,58 +2065,6 @@ async function tryQuickNewCarQuote(msgText, to) {
     // map profile → audience for price selection
     const audience =
       /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
-// ---------- BUDGET PARSER + PRICE RANGE ----------
-function parseBudgetFromText(s) {
-  if (!s) return null;
-  const norm = String(s).toLowerCase().replace(/[,₹]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // direct plain number (no unit)
-  const plainNum = (norm.match(/\b([0-9]{5,9})\b/ ) || [])[1];
-  if (plainNum) {
-    const v = Number(plainNum);
-    if (v > 10000) return v;
-  }
-
-  // lakh / lac / l
-  let m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(lakh|lac|l|k)\b/);
-  if (!m) m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(l)\b/);
-  if (m) {
-    const v = Number(m[1]) * 100000;
-    if (!Number.isNaN(v)) return v;
-  }
-
-  // crore
-  m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(crore|cr|c)\b/);
-  if (m) {
-    const v = Number(m[1]) * 10000000;
-    if (!Number.isNaN(v)) return v;
-  }
-
-  // compact like 15k (thousand)
-  m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*k\b/);
-  if (m) {
-    const v = Number(m[1]) * 1000;
-    if (!Number.isNaN(v)) return v;
-  }
-
-  // fallback: find any large number token
-  const tokens = norm.split(/\s+/).filter(Boolean);
-  for (const tok of tokens) {
-    const n = Number(tok);
-    if (!Number.isNaN(n) && n >= 50000) return n;
-  }
-  return null;
-}
-
-const userBudget = parseBudgetFromText(t); // in INR rupees, integer or null
-let budgetMin = null, budgetMax = null;
-if (userBudget) {
-  const MARGIN = Number(process.env.NEW_CAR_BUDGET_MARGIN || 0.20); // default 20% if not set
-  budgetMin = Math.round(userBudget * (1 - MARGIN));
-  budgetMax = Math.round(userBudget * (1 + MARGIN));
-  if (DEBUG) console.log("User budget parsed:", userBudget, "range:", budgetMin, budgetMax);
-}
-// ---------- end BUDGET block ----------
 
     // broaden raw: normalize 'auto' / 'automatic' to 'at' to match your variant suffix scheme
     let raw = t
@@ -2187,209 +2098,11 @@ if (userBudget) {
       return new RegExp('\\b' + escaped.join('[\\s\\W_]*') + '\\b', 'i');
     }
 
-const cityToken = city.split(' ')[0].toUpperCase();
+    const cityToken = city.split(' ')[0].toUpperCase();
 
-const allMatches = [];
-
-// ---------- MULTI-BRAND DETECTION ----------
-let allowedBrandSet = null;
-
-if (brandGuess) {
-  // If user mentioned a brand, keep it fixed
-  allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
-} else {
-    // Otherwise detect multiple brand names from the query
-  const mentionBrands = [];
-  const allBrands = Object.keys(tables || {});
-
-    // ----------------- STRENGTHEN BRAND DETECTION -----------------
-  // Build a simple alias map from your tables' keys:
-  const brandAliasMap = {};
-
-  // small curated model -> brand map to fix common collisions (expand as needed)
-  const commonModelToBrand = {
-    'fortuner': 'TOYOTA',
-    'legender': 'TOYOTA',
-    'hycross': 'TOYOTA',
-    'innova': 'TOYOTA',
-    'x1': 'BMW',
-    'x3': 'BMW',
-    'x5': 'BMW',
-    'creta': 'HYUNDAI',
-    'venue': 'HYUNDAI',
-    'city': 'HONDA',
-    'swift': 'MARUTI',
-    'eeco': 'MARUTI'
-  };
-
-  // helper: normalize token (lowercase, strip non-alphanum except space)
-  const normalize = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // 1) seed alias map from canonical brand keys (your `tables` keys)
-  for (const b of allBrands) {
-    if (!b) continue;
-    const raw = String(b).trim();
-    const lower = raw.toLowerCase();
-    const canonical = raw;
-
-    // whole-name -> canonical
-    brandAliasMap[normalize(lower)] = canonical;
-
-    // first token (toyota innova -> "toyota")
-    const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
-    if (first) brandAliasMap[normalize(first)] = canonical;
-
-    // strip common company suffixes (motors, cars, pvt, ltd, etc)
-    const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
-    if (stripped) brandAliasMap[normalize(stripped)] = canonical;
-
-    // short alias for short first tokens
-    if (first && first.length <= 6) brandAliasMap[normalize(first)] = canonical;
-  }
-
-  // 2) merge the curated model->brand map (ensures fortuner, legender, hycross map to TOYOTA)
-  for (const [m, b] of Object.entries(commonModelToBrand)) {
-    const key = normalize(m);
-    if (key && !brandAliasMap[key]) brandAliasMap[key] = b;
-  }
-
-  // 3) if `tables` contains models/variants, add their tokens too (defensive)
-  try {
-    if (typeof tables === 'object' && tables !== null) {
-      for (const canonical of Object.keys(tables)) {
-        const entry = tables[canonical];
-        // support common shapes: entry.models, entry.variants, entry.items, entry.list
-        const variants = entry && (entry.models || entry.variants || entry.items || entry.list || []);
-        if (Array.isArray(variants) && variants.length) {
-          for (const v of variants) {
-            if (!v) continue;
-            const vRaw = (typeof v === 'string') ? v : (v.name || v.model || String(v));
-            const key = normalize(vRaw).split(/\s+/)[0]; // use first token of variant
-            if (key && !brandAliasMap[key]) brandAliasMap[key] = canonical;
-          }
-        } else if (entry && typeof entry === 'object') {
-          // handle nested object keys as variant names
-          for (const k2 of Object.keys(entry)) {
-            const key2 = normalize(k2).split(/\s+/)[0];
-            if (key2 && !brandAliasMap[key2]) brandAliasMap[key2] = canonical;
-          }
-        }
-      }
-    }
-  } catch (e) {
-    if (DEBUG) console.log("model->brand map error:", e && e.message);
-  }
-
-  // detect brands by token and by substring
-  const detectedBrands = new Set();
-  const txtLower = normalize(t); // normalized text
-
-  // 1) token-level detection (prefer exact token matches to alias map and curated model map)
-  const tokens = txtLower.split(/\s+/).filter(Boolean);
-  for (const token of tokens) {
-    const tnorm = token.replace(/[^a-z0-9]/g, '');
-    if (!tnorm) continue;
-    // check brand alias map first
-    if (brandAliasMap[tnorm]) {
-      detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase());
-      continue;
-    }
-    // then check curated model->brand fallback
-    if (commonModelToBrand[tnorm]) {
-      detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase());
-      continue;
-    }
-  }
-
-  // 2) substring detection (handles multi-word mentions like "toyota innova")
-  for (const b of allBrands) {
-    if (!b) continue;
-    const bLow = normalize(String(b).toLowerCase());
-    if (bLow.length > 2 && txtLower.includes(bLow)) {
-      detectedBrands.add(String(b).toUpperCase());
-    }
-  }
-
-  // 3) normalise fuzzy single-brand guesses from detectBrandFromText (if present)
-  if (brandGuess) {
-    const bgLow = normalize(String(brandGuess || ''));
-    const exactKey = allBrands.find(x => normalize(String(x)) === bgLow);
-    if (exactKey) {
-      brandGuess = String(exactKey).toUpperCase();
-      detectedBrands.add(brandGuess);
-    } else {
-      const partial = allBrands.find(x => normalize(String(x)).includes(bgLow));
-      if (partial) {
-        brandGuess = String(partial).toUpperCase();
-        detectedBrands.add(brandGuess);
-      }
-    }
-  }
-
-  // Finalize allowedBrandSet: prefer explicit detected brands, else fall back to brandGuess if present
-  if (detectedBrands.size > 0) {
-    allowedBrandSet = new Set(Array.from(detectedBrands));
-  } else if (brandGuess) {
-    allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
-  } else {
-    allowedBrandSet = null; // keep null to allow all brands
-  }
-
-  // Safety fallback: if a Set was created but ended up empty, treat as ALL (null)
-  if (allowedBrandSet && allowedBrandSet.size === 0) {
-    if (DEBUG) console.log("allowedBrandSet empty -> switching to ALL (null) fallback");
-    allowedBrandSet = null;
-  }
-
-  if (DEBUG) {
-    console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,12));
-    console.log("Tokens:", tokens);
-    console.log("Detected brand candidates from text:", Array.from(detectedBrands));
-    console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
-  }
-  // ----------------- END brand strengthening -----------------
-  
-  const txt = t.toLowerCase();
-// --- strengthened multi-brand detection ---
-for (const b of allBrands) {
-  const bNorm = b.toLowerCase();
-  // exact brand word match → very strong signal
-  if (txt.includes(bNorm)) {
-    mentionBrands.push(b);
-  }
-  // remove spaces: "landrover" = "land rover"
-  if (txt.replace(/\s+/g, '').includes(bNorm.replace(/\s+/g, ''))) {
-    mentionBrands.push(b);
-  }
-}
-
-// If multiple brands found → pick the strongest one
-if (mentionBrands.length === 1) {
-  brandGuess = mentionBrands[0];
-} else if (mentionBrands.length > 1) {
-  // choose brand mention with longest overlap
-  brandGuess = mentionBrands.sort((a, b) => b.length - a.length)[0];
-}
-  for (const b of allBrands) {
-    const bLow = String(b || '').toLowerCase();
-    if (!bLow) continue;
-
-    // clean: remove symbols (toyota → toyota, mahindra-suv → mahindra)
-    const bClean = bLow.replace(/[^a-z0-9]/g, ' ').split(/\s+/)[0];
-
-    if (bClean && txt.includes(bClean)) {
-      mentionBrands.push(String(b).toUpperCase());
-    }
-  }
-  if (mentionBrands.length) {
-    allowedBrandSet = new Set(mentionBrands);
-    if (DEBUG) console.log("Multi-brand detection:", mentionBrands);
-  }
-}
-// ---------- END MULTI-BRAND DETECTION ----------
-
-for (const [brand, tab] of Object.entries(tables)) {
-       if (!tab || !tab.data) continue;
+    const allMatches = [];
+    for (const [brand, tab] of Object.entries(tables)) {
+      if (!tab || !tab.data) continue;
 
       const brandKey = String(brand || '').toUpperCase();
 
@@ -2485,7 +2198,7 @@ for (const [brand, tab] of Object.entries(tables)) {
             score -= 25;
           }
         }
-	
+
         if (score <= 0) continue;
 
         // pick on-road price column (Delhi INDIVIDUAL / CORPORATE)
@@ -2507,91 +2220,24 @@ for (const [brand, tab] of Object.entries(tables)) {
 
         const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
 
-       let priceOk = true;
-let priceScoreDelta = 0;
-
-if (userBudget) {
-  if (onroad >= budgetMin && onroad <= budgetMax) {
-    priceScoreDelta += 60;
-  } else {
-    const mid = (budgetMin + budgetMax) / 2;
-    const rel = Math.abs(onroad - mid) / (mid || 1);
-
-    if (rel <= 0.30) priceScoreDelta -= Math.round(rel * 100);
-    else priceOk = false;
-  }
-}
-
-if (!priceOk) continue;
-
-allMatches.push({
-  brand: brandKey,
-  row,
-  idxModel,
-  idxVariant,
-  idxMap,
-  onroad,
-  exShow,
-  score: score + priceScoreDelta,
-  fuel: fuelCell
-});
-      }
-    }
-
-    // ---------- BUDGET RELAXATION: if no strict matches, retry without budget filter ----------
-if (!allMatches.length) {
-  if (userBudget) {
-    if (DEBUG) console.log("No strict budget matches → relaxing budget filter.");
-
-    for (const [brand, tab] of Object.entries(tables)) {
-      if (!tab || !tab.data) continue;
-
-      const brandKey2 = String(brand || '').toUpperCase();
-      // obey multi-brand detection if active
-      if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue;
-
-      const header2 = tab.header.map(h => String(h || '').toUpperCase());
-      const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
-      const priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
-
-      for (const row2 of tab.data) {
-        const priceStr2 = priceIdx2 >= 0 ? String(row2[priceIdx2] || '') : '';
-        const onroad2 = Number(priceStr2.replace(/[,₹\s]/g, '')) || 0;
-        if (!onroad2) continue;
-
         allMatches.push({
-          brand: brandKey2,
-          row: row2,
-          idxModel: header2.findIndex(h => h.includes("MODEL") || h.includes("VEHICLE")),
-          idxVariant: header2.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX")),
-          idxMap: idxMap2,
-          onroad: onroad2,
-          exShow: 0,
-          score: 10, // low priority
-          fuel: ""
+          brand: brandKey,
+          row,
+          idxModel,
+          idxVariant,
+          idxMap,
+          onroad,
+          exShow,
+          score,
+          fuel: fuelCell
         });
       }
     }
-  }
 
-  // still nothing? fail gracefully
-  if (!allMatches.length) return false;
-}
-// ---------- END RELAXATION BLOCK ----------
+    if (!allMatches.length) return false;
 
     // sort by score desc
-    if (userBudget) {
-  const mid = (budgetMin + budgetMax) / 2;
-  allMatches.sort((a, b) => {
-    const diff = b.score - a.score;
-    if (diff !== 0) return diff;
-    const da = Math.abs((a.onroad || 0) - mid);
-    const db = Math.abs((b.onroad || 0) - mid);
-    return da - db; // closer to budget comes first
-  });
-} else {
-  allMatches.sort((a, b) => b.score - a.score);
-}
+    allMatches.sort((a, b) => b.score - a.score);
 
     // if user asked only the brand/model (very short query) — show short variant list
     const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
@@ -2617,23 +2263,15 @@ if (!allMatches.length) {
       }
 
       if (distinct.length > 1) {
-       const lines = [];
-lines.push(`*Available variants (${distinct.length}) — ${coreTokens[0].toUpperCase()}*`);
-
-// show budget if user provided one
-if (userBudget) {
-  lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/1000)/1000}L - ${Math.round((budgetMax||userBudget)/1000)/1000}L)`);
-  lines.push(''); // blank line
-}
-
-for (let i = 0; i < distinct.length; i++) {
-  const d = distinct[i];
-  lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
-}
-lines.push('');
-lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
-await waSendText(to, lines.join('\n'));
-
+        const lines = [];
+        lines.push(`*Available variants (${distinct.length}) — ${coreTokens[0].toUpperCase()}*`);
+        for (let i = 0; i < distinct.length; i++) {
+          const d = distinct[i];
+          lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
+        }
+        lines.push('');
+        lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
+        await waSendText(to, lines.join('\n'));
         setLastService(to, 'NEW');
         return true;
       }
@@ -2902,30 +2540,25 @@ app.post('/webhook', async (req, res) => {
           console.warn("Forward image to admin failed:", err?.message || err);
         }
 
-               // ---- 2. AI VISION: TEMP – run for ANY image to test pipeline ----
+        // ---- 2. AI VISION: if photo + problem words, run fault analysis (non-blocking) ----
         try {
           if (msg.type === "image" && msg.image?.id) {
             const caption = msg.image?.caption || "";
-            const combinedText = `${lastMsgForAuto || ""} ${caption || ""}`.toLowerCase();
+            const combinedText = `${lastMsgForAuto} ${caption}`.toLowerCase();
 
-            if (DEBUG) {
-              console.log("AI VISION candidate image:", {
-                caption,
-                lastMsgForAuto,
-                combinedText
-              });
-            }
+            const faultIntent =
+              /\b(issue|problem|fault|damage|dent|scratch|leak|oil|noise|sound|smoke|crack|broken|rust)\b/.test(combinedText);
 
-            const mediaUrl = await getMediaUrl(msg.image.id);
-            if (mediaUrl) {
-              const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
-              await waSendText(
-                senderForAuto,
-                `*Preliminary check based on your photo:*\n\n${analysis}`
-              );
-              setLastService(senderForAuto, "FAULT_ANALYSIS");
-            } else if (DEBUG) {
-              console.log("AI VISION: no mediaUrl returned for image id:", msg.image.id);
+            if (faultIntent) {
+              const mediaUrl = await getMediaUrl(msg.image.id);
+              if (mediaUrl) {
+                const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
+                await waSendText(
+                  senderForAuto,
+                  `*Preliminary check based on your photo:*\n\n${analysis}`
+                );
+                setLastService(senderForAuto, "FAULT_ANALYSIS");
+              }
             }
           }
         } catch (err) {
@@ -2969,6 +2602,19 @@ app.post('/webhook', async (req, res) => {
     } catch (e) {
       console.warn("AUTO-INGEST FAILED:", e?.message || e);
     }
+
+// ------------------------------------------------------------------
+// STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
+// ------------------------------------------------------------------
+try {
+  if (await trySmartNewCarIntent(lastMsgForAuto, senderForAuto)) {
+    if (DEBUG) console.log("SMART NEW CAR INTENT handled.");
+    return res.sendStatus(200); 
+  }
+} catch (e) {
+  console.warn("Smart intent engine failed:", e?.message || e);
+}
+        
     // ---- WhatsApp delivery status tracking ----
 if (value.statuses && !value.messages) {
   for (const st of value.statuses) {
@@ -3047,38 +2693,6 @@ if (value.statuses && !value.messages) {
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
     }
-    // ------------------------------------------------------------------
-    // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
-    // ------------------------------------------------------------------
-    try {
-      const smartText = (typeof msgText === 'string' && msgText.trim())
-        ? msgText.trim()
-        : '';
-
-      const smartFrom = from || null;
-
-      if (smartText && smartFrom) {
-        const handled = await trySmartNewCarIntent(smartText, smartFrom);
-        if (handled) {
-          if (DEBUG) {
-            console.log("SMART NEW CAR INTENT handled.", {
-              from: smartFrom,
-              text: smartText
-            });
-          }
-          // We already replied from trySmartNewCarIntent
-          return res.sendStatus(200);
-        }
-      } else if (DEBUG) {
-        console.log("SMART NEW CAR INTENT skipped (missing smartText or smartFrom)", {
-          smartText,
-          smartFrom
-        });
-      }
-    } catch (e) {
-      console.warn("Smart intent engine failed:", e?.message || e);
-    }
-
     // ---- Admin alert for real incoming messages ----
     try {
       // Only if ADMIN_WA is set, we have a sender, and it’s not the admin number itself
@@ -3701,80 +3315,22 @@ async function waSendImage(to, mediaId, caption="") {
   return j;
 }
 
-// === WhatsApp media helper: download and expose via our server ===
+// === Get a temporary media URL from WhatsApp for a given media_id ===
 async function getMediaUrl(mediaId) {
-  try {
-    if (!mediaId) throw new Error("No mediaId provided");
-
-    if (!META_TOKEN) {
-      throw new Error("META_TOKEN missing – cannot fetch media");
+  const metaUrl = `https://graph.facebook.com/v21.0/${mediaId}`;
+  const resp = await fetch(metaUrl, {
+    headers: {
+      Authorization: `Bearer ${META_TOKEN}`
     }
+  });
 
-    const GRAPH_API_BASE = process.env.GRAPH_API_BASE || "https://graph.facebook.com/v21.0";
-    const baseUrl = process.env.PUBLIC_BASE_URL || "";
-
-    if (!baseUrl) {
-      throw new Error("PUBLIC_BASE_URL not set – cannot expose media URL");
-    }
-
-    // 1) First call: get media metadata (URL) from Graph API
-    const metaResp = await fetch(`${GRAPH_API_BASE}/${mediaId}`, {
-      headers: {
-        Authorization: `Bearer ${META_TOKEN}`
-      }
-    });
-
-    if (!metaResp.ok) {
-      const errText = await metaResp.text();
-      throw new Error(`Media meta fetch failed: ${metaResp.status} ${errText}`);
-    }
-
-    const metaJson = await metaResp.json();
-    const waUrl = metaJson.url;
-    if (!waUrl) throw new Error("No url field in media meta");
-
-    // 2) Second call: download actual binary from that URL
-    const fileResp = await fetch(waUrl, {
-      headers: {
-        Authorization: `Bearer ${META_TOKEN}`
-      }
-    });
-
-    if (!fileResp.ok) {
-      const errText = await fileResp.text();
-      throw new Error(`Media download failed: ${fileResp.status} ${errText}`);
-    }
-
-    const contentType = fileResp.headers.get("content-type") || "image/jpeg";
-    const arrayBuf = await fileResp.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
-
-    // Decide file extension
-    let ext = "jpg";
-    if (contentType.includes("png")) ext = "png";
-    else if (contentType.includes("jpeg")) ext = "jpg";
-    else if (contentType.includes("webp")) ext = "webp";
-
-    // Ensure uploads directory exists
-    const uploadsDir = path.join(__dirname, "public", "uploads");
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-
-    // Save file locally
-    const fileName = `wa_${mediaId}.${ext}`;
-    const filePath = path.join(uploadsDir, fileName);
-    await fs.promises.writeFile(filePath, buf);
-
-    // Public URL for OpenAI
-    const publicUrl = `${baseUrl}/uploads/${fileName}`;
-    if (DEBUG) console.log("getMediaUrl: stored media at", publicUrl);
-
-    return publicUrl;
-  } catch (err) {
-    console.warn("getMediaUrl failed:", err?.message || err);
-    return null;
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`getMediaUrl failed: ${resp.status} ${txt}`);
   }
+
+  const json = await resp.json();
+  return json.url || null;
 }
 
 // === Forward existing WhatsApp media to another number ===
