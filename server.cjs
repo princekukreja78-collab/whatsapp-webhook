@@ -2105,6 +2105,58 @@ async function tryQuickNewCarQuote(msgText, to) {
     // map profile → audience for price selection
     const audience =
       /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
+// ---------- BUDGET PARSER + PRICE RANGE ----------
+function parseBudgetFromText(s) {
+  if (!s) return null;
+  const norm = String(s).toLowerCase().replace(/[,₹]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // direct plain number (no unit)
+  const plainNum = (norm.match(/\b([0-9]{5,9})\b/ ) || [])[1];
+  if (plainNum) {
+    const v = Number(plainNum);
+    if (v > 10000) return v;
+  }
+
+  // lakh / lac / l
+  let m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(lakh|lac|l|k)\b/);
+  if (!m) m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(l)\b/);
+  if (m) {
+    const v = Number(m[1]) * 100000;
+    if (!Number.isNaN(v)) return v;
+  }
+
+  // crore
+  m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(crore|cr|c)\b/);
+  if (m) {
+    const v = Number(m[1]) * 10000000;
+    if (!Number.isNaN(v)) return v;
+  }
+
+  // compact like 15k (thousand)
+  m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*k\b/);
+  if (m) {
+    const v = Number(m[1]) * 1000;
+    if (!Number.isNaN(v)) return v;
+  }
+
+  // fallback: find any large number token
+  const tokens = norm.split(/\s+/).filter(Boolean);
+  for (const tok of tokens) {
+    const n = Number(tok);
+    if (!Number.isNaN(n) && n >= 50000) return n;
+  }
+  return null;
+}
+
+const userBudget = parseBudgetFromText(t); // in INR rupees, integer or null
+let budgetMin = null, budgetMax = null;
+if (userBudget) {
+  const MARGIN = Number(process.env.NEW_CAR_BUDGET_MARGIN || 0.20); // default 20% if not set
+  budgetMin = Math.round(userBudget * (1 - MARGIN));
+  budgetMax = Math.round(userBudget * (1 + MARGIN));
+  if (DEBUG) console.log("User budget parsed:", userBudget, "range:", budgetMin, budgetMax);
+}
+// ---------- end BUDGET block ----------
 
     // broaden raw: normalize 'auto' / 'automatic' to 'at' to match your variant suffix scheme
     let raw = t
@@ -2138,11 +2190,42 @@ async function tryQuickNewCarQuote(msgText, to) {
       return new RegExp('\\b' + escaped.join('[\\s\\W_]*') + '\\b', 'i');
     }
 
-    const cityToken = city.split(' ')[0].toUpperCase();
+const cityToken = city.split(' ')[0].toUpperCase();
 
-    const allMatches = [];
-    for (const [brand, tab] of Object.entries(tables)) {
-      if (!tab || !tab.data) continue;
+const allMatches = [];
+
+// ---------- MULTI-BRAND DETECTION ----------
+let allowedBrandSet = null;
+
+if (brandGuess) {
+  // If user mentioned a brand, keep it fixed
+  allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
+} else {
+  // Otherwise detect multiple brand names from the query
+  const mentionBrands = [];
+  const allBrands = Object.keys(tables || {});
+  const txt = t.toLowerCase();
+
+  for (const b of allBrands) {
+    const bLow = String(b || '').toLowerCase();
+    if (!bLow) continue;
+
+    // clean: remove symbols (toyota → toyota, mahindra-suv → mahindra)
+    const bClean = bLow.replace(/[^a-z0-9]/g, ' ').split(/\s+/)[0];
+
+    if (bClean && txt.includes(bClean)) {
+      mentionBrands.push(String(b).toUpperCase());
+    }
+  }
+  if (mentionBrands.length) {
+    allowedBrandSet = new Set(mentionBrands);
+    if (DEBUG) console.log("Multi-brand detection:", mentionBrands);
+  }
+}
+// ---------- END MULTI-BRAND DETECTION ----------
+
+for (const [brand, tab] of Object.entries(tables)) {
+       if (!tab || !tab.data) continue;
 
       const brandKey = String(brand || '').toUpperCase();
 
@@ -2260,24 +2343,91 @@ async function tryQuickNewCarQuote(msgText, to) {
 
         const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
 
-        allMatches.push({
-          brand: brandKey,
-          row,
-          idxModel,
-          idxVariant,
-          idxMap,
-          onroad,
-          exShow,
-          score,
-          fuel: fuelCell
-        });
+       let priceOk = true;
+let priceScoreDelta = 0;
+
+if (userBudget) {
+  if (onroad >= budgetMin && onroad <= budgetMax) {
+    priceScoreDelta += 60;
+  } else {
+    const mid = (budgetMin + budgetMax) / 2;
+    const rel = Math.abs(onroad - mid) / (mid || 1);
+
+    if (rel <= 0.30) priceScoreDelta -= Math.round(rel * 100);
+    else priceOk = false;
+  }
+}
+
+if (!priceOk) continue;
+
+allMatches.push({
+  brand: brandKey,
+  row,
+  idxModel,
+  idxVariant,
+  idxMap,
+  onroad,
+  exShow,
+  score: score + priceScoreDelta,
+  fuel: fuelCell
+});
       }
     }
 
-    if (!allMatches.length) return false;
+    // ---------- BUDGET RELAXATION: if no strict matches, retry without budget filter ----------
+if (!allMatches.length) {
+  if (userBudget) {
+    if (DEBUG) console.log("No strict budget matches → relaxing budget filter.");
+
+    for (const [brand, tab] of Object.entries(tables)) {
+      if (!tab || !tab.data) continue;
+
+      const brandKey2 = String(brand || '').toUpperCase();
+      // obey multi-brand detection if active
+      if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue;
+
+      const header2 = tab.header.map(h => String(h || '').toUpperCase());
+      const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
+      const priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
+
+      for (const row2 of tab.data) {
+        const priceStr2 = priceIdx2 >= 0 ? String(row2[priceIdx2] || '') : '';
+        const onroad2 = Number(priceStr2.replace(/[,₹\s]/g, '')) || 0;
+        if (!onroad2) continue;
+
+        allMatches.push({
+          brand: brandKey2,
+          row: row2,
+          idxModel: header2.findIndex(h => h.includes("MODEL") || h.includes("VEHICLE")),
+          idxVariant: header2.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX")),
+          idxMap: idxMap2,
+          onroad: onroad2,
+          exShow: 0,
+          score: 10, // low priority
+          fuel: ""
+        });
+      }
+    }
+  }
+
+  // still nothing? fail gracefully
+  if (!allMatches.length) return false;
+}
+// ---------- END RELAXATION BLOCK ----------
 
     // sort by score desc
-    allMatches.sort((a, b) => b.score - a.score);
+    if (userBudget) {
+  const mid = (budgetMin + budgetMax) / 2;
+  allMatches.sort((a, b) => {
+    const diff = b.score - a.score;
+    if (diff !== 0) return diff;
+    const da = Math.abs((a.onroad || 0) - mid);
+    const db = Math.abs((b.onroad || 0) - mid);
+    return da - db; // closer to budget comes first
+  });
+} else {
+  allMatches.sort((a, b) => b.score - a.score);
+}
 
     // if user asked only the brand/model (very short query) — show short variant list
     const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
