@@ -2620,61 +2620,66 @@ if (userBudget && allMatches.length < 3) {
   allMatches.sort((a, b) => b.score - a.score);
 }
 // ---------------------------------------------------------
-// EXACT MODEL PROTECTION (prevents Hycross mixing into Legender/Fortuner)
+// STRICT MODEL MATCHING ENGINE (Option A)
+// Prevents ANY model mixing (Fortuner/Hycross, GLA/X1, etc.)
 // ---------------------------------------------------------
-let exactModelHit = false;
 
-try {
-  const rawModel = best && best.idxModel >= 0
-    ? String(best.row[best.idxModel] || '').toUpperCase().trim()
-    : '';
+let strictModel = null;
 
-  const EXACT_MODELS = new Set([
-    'FORTUNER', 'LEGENDER',
-    'INNOVA HYCROSS', 'INNOVA CRYSTA',
-    'GLA', 'GLS', 'E CLASS', 'E200',
-    'X1', 'X3', 'X5', 'X7'
-  ]);
+// 1) Build a model keyword list from MODEL_ALIASES and BRAND_HINTS
+const ALL_MODEL_KEYWORDS = new Set();
 
-  if (EXACT_MODELS.has(rawModel)) {
-    exactModelHit = true;
+// MODEL_ALIASES canonical + synonyms
+if (typeof MODEL_ALIASES !== 'undefined') {
+  for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
+    ALL_MODEL_KEYWORDS.add(canon.toUpperCase());
+    if (Array.isArray(syns)) {
+      for (const s of syns) {
+        if (s) ALL_MODEL_KEYWORDS.add(String(s).toUpperCase());
+      }
+    }
   }
-} catch (e) {}
+}
 
-// ---------------------------------------------------------
-// SPECIAL HANDLING: FORTUNER / LEGENDER — show only their own variants
-// ---------------------------------------------------------
-if (exactModelHit) {
-  const rawModel = best && best.idxModel >= 0
-    ? String(best.row[best.idxModel] || '').toUpperCase()
-    : '';
+// BRAND_HINTS also contains model names
+if (typeof BRAND_HINTS !== 'undefined') {
+  for (const arr of Object.values(BRAND_HINTS)) {
+    if (!Array.isArray(arr)) continue;
+    for (const v of arr) {
+      ALL_MODEL_KEYWORDS.add(String(v).toUpperCase());
+    }
+  }
+}
 
-  const isFortuner = rawModel.includes("FORTUNER");
-  const isLegender = rawModel.includes("LEGENDER");
+// 2) Detect exact model the user typed
+for (const tk of tokens) {
+  const t = String(tk || '').toUpperCase().trim();
+  if (ALL_MODEL_KEYWORDS.has(t)) {
+    strictModel = t;
+    break;
+  }
+}
 
-  if (isFortuner || isLegender) {
+// 3) STRICT FILTER: Only rows of THAT model are allowed
+if (strictModel) {
+  allMatches = allMatches.filter(m => {
+    const mdl = String(m.row[m.idxModel] || '').toUpperCase();
+    return mdl.includes(strictModel);
+  });
 
-    const rows = allMatches.filter(m => {
-      const mdl = String(m.row[m.idxModel] || '').toUpperCase();
-      if (isFortuner) return mdl.includes("FORTUNER");
-      if (isLegender) return mdl.includes("LEGENDER");
-      return false;
+  // If multiple variants exist → respond immediately with a variant list
+  if (allMatches.length > 1) {
+    const out = [];
+    out.push(`*Available variants — ${strictModel}*`);
+
+    allMatches.forEach((m, i) => {
+      const mdl = String(m.row[m.idxModel]   || '');
+      const varr = String(m.row[m.idxVariant] || '');
+      out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
     });
 
-    if (rows.length > 0) {
-
-      const title = isLegender ? "LEGENDER" : "FORTUNER";
-      const list = rows.map((m, i) => {
-        const mdl = String(m.row[m.idxModel]   || '');
-        const varr = String(m.row[m.idxVariant] || '');
-        return `${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`;
-      });
-
-      const out = [`*Available variants — ${title}*`, ...list];
-
-      await waSendText(to, out.join("\n"));
-      return true;
-    }
+    await waSendText(to, out.join("\n"));
+    return true;
   }
 }
 
