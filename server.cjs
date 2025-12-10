@@ -1,13 +1,12 @@
 console.log("🚀 MR.CAR Webhook Server Booted (Verbose Logging ON)");
 
-/* Load .env early so process.env is populated for subsequent reads */
-require('dotenv').config({ debug: false });
-
-
 /* Canonical SIGNATURE_MODEL wired from env */
 const SIGNATURE_MODEL = process.env.OPENAI_MODEL || process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || process.env.ENGINE_USED || 'gpt-4o-mini';
+console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
 /* Auto-insert: use OPENAI_MODEL or ENGINE_USED from env */
 console.log("MODEL SELECTED (SIGNATURE_MODEL)=", SIGNATURE_MODEL);
+console.log('MODEL SELECTED (SIGNATURE_MODEL)=', SIGNATURE_MODEL);
+require('dotenv').config({ debug: false });
 // --- Template names from env (text + media) ---
 const GREETING_TEMPLATE_NAME =
   process.env.GREETING_TEMPLATE_NAME || 'mr_car_broadcast_en';
@@ -91,6 +90,8 @@ function logOnceRag(msg) {
   }
   console.log(msg);
 }
+require('dotenv').config({ debug: false });
+
 /* ===== SUFFIX MATCH PATCH (ZXO / VXO / GXO with loose matching) ===== */
 
 // canonical list – longest-first will be applied below
@@ -169,10 +170,7 @@ const BRAND_HINTS = {
   TOYOTA: [
     'toyota','toyata',
     'innova','crysta','hycross','hykros','hy ryder','hyryder',
-    'fortuner','fortu',
-'legender','legend',
-'glanza','camry','rumion'
-
+    'fortuner','fortu','legender','glanza','camry','rumion'
   ],
   HYUNDAI: [
     'hyundai','hundai',
@@ -217,8 +215,7 @@ const MODEL_ALIASES = {
   'volvo xc90': ['xc90','xc 90'],
   'toyota innova hycross': ['hycross','innova hycross','hycros','hykros'],
   'toyota innova crysta': ['crysta','innova crysta'],
-  'toyota fortuner': ['fortuner','fortu'],
-'toyota legender': ['legender','legend'],
+  'toyota fortuner': ['fortuner','fortu','legender'],
   'toyota hyryder': ['hyryder','hy ryder'],
   'hyundai creta': ['creta'],
   'hyundai venue': ['venue'],
@@ -289,80 +286,43 @@ function detectModelsFromText(text) {
 // - Loan menu: EMI Calculator, Loan Documents, Loan Eligibility.
 // - Central CRM core: /crm/leads (GET), /crm/ingest (POST) for all bots.
 
+require('dotenv').config();
+
 const OpenAI = require("openai");
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY
 });
-// === AI Vision: Analyze car image for faults + repaint + upgrades + PPF advice ===
-async function analyzeCarImageFaultWithOpenAI(imageUrl, userText = "") {
-  const model = process.env.OPENAI_VISION_MODEL || process.env.ENGINE_USED || "gpt-4o-mini";
+// === AI Vision: analyze car fault from an image using OpenAI ===
+async function analyzeCarImageFaultWithOpenAI(imageUrl, userText) {
+  const prompt = `
+You are an experienced car service advisor.
 
-  const systemPrompt = `
-You are *MR.CAR* – a professional car evaluator, bodyshop and detailing advisor.
-You ONLY see 1–2 photos plus a short text from the customer.
+The customer has sent a photo of their car and said:
+"${userText}"
 
-Your goals:
-1) Identify visible issues or risks (mechanical, body, tires, lights, glass, rust, leaks, etc.).
-2) Comment on *paint condition* and *possible repainting*:
-   - Look for colour mismatch between panels.
-   - Uneven orange-peel texture or waviness on one panel vs others.
-   - Masking/paint lines near rubber, chrome, badges, door handles.
-   - Overspray on rubbers or trims.
-   - Unusual panel gaps or alignment.
-   - Scratches/buff marks indicating heavy polishing.
-   You are NOT a lab – clearly state this is a visual opinion, not 100% proof.
-3) Give *PPF / coating / detailing* advice:
-   - When is PPF advisable? (highway usage, new car, expensive colour, lots of chips risk)
-   - Suggest whether full body PPF, frontal kit (bumper+bonnet+mirrors), or only high-contact areas.
-   - Mention cheaper alternatives like ceramic/graphene coating, wax, or only repaint+polish if needed.
-4) Give *upgrade suggestions*:
-   - If interior visible: suggest seat cover type (fabric, PU, leather), colour combos (eg. black–tan, black–red) and possible carbon-fibre or piano-black trim areas (steering, central console, door switch panels).
-   - If exterior mainly visible: suggest alloys, dechroming, black roof, mild spoilers, projector/LED headlamp upgrades – BUT keep it classy, not boy-racer.
-5) If the user text mentions "problem", "noise", "check engine", "warning light", etc., treat that as a service concern and first address that.
-
-Output format (very important):
-1) *Quick Summary* – 2–3 lines.
-2) *Visible Issues / Faults* – bullet points (or "None clearly visible").
-3) *Repaint / Bodywork Opinion* – explain if any panel looks possibly repainted and WHY, with low/medium/high confidence.
-4) *PPF / Protection Advice* – what you recommend (eg. "frontal kit PPF", "only touch-ups and polish", etc.).
-5) *Interior / Exterior Upgrade Ideas* – concise, 3–5 bullets max.
-6) *Disclaimer* – remind that this is based only on photos and is not a physical inspection.
+Tasks:
+- Look at the image and describe any visible damage, dents, scratches, leaks, smoke, tyre wear, rust, or misalignment.
+- If nothing clear is visible, say that clearly.
+- Give 2–3 possible causes in simple language.
+- Suggest whether it is likely safe to drive or they should visit a workshop urgently.
+- Always end with: "This is an approximate opinion based only on the photo. A physical inspection at the workshop is recommended."
 `.trim();
 
-  const userPrompt = `
-User context/message (may be empty):
-"${userText || "N/A"}"
-
-Now analyse the attached car photo(s) and respond in the requested format.
-`.trim();
-
-  const completion = await openai.chat.completions.create({
-    model,
-    messages: [
-      {
-        role: "system",
-        content: systemPrompt
-      },
+  const response = await openai.responses.create({
+    model: "gpt-4.1-mini", // or "gpt-4o-mini" if that's what you're using
+    input: [
       {
         role: "user",
         content: [
-          { type: "text", text: userPrompt },
-          {
-            type: "image_url",
-            image_url: { url: imageUrl }
-          }
+          { type: "input_text", text: prompt },
+          { type: "input_image", image_url: { url: imageUrl } }
         ]
       }
     ]
   });
 
-  const text =
-    (completion.choices &&
-      completion.choices[0] &&
-      completion.choices[0].message &&
-      completion.choices[0].message.content) ||
-    "Sorry, I could not clearly understand this photo. Please send a clearer image.";
-
+  // Node SDK v4: easiest is to use output_text
+  const text = response.output_text || "";
   return text.trim();
 }
 
@@ -375,8 +335,6 @@ const express = require('express');
 const app = express();
 const FormData = require('form-data');
 const crmIngestHandler = require('./routes/crm_ingest.cjs');
-const autoIngest = require('./routes/auto_ingest.cjs');
-
 
 // ---- Delivery status tracking (CRM + console) ----
 const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
@@ -1835,24 +1793,23 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
     return null;
   }
 }
-
 // ============================================================================
-// SMART NEW-CAR INTENT ENGINE + ENHANCED tryQuickNewCarQuote (FULL REPLACEMENT)
-// - Adaptive min-score, normalized comparisons, brand alias strengthening,
-//   softer suffix penalties, robust price index fallback, improved RAG/spec retry,
-//   capped relaxed matches and improved debug logs.
-// NOTE: relies on existing runtime helpers listed earlier in your system.
+// SMART NEW-CAR INTENT ENGINE — SAFE ADDITIVE BLOCK
+// Place ABOVE tryQuickNewCarQuote()
+// This does NOT modify existing logic; only handles new intents FIRST
 // ============================================================================
-
-/* eslint-disable no-unused-vars */
+// ============================================================================
+// SMART NEW-CAR INTENT ENGINE — SAFE ADDITIVE BLOCK
+// ============================================================================
 
 async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
-  const tRaw = String(msgText || "");
-  const t = tRaw.toLowerCase().trim();
+  const t = String(msgText || "").toLowerCase().trim();
 
-  // let the main spec flow handle explicit 'spec' requests
-  if (/\b(spec|specs|specification|specifications)\b/i.test(t)) return false;
+  // If user is clearly asking for technical specs, let main new-car flow handle it
+  if (/\b(spec|specs|specification|specifications)\b/i.test(t)) {
+    return false; // don't consume, allow tryQuickNewCarQuote to run
+  }
 
   // ------------------------------
   // DICTIONARIES
@@ -1876,22 +1833,36 @@ async function trySmartNewCarIntent(msgText, to) {
   // 1️⃣ COMPARISON INTENT
   // ------------------------------
   if (/vs|compare|better|difference between/.test(t)) {
-    const foundModels = (typeof detectModelsFromText === 'function') ? await detectModelsFromText(t) : [];
-    if (foundModels && foundModels.length >= 2) {
+    const foundModels = detectModelsFromText(t);   // uses global MODEL_ALIASES
+
+    if (foundModels.length >= 2) {
       const m1 = foundModels[0];
       const m2 = foundModels[1];
-      const comparison = (typeof SignatureAI_RAG === 'function')
-        ? await SignatureAI_RAG(
-          `Provide a clean customer-friendly comparison between ${m1} and ${m2} covering:\n - Price\n - Engine & performance\n - Mileage\n - Features & safety\n - Comfort & space\n - Best for which type of customer`
-        )
-        : `Comparison: ${m1} vs ${m2}`;
-      await waSendText(to, `*${m1} vs ${m2} — Detailed Comparison*\n\n${comparison}`);
+
+      const comparison = await SignatureAI_RAG(
+        `Provide a clean customer-friendly comparison between ${m1} and ${m2} covering:
+         - Price
+         - Engine & performance
+         - Mileage
+         - Features & safety
+         - Comfort & space
+         - Best for which type of customer`
+      );
+
+      await waSendText(
+        to,
+        `*${m1} vs ${m2} — Detailed Comparison*\n\n${comparison}`
+      );
       setLastService(to, "NEW");
       return true;
-    } else {
-      await waSendText(to, "Please tell me the two car models you want me to compare (e.g., *Creta vs Hyryder*).");
-      return true;
     }
+
+    // Comparison requested but not enough models detected
+    await waSendText(
+      to,
+      "Please tell me the two car models you want me to compare (e.g., *Creta vs Hyryder* or *E Class vs 5 Series*)."
+    );
+    return true;
   }
 
   // ------------------------------
@@ -1899,8 +1870,9 @@ async function trySmartNewCarIntent(msgText, to) {
   // ------------------------------
   let budget = null;
   const budgetMatch = t.match(/\b(\d{1,2})\s?(lakh|lakhs|lac|lacs)\b/);
-  if (budgetMatch) budget = Number(budgetMatch[1]) * 100000;
-  else {
+  if (budgetMatch) {
+    budget = Number(budgetMatch[1]) * 100000;
+  } else {
     const priceNumber = t.match(/\b(\d{5,7})\b/);
     if (priceNumber) {
       const v = Number(priceNumber[1]);
@@ -1925,78 +1897,43 @@ async function trySmartNewCarIntent(msgText, to) {
       { model:"Kia Carens",           type:"MPV",   price:1100000 }
     ];
 
-    try {
-      const sheets = await loadPricingFromSheets();
-      if (sheets && Object.keys(sheets).length) {
-        const dynamicPicks = [];
-        for (const [brand, tab] of Object.entries(sheets)) {
-          if (!tab || !tab.data) continue;
-          const header = Array.isArray(tab.header) ? tab.header.map(h => String(h || '').toUpperCase()) : [];
-          const idxMap = tab.idxMap || toHeaderIndexMap(header);
-          const priceIdx = pickOnRoadPriceIndex(idxMap, (budget && 'DELHI') || '', 'individual') || -1;
-          const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
-          const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+    const picks = CARS.filter(c =>
+      c.price <= budget &&
+      (
+        (wantsSUV && c.type === "SUV") ||
+        (wantsSedan && c.type === "SEDAN") ||
+        (wantsHatch && c.type === "HATCH") ||
+        (!wantsSUV && !wantsSedan && !wantsHatch)  // any body type if none specified
+      )
+    );
 
-          for (const row of tab.data) {
-            let onroad = 0;
-            if (priceIdx >= 0) onroad = Number(String(row[priceIdx] || '').replace(/[,₹\s]/g, '')) || 0;
-            if (!onroad) {
-              for (let i=0;i<row.length;i++) {
-                const v = String(row[i] || '').replace(/[,₹\s]/g,'');
-                if (v && /^\d+$/.test(v)) { const n = Number(v); if (n >= 200000) { onroad = n; break; } }
-              }
-            }
-            if (!onroad) continue;
-            const modelCell = idxModel>=0 ? String(row[idxModel]||'').toLowerCase() : '';
-            const variantCell = idxVariant>=0 ? String(row[idxVariant]||'').toLowerCase() : '';
-            const segText = (modelCell + ' ' + variantCell);
-            let seg = 'ANY';
-            if (/\b(suv|brezza|creta|seltos|sonet|venue|brezza)\b/.test(segText)) seg = 'SUV';
-            if (/\b(sedan|city|verna|civic)\b/.test(segText)) seg = 'SEDAN';
-            if (/\b(hatch|swift|baleno|glanza|alto)\b/.test(segText)) seg = 'HATCH';
-            if ((wantsSUV && seg !== 'SUV') || (wantsSedan && seg !== 'SEDAN') || (wantsHatch && seg !== 'HATCH')) continue;
-            if (onroad <= budget * 1.2) {
-              const titleParts = [];
-              if (idxModel>=0 && row[idxModel]) titleParts.push(String(row[idxModel]).trim());
-              if (idxVariant>=0 && row[idxVariant]) titleParts.push(String(row[idxVariant]).trim());
-              dynamicPicks.push({ brand, model: titleParts.join(' '), onroad, seg });
-            }
-          }
-        }
-        if (dynamicPicks.length) {
-          dynamicPicks.sort((a,b) => Math.abs(a.onroad - budget) - Math.abs(b.onroad - budget));
-          const out = [];
-          out.push(`*Best New Car Options Under ₹${fmtMoney(budget)}*`);
-          out.push('');
-          if (wantsSUV) out.push('• Segment: *SUV*'); else if (wantsSedan) out.push('• Segment: *Sedan*'); else if (wantsHatch) out.push('• Segment: *Hatchback*'); else out.push('• Segment: *Any*');
-          out.push('');
-          dynamicPicks.slice(0,6).forEach(p => out.push(`• *${p.brand} ${p.model || ''}* — On-road ~ ₹${fmtMoney(p.onroad)}`));
-          out.push('', 'Reply with the model name for exact *on-road price*, *offers* and *EMI*.');
-          await waSendText(to, out.join('\n'));
-          setLastService(to, 'NEW');
-          return true;
-        }
-      }
-    } catch (e) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn('Dynamic budget picks failed, falling back to static list:', e && e.message);
-    }
-
-    // Fallback static behaviour
-    const picks = CARS.filter(c => c.price <= budget && ((wantsSUV && c.type === "SUV") || (wantsSedan && c.type === "SEDAN") || (wantsHatch && c.type === "HATCH") || (!wantsSUV && !wantsSedan && !wantsHatch)));
     if (picks.length > 0) {
       const out = [];
       out.push(`*Best New Car Options Under ₹${fmtMoney(budget)}*`);
-      if (wantsSUV) out.push("• Segment: *SUV*"); else if (wantsSedan) out.push("• Segment: *Sedan*"); else if (wantsHatch) out.push("• Segment: *Hatchback*"); else out.push("• Segment: *Any*");
+
+      if (wantsSUV) out.push("• Segment: *SUV*");
+      else if (wantsSedan) out.push("• Segment: *Sedan*");
+      else if (wantsHatch) out.push("• Segment: *Hatchback*");
+      else out.push("• Segment: *Any*");
+
       out.push("");
-      picks.slice(0, 6).forEach(c => { out.push(`• *${c.model}* — starts at ₹${fmtMoney(c.price)}`); });
+
+      picks.slice(0, 6).forEach(c => {
+        out.push(`• *${c.model}* — starts at ₹${fmtMoney(c.price)}`);
+      });
+
       out.push("");
       out.push("Tell me the model name for exact *on-road price*, *offers* and *EMI*.");
-      await waSendText(to, out.join('\n'));
+
+      await waSendText(to, out.join("\n"));
       setLastService(to, "NEW");
       return true;
     }
 
-    await waSendText(to, `I noted your budget of *₹${fmtMoney(budget)}*.\nDo you prefer *SUV*, *Sedan* or *Hatchback*?`);
+    await waSendText(
+      to,
+      `I noted your budget of *₹${fmtMoney(budget)}*.\nDo you prefer *SUV*, *Sedan* or *Hatchback*?`
+    );
     setLastService(to, "NEW");
     return true;
   }
@@ -2006,8 +1943,13 @@ async function trySmartNewCarIntent(msgText, to) {
   // ------------------------------
   for (const ft of FEATURE_TOPICS) {
     if (t.includes(ft)) {
-      const expl = (typeof SignatureAI_RAG === 'function') ? await SignatureAI_RAG(`Explain "${ft}" in simple car-buyer language (2–3 short paragraphs, India context).`) : `Explanation for ${ft}`;
-      await waSendText(to, `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`);
+      const expl = await SignatureAI_RAG(
+        `Explain "${ft}" in simple car-buyer language (2–3 short paragraphs, India context).`
+      );
+      await waSendText(
+        to,
+        `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`
+      );
       setLastService(to, "NEW");
       return true;
     }
@@ -2018,6 +1960,7 @@ async function trySmartNewCarIntent(msgText, to) {
   // ------------------------------
   if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t)) {
     await waSendText(
+      to,
       "*I'll help you pick the right new car.*\n\n" +
       "Please tell me:\n" +
       "1️⃣ Your *budget* (e.g., 10 lakh)\n" +
@@ -2032,9 +1975,13 @@ async function trySmartNewCarIntent(msgText, to) {
   // 5️⃣ WAITING PERIOD & DELIVERY
   // ------------------------------
   for (const [modelName, wait] of Object.entries(WAITING_PERIODS)) {
-    const key = modelName.split(" ")[1] || modelName;
+    const key = modelName.split(" ")[1] || modelName; // e.g. "fortuner" from "toyota fortuner"
     if (t.includes(key.toLowerCase())) {
-      await waSendText(to, `*${modelName.toUpperCase()} — Waiting Period*\n${wait}\n\nTell me your preferred *color* and *variant* to check the closest delivery timeline.`);
+      await waSendText(
+        to,
+        `*${modelName.toUpperCase()} — Waiting Period*\n${wait}\n\n` +
+        "Tell me your preferred *color* and *variant* to check the closest delivery timeline."
+      );
       setLastService(to, "NEW");
       return true;
     }
@@ -2045,6 +1992,7 @@ async function trySmartNewCarIntent(msgText, to) {
   // ------------------------------
   if (/emi|finance|loan|0 down|zero down/.test(t)) {
     await waSendText(
+      to,
       "To calculate your *EMI*, please tell me:\n" +
       "• Car model (e.g., *Fortuner ZX*, *Creta SX*, *City VX*)\n" +
       "• City\n" +
@@ -2058,41 +2006,43 @@ async function trySmartNewCarIntent(msgText, to) {
   return false;
 }
 
-// ---------------- tryQuickNewCarQuote (FULL REWRITE) ----------------
+// ============================================================================
+// END OF SMART BLOCK
+// ============================================================================
+// ---------------- tryQuickNewCarQuote ----------------
 async function tryQuickNewCarQuote(msgText, to) {
   try {
     if (!msgText || !msgText.trim()) return false;
 
-    // If user included a year (e.g. "2024"), treat as USED
+    // If user included a year (e.g. "2024"), treat as USED -> do not serve new-car flow here
     const yearMatch = (String(msgText).match(/\b(19|20)\d{2}\b/) || [])[0];
     if (yearMatch) {
       const y = Number(yearMatch);
       const nowYear = new Date().getFullYear();
       if (y >= 1990 && y <= nowYear) {
-        if (typeof DEBUG !== 'undefined' && DEBUG) console.log('User query contains year -> treat as USED:', msgText);
+        if (DEBUG) console.log('User query contains year -> treat as USED:', msgText);
         return false;
       }
     }
 
     if (!canSendQuote(to)) {
-      await waSendText('You’ve reached today’s assistance limit for quotes. Please try again tomorrow or provide your details for a personalised quote.');
+      await waSendText(
+        to,
+        'You’ve reached today’s assistance limit for quotes. Please try again tomorrow or provide your details for a personalised quote.'
+      );
       return true;
     }
 
     const tables = await loadPricingFromSheets();
-    if (!tables || Object.keys(tables).length === 0) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.log('No pricing tables loaded — aborting new-car quick quote.');
-      return false;
-    }
+    if (!tables || Object.keys(tables).length === 0) return false;
 
-    const tRaw = String(msgText || '');
-    const t = tRaw.toLowerCase();
+    const t = String(msgText || '').toLowerCase();
     const tUpper = t.toUpperCase();
 
     // --- unified brand detection (uses global helper) ---
-    let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
+    let brandGuess = detectBrandFromText(t);
 
-    // city detection (default to delhi)
+    // city detection
     let cityMatch =
       (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/) || [])[1] ||
       null;
@@ -2108,57 +2058,14 @@ async function tryQuickNewCarQuote(msgText, to) {
     }
     const city = cityMatch;
 
-    const profile = (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
-    const audience = /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
+    const profile =
+      (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
 
-    // ---------- BUDGET PARSER ----------
-    function parseBudgetFromText(s) {
-      if (!s) return null;
-      const norm = String(s).toLowerCase().replace(/[,₹]/g, ' ').replace(/\s+/g, ' ').trim();
+    // map profile → audience for price selection
+    const audience =
+      /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
 
-      const plainNum = (norm.match(/\b([0-9]{5,9})\b/ ) || [])[1];
-      if (plainNum) {
-        const v = Number(plainNum);
-        if (v > 10000) return v;
-      }
-
-      let m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(lakh|lac|l|k)\b/);
-      if (!m) m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(l)\b/);
-      if (m) {
-        const v = Number(m[1]) * 100000;
-        if (!Number.isNaN(v)) return v;
-      }
-
-      m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(crore|cr|c)\b/);
-      if (m) {
-        const v = Number(m[1]) * 10000000;
-        if (!Number.isNaN(v)) return v;
-      }
-
-      m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*k\b/);
-      if (m) {
-        const v = Number(m[1]) * 1000;
-        if (!Number.isNaN(v)) return v;
-      }
-
-      const tokens = norm.split(/\s+/).filter(Boolean);
-      for (const tok of tokens) {
-        const n = Number(tok);
-        if (!Number.isNaN(n) && n >= 50000) return n;
-      }
-      return null;
-    }
-
-    const userBudget = parseBudgetFromText(t);
-    let budgetMin = null, budgetMax = null;
-    if (userBudget) {
-      const MARGIN = Number(process.env.NEW_CAR_BUDGET_MARGIN || 0.20);
-      budgetMin = Math.round(userBudget * (1 - MARGIN));
-      budgetMax = Math.round(userBudget * (1 + MARGIN));
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.log("User budget parsed:", userBudget, "range:", budgetMin, budgetMax);
-    }
-
-    // Preprocess input to remove city/profile tokens and normalize
+    // broaden raw: normalize 'auto' / 'automatic' to 'at' to match your variant suffix scheme
     let raw = t
       .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/g, ' ')
       .replace(/\b(individual|company|corporate|firm|personal)\b/g, ' ')
@@ -2169,16 +2076,21 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     if (!raw) return false;
 
+    // base model guess (first few tokens)
     let modelGuess = raw.split(' ').slice(0, 4).join(' ');
     const userNorm = normForMatch(raw);
     const tokens = userNorm.split(' ').filter(Boolean);
 
+    // short token (like "gla", "gls", "x5", "e200")
     const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
     const isShortModelToken = modelTok && modelTok.length <= 4;
 
+    // variant list limit
     const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 12);
+
     const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
 
+    // helper: create loose pattern for suffixes like "zxo", "z x o", "zx", "z xo"
     function _makeLoosePat(sfx) {
       const parts = (sfx || '').toString().toLowerCase().split('');
       const escaped = parts.map(ch => ch.replace(/[^a-z0-9]/g, '\\$&'));
@@ -2187,132 +2099,16 @@ async function tryQuickNewCarQuote(msgText, to) {
 
     const cityToken = city.split(' ')[0].toUpperCase();
 
-    // ----------------- PRECOMPUTE: coreTokens, exactModelHit -----------------
-    const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
-    const coreTokensArr = (userNorm || '').split(' ').filter(tk => tk && !genericWords.has(tk));
-
-    let exactModelHit = false;
-    try {
-      if (typeof MODEL_ALIASES !== 'undefined') {
-        const allModelSyns = new Set();
-        for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
-          if (canon) allModelSyns.add(String(normForMatch(canon)).toUpperCase());
-          if (Array.isArray(syns)) syns.forEach(s => s && allModelSyns.add(String(normForMatch(s)).toUpperCase()));
-        }
-        for (const tk of coreTokensArr) {
-          if (!tk) continue;
-          if (allModelSyns.has(String(normForMatch(tk)).toUpperCase())) {
-            exactModelHit = true; break;
-          }
-        }
-      }
-    } catch (e) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn('exactModelHit detection failed:', e && e.message);
-    }
-
-    // ---------- MULTI-BRAND DETECTION (strengthened) ----------
-    let allowedBrandSet = null;
-
-    if (brandGuess) {
-      allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
-    } else {
-      const allBrands = Object.keys(tables || {});
-      const brandAliasMap = {};
-
-      const normalize = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-
-      // curated model -> brand map (expanded)
-      const commonModelToBrand = {
-        'fortuner': 'TOYOTA', 'legender': 'TOYOTA', 'hycross': 'TOYOTA', 'innova': 'TOYOTA',
-        'x1': 'BMW','x3': 'BMW','x5': 'BMW','creta': 'HYUNDAI','venue': 'HYUNDAI',
-        'city': 'HONDA','swift': 'MARUTI','eeco': 'MARUTI',
-        'grs': 'TOYOTA','zxo': 'TOYOTA','zx': 'TOYOTA','vx': 'TOYOTA','gx': 'TOYOTA','vxo':'TOYOTA','gxo':'TOYOTA'
-      };
-
-      // build alias map from sheet names + normalized tokens
-      for (const b of allBrands) {
-        if (!b) continue;
-        const rawB = String(b).trim();
-        const lower = rawB.toLowerCase();
-        brandAliasMap[normalize(lower)] = rawB;
-        const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
-        if (first) brandAliasMap[normalize(first)] = rawB;
-        const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
-        if (stripped) brandAliasMap[normalize(stripped)] = rawB;
-        if (first && first.length <= 6) brandAliasMap[normalize(first)] = rawB;
-      }
-
-      // merge curated map
-      for (const [m, b] of Object.entries(commonModelToBrand)) {
-        const key = normalize(m);
-        if (key && !brandAliasMap[key]) brandAliasMap[key] = b;
-      }
-
-      // defensive: add model/variant tokens found inside each table
-      try {
-        for (const canonical of Object.keys(tables)) {
-          const entry = tables[canonical];
-          const variants = entry && (entry.models || entry.variants || entry.items || entry.list || []);
-          if (Array.isArray(variants) && variants.length) {
-            for (const v of variants) {
-              if (!v) continue;
-              const vRaw = (typeof v === 'string') ? v : (v.name || v.model || String(v));
-              const key = normalize(vRaw).split(/\s+/)[0];
-              if (key && !brandAliasMap[key]) brandAliasMap[key] = canonical;
-            }
-          } else if (entry && typeof entry === 'object') {
-            for (const k2 of Object.keys(entry)) {
-              const key2 = normalize(k2).split(/\s+/)[0];
-              if (key2 && !brandAliasMap[key2]) brandAliasMap[key2] = canonical;
-            }
-          }
-        }
-      } catch (e) {
-        if (typeof DEBUG !== 'undefined' && DEBUG) console.log("model->brand map error:", e && e.message);
-      }
-
-      // detect brands by tokens & substring
-      const detectedBrands = new Set();
-      const txtLower = normalize(t);
-      const tokensTxt = txtLower.split(/\s+/).filter(Boolean);
-      for (const token of tokensTxt) {
-        const tnorm = token.replace(/[^a-z0-9]/g,'');
-        if (!tnorm) continue;
-        if (brandAliasMap[tnorm]) { detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase()); continue; }
-        if (commonModelToBrand[tnorm]) { detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase()); continue; }
-      }
-
-      for (const b of allBrands) {
-        if (!b) continue;
-        const bLow = normalize(String(b).toLowerCase());
-        if (bLow.length > 2 && txtLower.includes(bLow)) detectedBrands.add(String(b).toUpperCase());
-        if (txtLower.replace(/\s+/g,'').includes(bLow.replace(/\s+/g,''))) detectedBrands.add(String(b).toUpperCase());
-      }
-
-      if (detectedBrands.size > 0) allowedBrandSet = new Set(Array.from(detectedBrands)); else allowedBrandSet = null;
-      if (allowedBrandSet && allowedBrandSet.size === 0) allowedBrandSet = null;
-
-      if (typeof DEBUG !== 'undefined' && DEBUG) {
-        console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,12));
-        console.log("Tokens:", tokensTxt);
-        console.log("Detected brand candidates from text:", Array.from(detectedBrands));
-        console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
-      }
-    }
-
-    // ---------- MATCHING LOOP ----------
-    let allMatches = [];
-
+    const allMatches = [];
     for (const [brand, tab] of Object.entries(tables)) {
       if (!tab || !tab.data) continue;
 
       const brandKey = String(brand || '').toUpperCase();
 
-      // brand lock
-      if (brandGuess && brandKey !== String(brandGuess).toUpperCase()) continue;
-      if (allowedBrandSet && !allowedBrandSet.has(brandKey)) continue;
+      // strong brand lock: if we know the brand, ignore other sheets
+      if (brandGuess && brandKey !== brandGuess.toUpperCase()) continue;
 
-      const header = (Array.isArray(tab.header) ? tab.header : []).map(h => String(h || '').toUpperCase());
+      const header = tab.header.map(h => String(h || '').toUpperCase());
       const idxMap = tab.idxMap || toHeaderIndexMap(header);
       const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
       const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
@@ -2320,51 +2116,45 @@ async function tryQuickNewCarQuote(msgText, to) {
       const idxSuffixCol = header.findIndex(h => h.includes('SUFFIX'));
       const fuelIdx = pickFuelIndex(idxMap);
       const exIdx = detectExShowIdx(idxMap);
-      let globalPriceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience);
-
-      // price-index fallback: try to find any likely price header
-      if (globalPriceIdx < 0) {
-        for (let i=0;i<header.length;i++) {
-          if (/(ON[-_ ]?ROAD|ONROAD|ON[-_ ]?ROAD PRICE|ONROAD PRICE|ONR|O-R|PRICE|O R|ONROAD₹)/i.test(header[i])) {
-            globalPriceIdx = i; break;
-          }
-        }
-      }
+      const globalPriceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience);
 
       for (const row of tab.data) {
         const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
         const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
-        const modelNorm = normForMatch(modelCell || '');
-        const variantNorm = normForMatch(variantCell || '');
+        const modelNorm = normForMatch(modelCell);
+        const variantNorm = normForMatch(variantCell);
 
-        // HARD FILTER for very short model tokens when brand guessed
+        // HARD FILTER for very short model tokens (GLA/GLS/E200/X5 etc.)
         if (brandGuess && isShortModelToken) {
           const modelWords = modelNorm.split(' ').filter(Boolean);
-          if (!modelWords.includes(modelTok)) continue;
+          if (!modelWords.includes(modelTok)) {
+            continue; // row is NOT this model → SKIP
+          }
         }
 
         let score = 0;
 
-        // stronger signals for substring matches (normalized)
-        try {
-          const modelGuessNorm = normForMatch(modelGuess || '');
-          const rawNorm = userNorm;
-          if (modelNorm && modelGuessNorm && modelNorm.includes(modelGuessNorm)) score += 40;
-          if (variantNorm && modelGuessNorm && variantNorm.includes(modelGuessNorm)) score += 45;
-          if (rawNorm && (modelNorm.includes(rawNorm) || variantNorm.includes(rawNorm))) score += 30;
-        } catch (e) {
-          if (modelCell && modelCell.includes(modelGuess)) score += 40;
-          if (variantCell && variantCell.includes(modelGuess)) score += 45;
-          if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
-        }
+        // stronger signals for exact substring matches (keeps prior behaviour)
+        if (modelCell && modelCell.includes(modelGuess)) score += 40;
+        if (variantCell && variantCell.includes(modelGuess)) score += 45;
+        if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
 
-        if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) score += 35;
-        if (userNorm && variantNorm && (variantNorm.includes(userNorm) || userNorm.includes(variantNorm))) score += 35;
+        // normalized-match signals
+        if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) {
+          score += 35;
+        }
+        if (userNorm && variantNorm && (variantNorm.includes(userNorm) || userNorm.includes(variantNorm))) {
+          score += 35;
+        }
 
         let varKwNorm = '';
         let suffixNorm = '';
-        if (idxVarKw >= 0 && row[idxVarKw] != null) varKwNorm = normForMatch(row[idxVarKw]);
-        if (idxSuffixCol >= 0 && row[idxSuffixCol] != null) suffixNorm = normForMatch(row[idxSuffixCol]);
+        if (idxVarKw >= 0 && row[idxVarKw] != null) {
+          varKwNorm = normForMatch(row[idxVarKw]);
+        }
+        if (idxSuffixCol >= 0 && row[idxSuffixCol] != null) {
+          suffixNorm = normForMatch(row[idxSuffixCol]);
+        }
 
         let fuelNorm = '';
         let fuelCell = '';
@@ -2379,90 +2169,55 @@ async function tryQuickNewCarQuote(msgText, to) {
           if (variantNorm && variantNorm.includes(tok)) score += 8;
           if (suffixNorm && suffixNorm.includes(tok)) score += 10;
           if (varKwNorm && varKwNorm.includes(tok)) score += 15;
-          if (fuelNorm && fuelNorm.includes(tok)) score += 6;
+          if (fuelNorm && fuelNorm.includes(tok)) score += 6; // petrol / diesel / hybrid / cng
         }
 
-        // improved suffix detection (loose)
+        // improved suffix detection for ZX/VX/GX/ZXO/VXO/GXO (loose)
         const specialSuffixes = ['zxo', 'gxo', 'vxo', 'zx', 'vx', 'gx'];
         const searchTargets = [variantNorm || '', suffixNorm || '', varKwNorm || '', modelNorm || ''].join(' ');
         let userSuffix = null;
         for (const sfx of specialSuffixes) {
           const pat = _makeLoosePat(sfx);
           if (pat.test(userNorm) || pat.test(searchTargets)) {
-            userSuffix = sfx; break;
+            userSuffix = sfx;
+            break;
           }
         }
         if (userSuffix) {
           const sPat = _makeLoosePat(userSuffix);
           const rowHasSuffix = sPat.test(variantNorm) || sPat.test(suffixNorm) || sPat.test(varKwNorm) || sPat.test(modelNorm);
           if (rowHasSuffix) score += 80;
-          else {
-            // softer penalty: only penalize strongly if user clearly typed suffix longer than 1 char
-            if (userSuffix.length > 1) score -= 8;
-          }
+          else score -= 15; // small penalty if row doesn't show suffix
         }
 
-        // NORMALIZE SPECIAL_WORDS comparison using normForMatch
-        const variantNormUpper = String(normForMatch(String(variantCell || ''))).toUpperCase();
-        const varKwNormUpper = String(varKwNorm || '').toUpperCase();
-        const userNormUpper = String(normForMatch(String(t || ''))).toUpperCase();
+        const variantUpper = String(variantCell || '').toUpperCase();
+        const varKwUpper = String(varKwNorm || '').toUpperCase();
         for (const sw of SPECIAL_WORDS) {
-          if ((variantNormUpper.includes(sw) || varKwNormUpper.includes(sw)) && !userNormUpper.includes(sw)) score -= 25;
-        }
-
-        // a small extra defensive step: if user suffix is very short (<=3) and no allowedBrandSet,
-        // prefer rows that explicitly include the suffix. apply a small penalty otherwise.
-        if (userSuffix && userSuffix.length <= 3 && !allowedBrandSet) {
-          if (!(variantNorm.includes(userSuffix) || varKwNorm.includes(userSuffix) || suffixNorm.includes(userSuffix))) {
-            score -= 10;
+          if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw.toLowerCase())) {
+            score -= 25;
           }
         }
 
-        // require a minimum useful score before considering (adaptive)
-        let ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
-        if ((coreTokensArr && coreTokensArr.length === 1) || isShortModelToken) {
-          ABS_MIN_SCORE = Math.min(8, ABS_MIN_SCORE);
-        }
-        if (score <= 0 || score < ABS_MIN_SCORE) continue;
+        if (score <= 0) continue;
 
-        // pick price column (globalPriceIdx) else fallback to first numeric
+        // pick on-road price column (Delhi INDIVIDUAL / CORPORATE)
         let priceIdx = globalPriceIdx;
         if (priceIdx < 0) {
+          // Fallback: first numeric cell in row
           for (let i = 0; i < row.length; i++) {
             const v = String(row[i] || '').replace(/[,₹\s]/g, '');
             if (v && /^\d+$/.test(v)) {
-              priceIdx = i; break;
+              priceIdx = i;
+              break;
             }
           }
         }
 
         const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
         const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
-        if (!onroad) {
-          if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`skip row: no onroad price for brand=${brandKey} model=${modelCell} variant=${variantCell}`);
-          continue;
-        }
+        if (!onroad) continue;
 
         const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
-
-        // Price-based boosting/penalty when userBudget present
-        let priceOk = true;
-        let priceScoreDelta = 0;
-        if (userBudget) {
-          if (onroad >= budgetMin && onroad <= budgetMax) {
-            priceScoreDelta += 60;
-          } else {
-            const mid = (budgetMin + budgetMax) / 2;
-            const rel = Math.abs(onroad - mid) / (mid || 1);
-            if (rel <= 0.30) priceScoreDelta -= Math.round(rel * 100);
-            else if (rel <= 0.60) priceScoreDelta -= Math.round(rel * 80);
-            else priceOk = false;
-          }
-        }
-        if (!priceOk) {
-          if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`skip row: price out of range for userBudget; onroad=${onroad}, range=${budgetMin}-${budgetMax}`);
-          continue;
-        }
 
         allMatches.push({
           brand: brandKey,
@@ -2472,189 +2227,43 @@ async function tryQuickNewCarQuote(msgText, to) {
           idxMap,
           onroad,
           exShow,
-          score: score + priceScoreDelta,
+          score,
           fuel: fuelCell
         });
       }
     }
 
-    // ---------- PRUNE & RELAXED MATCHING ----------
-    if (!allMatches.length && !userBudget) return false;
+    if (!allMatches.length) return false;
 
-    if (allMatches.length > 0) {
-      const topScore = Math.max(...allMatches.map(m => m.score || 0));
-      const REL_MIN_FRAC = 0.12;
-      const ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
-      const before = allMatches.length;
-      allMatches = allMatches.filter(m => {
-        const s = m.score || 0;
-        if (s < ABS_MIN_SCORE && s < topScore * REL_MIN_FRAC) return false;
-        return true;
-      });
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`Pruned matches: before=${before}, after=${allMatches.length}, topScore=${topScore}`);
-    }
-
-    // Relaxed matching when needed
-    if (userBudget && allMatches.length < 3) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.log("Relaxing budget filter because strict matches < 3.");
-
-      const relaxedMatches = [];
-      const RELAX_LIMIT = Number(process.env.RELAXED_LIMIT || 25);
-      const mid = (budgetMin + budgetMax) / 2;
-
-      for (const [brand, tab] of Object.entries(tables)) {
-        if (!tab || !tab.data) continue;
-        const brandKey2 = String(brand || '').toUpperCase();
-        if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue;
-
-        const header2 = (Array.isArray(tab.header) ? tab.header : []).map(h => String(h || '').toUpperCase());
-        const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
-        let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
-        if (priceIdx2 < 0) {
-          for (let i=0;i<header2.length;i++) {
-            if (/(ON[-_ ]?ROAD|ONROAD|PRICE|ONROAD PRICE)/i.test(header2[i])) { priceIdx2 = i; break; }
-          }
-        }
-
-        for (const row2 of tab.data) {
-          if (relaxedMatches.length >= RELAX_LIMIT) break;
-          const priceStr2 = priceIdx2 >= 0 ? String(row2[priceIdx2] || '') : '';
-          const onroad2 = Number(priceStr2.replace(/[,₹\s]/g, '')) || 0;
-          if (!onroad2) continue;
-          const distFrac = Math.abs(onroad2 - mid) / (mid || 1);
-          if (distFrac <= 1.2) {
-            let rscore = Math.max(5, Math.round(100 - distFrac * 120));
-            relaxedMatches.push({
-              brand: brandKey2,
-              row: row2,
-              idxModel: header2.findIndex(h => h.includes("MODEL") || h.includes("VEHICLE")),
-              idxVariant: header2.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX")),
-              idxMap: idxMap2,
-              onroad: onroad2,
-              exShow: 0,
-              score: rscore,
-              fuel: ""
-            });
-          }
-        }
-        if (relaxedMatches.length >= RELAX_LIMIT) break;
-      }
-      if (relaxedMatches.length) allMatches.push(...relaxedMatches);
-    }
-
-    // sort
-    if (userBudget && allMatches.length) {
-      const mid = (budgetMin + budgetMax) / 2;
-      allMatches.sort((a, b) => {
-        const diff = (b.score || 0) - (a.score || 0);
-        if (diff !== 0) return diff;
-        const da = Math.abs((a.onroad || 0) - mid);
-        const db = Math.abs((b.onroad || 0) - mid);
-        return da - db;
-      });
-    } else {
-      allMatches.sort((a, b) => (b.score || 0) - (a.score || 0));
-    }
-
-    if (typeof DEBUG !== 'undefined' && DEBUG) {
-      console.log("DEBUG_QUICK: tokens=", tokens && tokens.slice(0,6));
-      console.log("DEBUG_QUICK: coreTokens=", coreTokensArr.slice(0,6));
-      console.log("DEBUG_QUICK: allMatches_before=", Array.isArray(allMatches) ? allMatches.length : typeof allMatches);
-      console.log("DEBUG_QUICK top 8:", (allMatches||[]).slice(0,8).map(m=>({brand:m.brand, score:m.score, onroad:m.onroad, model:(m.row && m.idxModel>=0)?m.row[m.idxModel]:null, variant:(m.row && m.idxVariant>=0)?m.row[m.idxVariant]:null})));
-    }
-
-    // ---------------------------------------------------------
-    // STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
-    // ---------------------------------------------------------
-    let strictModel = null;
-    try {
-      const ALL_MODEL_KEYWORDS = new Set();
-      if (typeof MODEL_ALIASES !== 'undefined') {
-        for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
-          if (canon) ALL_MODEL_KEYWORDS.add(String(normForMatch(canon)).toUpperCase());
-          if (Array.isArray(syns)) syns.forEach(s => s && ALL_MODEL_KEYWORDS.add(String(normForMatch(s)).toUpperCase()));
-        }
-      }
-      if (typeof BRAND_HINTS !== 'undefined') {
-        for (const arr of Object.values(BRAND_HINTS)) {
-          if (!Array.isArray(arr)) continue;
-          for (const v of arr) {
-            if (v) ALL_MODEL_KEYWORDS.add(String(normForMatch(v)).toUpperCase());
-          }
-        }
-      }
-
-      const tokenSource = (coreTokensArr && coreTokensArr.length) ? coreTokensArr : (tokens && tokens.length ? tokens : []);
-      for (const tk of tokenSource) {
-        const tku = String(normForMatch(tk || '')).toUpperCase();
-        if (!tku) continue;
-        if (ALL_MODEL_KEYWORDS.has(tku)) { strictModel = tku; break; }
-      }
-    } catch (e) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn('strictModel engine failed:', e && e.message);
-    }
-
-    if (strictModel) {
-      const filteredMatches = allMatches.filter(m => {
-        if (!m || typeof m.idxModel === 'undefined' || m.idxModel < 0) return false;
-        const mdl = String(m.row[m.idxModel] || '').toUpperCase();
-        const mdlNorm = String(normForMatch(mdl)).toUpperCase();
-        return mdlNorm.includes(strictModel);
-      });
-
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.log("DEBUG_QUICK: strictModel=", strictModel, "filteredMatches=", filteredMatches.length);
-
-      if (filteredMatches.length > 0) {
-        allMatches = filteredMatches;
-        if (allMatches.length > 1) {
-          const out = [];
-          out.push(`*Available variants — ${strictModel}*`);
-          allMatches.forEach((m, i) => {
-            const mdl = String(m.row[m.idxModel] || '').trim();
-            const varr = String(m.row[m.idxVariant] || '').trim();
-            out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
-          });
-          await waSendText(to, out.join("\n"));
-          setLastService(to, 'NEW');
-          return true;
-        }
-      } else {
-        strictModel = null;
-      }
-    }
+    // sort by score desc
+    allMatches.sort((a, b) => b.score - a.score);
 
     // if user asked only the brand/model (very short query) — show short variant list
-    if (coreTokensArr.length === 1 && !exactModelHit) {
+    const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
+    const coreTokens = tokens.filter(tk => tk && !genericWords.has(tk));
+    if (coreTokens.length === 1) {
+      // gather top distinct variants for that model/brand
       const distinct = [];
       const seenTitles = new Set();
       for (const m of allMatches) {
-        if (allowedBrandSet && !allowedBrandSet.has(m.brand)) continue;
-        if ((m.score || 0) < Number(process.env.MIN_MATCH_SCORE || 12)) continue;
         const row = m.row;
         const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
         const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
-        const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
+        const titleParts = [];
+        if (modelVal) titleParts.push(modelVal);
+        if (variantVal) titleParts.push(variantVal);
+        const title = titleParts.join(' ').trim();
         if (!title) continue;
-        if (seenTitles.has(title)) continue;
-        seenTitles.add(title);
-        distinct.push({ title, onroad: m.onroad || 0, brand: m.brand, score: m.score || 0 });
+        if (!seenTitles.has(title)) {
+          seenTitles.add(title);
+          distinct.push({ title, onroad: m.onroad, brand: m.brand });
+        }
         if (distinct.length >= VARIANT_LIST_LIMIT) break;
       }
 
       if (distinct.length > 1) {
-        if (userBudget) {
-          const mid = (budgetMin + budgetMax) / 2;
-          distinct.sort((a,b) => (b.score - a.score) || (Math.abs(a.onroad - mid) - Math.abs(b.onroad - mid)));
-        } else {
-          distinct.sort((a,b) => b.score - a.score);
-        }
-
         const lines = [];
-        lines.push(`*Available variants (${distinct.length}) — ${coreTokensArr[0].toUpperCase()}*`);
-        if (userBudget) {
-          lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/100000)/10}L - ${Math.round((budgetMax||userBudget)/100000)/10}L)`);
-          lines.push('');
-        }
+        lines.push(`*Available variants (${distinct.length}) — ${coreTokens[0].toUpperCase()}*`);
         for (let i = 0; i < distinct.length; i++) {
           const d = distinct[i];
           lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
@@ -2672,8 +2281,7 @@ async function tryQuickNewCarQuote(msgText, to) {
     if (!best) return false;
 
     const loanAmt = best.exShow || best.onroad || 0;
-    const roi = Number(process.env.NEW_CAR_ROI || 10.5); // default ROI
-    const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
+    const emi60 = loanAmt ? calcEmiSimple(loanAmt, NEW_CAR_ROI, 60) : 0;
 
     const modelName  = best.idxModel   >= 0 ? String(best.row[best.idxModel]   || '').toUpperCase() : '';
     const variantStr = best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
@@ -2686,42 +2294,67 @@ async function tryQuickNewCarQuote(msgText, to) {
     if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
     if (best.onroad) lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
     if (loanAmt) {
-      lines.push(`*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${roi}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`);
+      lines.push(
+        `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
+      );
     }
-    lines.push('\n*Terms & Conditions Apply ✅*');
+        lines.push('\n*Terms & Conditions Apply ✅*');
 
-    // --- SPEC SHEET: try RAG then SignatureAI_RAG with retry
+    // --- SPEC SHEET: first try RAG, then fallback to Signature AI ---
     try {
+      // 🔥 Make "specs / specification / features" all work
       const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
-      if (specIntent.test(t) || /feature|features/.test(t)) {
+
+      if (specIntent.test(t)) {
         const specQuery = `${best.brand} ${modelName} ${variantStr} full technical specifications for India (engine, bhp, torque, seating, dimensions, tyres, safety, mileage).`;
+
         let specText = "";
 
-        // RAG attempt
+        // 1️⃣ Try direct RAG / vector search first
         try {
           if (typeof findRelevantChunks === "function") {
             const chunks = await findRelevantChunks(specQuery, 4);
             if (Array.isArray(chunks) && chunks.length) {
-              const joined = chunks.map(c => (c.text || c.content || "").trim()).filter(Boolean).join("\n");
-              if (joined && joined.length > 80) specText = joined;
+              const joined = chunks
+                .map(c => (c.text || c.content || "").trim())
+                .filter(Boolean)
+                .join("\n");
+
+              if (joined && joined.length > 80) {
+                specText = joined;
+              }
             }
           }
         } catch (ragErr) {
-          if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec RAG (chunks) failed:", ragErr && (ragErr.message || ragErr));
+          if (DEBUG) console.warn("Spec RAG (chunks) failed:", ragErr && (ragErr.message || ragErr));
         }
 
-        // Signature AI fallback with retry
+        // 2️⃣ Fallback → Signature AI
         if (!specText && typeof SignatureAI_RAG === "function") {
-          const specPrompt = `You are Mr.Car Signature AI.\nProvide a concise bullet-point technical specification for ${best.brand} ${modelName} ${variantStr} (India-spec, approximate ok):\n- Engine & displacement\n- Power (BHP) & torque (Nm)\n- Transmission & drive\n- Fuel & mileage (claimed)\n- Seating\n- Tyres & wheel size\n- Safety features (airbags, ABS, ESP, ADAS)\nKeep it short and whatsapp-friendly.`;
+          const specPrompt = `
+You are Mr.Car Signature AI.
+
+Give a clean, bullet-point technical specification sheet for:
+${best.brand} ${modelName} ${variantStr}
+
+Include (India-spec, approximate ok):
+- Engine type & displacement
+- Power (BHP / kW) and torque (Nm)
+- Transmission (MT / AT / CVT / DCT) and drive type (FWD / RWD / AWD / 4x4)
+- Fuel type and claimed mileage
+- Seating capacity
+- Tyre & wheel size
+- Key safety features (airbags, ABS, ESP, ADAS if applicable)
+Keep it concise, readable on WhatsApp and avoid marketing fluff.
+          `.trim();
+
           try {
-            let aiSpec = await SignatureAI_RAG(specPrompt);
-            if (!aiSpec || aiSpec.trim().length < 40) {
-              const specPrompt2 = `Short bullets (6 lines) for ${best.brand} ${modelName} ${variantStr}: engine, power, transmission, mileage, seating, 2 key safety features.`;
-              aiSpec = await SignatureAI_RAG(specPrompt2);
+            const aiSpec = await SignatureAI_RAG(specPrompt);
+            if (aiSpec && aiSpec.trim().length > 40) {
+              specText = aiSpec.trim();
             }
-            if (aiSpec && aiSpec.trim().length > 30) specText = aiSpec.trim();
           } catch (aiErr) {
-            if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec SignatureAI_RAG retry failed:", aiErr && aiErr.message);
+            if (DEBUG) console.warn("Spec SignatureAI_RAG failed:", aiErr && (aiErr.message || aiErr));
           }
         }
 
@@ -2732,7 +2365,7 @@ async function tryQuickNewCarQuote(msgText, to) {
         }
       }
     } catch (err) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec block failed:", err && (err.message || err));
+      if (DEBUG) console.warn("Spec block failed:", err && (err.message || err));
     }
 
     await waSendText(to, lines.join('\n'));
@@ -2746,10 +2379,6 @@ async function tryQuickNewCarQuote(msgText, to) {
     return false;
   }
 }
-
-// ============================================================================
-// END OF REPLACEMENT BLOCK
-// ============================================================================
 
 // ---------------- webhook verify & health ----------------
 app.get('/healthz', (req, res) => {
@@ -2882,11 +2511,24 @@ app.post('/webhook', async (req, res) => {
       value  = {};
     }
 
-          /* AUTO-INGEST using actual WhatsApp message fields + photo forward + AI vision */
+    /* AUTO-INGEST using actual WhatsApp message fields */
     try {
       const msg     = value.messages?.[0];
       const contact = value.contacts?.[0];
+// ---- 1. FORWARD ANY PHOTO USER SENDS TO ADMIN ----
+try {
+  if (msg && msg.type === "image" && msg.image?.id && ADMIN_WA && msg.from !== ADMIN_WA) {
+    await waForwardImage(
+      ADMIN_WA,
+      msg.image.id,
+      `📷 Customer sent an image\nFrom: ${msg.from}\nName: ${contact?.profile?.name || "UNKNOWN"}`
+    );
 
+    if (DEBUG) console.log("Forwarded user image to admin WA:", msg.image.id);
+  }
+} catch (err) {
+  console.warn("Forward image to admin failed:", err?.message || err);
+}
       if (msg && msg.from) {
         const senderForAuto     = msg.from;
         const senderNameForAuto = contact?.profile?.name || senderForAuto;
@@ -2895,88 +2537,74 @@ app.post('/webhook', async (req, res) => {
           msg.interactive?.button_reply?.title ||
           msg.interactive?.list_reply?.title ||
           "";
+  // ---- AI VISION: if photo + problem words, run fault analysis ----
+  try {
+    if (msg.type === "image" && msg.image?.id) {
+      const caption = msg.image?.caption || "";
+      const combinedText = `${lastMsgForAuto} ${caption}`.toLowerCase();
 
-        // ---- 1. FORWARD ANY PHOTO USER SENDS TO ADMIN ----
-        try {
-          if (msg.type === "image" && msg.image?.id && ADMIN_WA && senderForAuto !== ADMIN_WA) {
-            await waForwardImage(
-              ADMIN_WA,
-              msg.image.id,
-              `📷 Customer sent an image\nFrom: ${senderForAuto}\nName: ${senderNameForAuto || "UNKNOWN"}`
-            );
-            if (DEBUG) console.log("Forwarded user image to admin WA:", msg.image.id);
-          }
-        } catch (err) {
-          console.warn("Forward image to admin failed:", err?.message || err);
-        }
+      const faultIntent = /\b(issue|problem|fault|damage|dent|scratch|leak|oil|noise|sound|smoke|crack|broken|rust)\b/.test(combinedText);
 
-               // ---- 2. AI VISION: TEMP – run for ANY image to test pipeline ----
-        try {
-          if (msg.type === "image" && msg.image?.id) {
-            const caption = msg.image?.caption || "";
-            const combinedText = `${lastMsgForAuto || ""} ${caption || ""}`.toLowerCase();
-
-            if (DEBUG) {
-              console.log("AI VISION candidate image:", {
-                caption,
-                lastMsgForAuto,
-                combinedText
-              });
-            }
-
-            const mediaUrl = await getMediaUrl(msg.image.id);
-            if (mediaUrl) {
-              const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
-              await waSendText(
-                senderForAuto,
-                `*Preliminary check based on your photo:*\n\n${analysis}`
-              );
-              setLastService(senderForAuto, "FAULT_ANALYSIS");
-            } else if (DEBUG) {
-              console.log("AI VISION: no mediaUrl returned for image id:", msg.image.id);
-            }
-          }
-        } catch (err) {
-          console.warn("AI vision fault analysis failed:", err?.message || err);
-          // Do not return; let rest of flow continue
-        }
-
-        // ---- 3. AUTO-INGEST TO CRM (existing behaviour) ----
-        await autoIngest({
-          bot: "MR.CAR",
-          channel: "whatsapp",
-          from: senderForAuto,
-          name: senderNameForAuto,
-          lastMessage: lastMsgForAuto,
-          meta: { source: "webhook-auto" }
-        });
-
-        // ---- 4. ADMIN TEXT ALERT (existing behaviour) ----
-        try {
-          if (ADMIN_WA && senderForAuto !== ADMIN_WA) {
-            const body =
-              `🔔 *New Lead Received*\n\n` +
-              `👤 Name: ${senderNameForAuto}\n` +
-              `📱 Phone: ${senderForAuto}\n` +
-              `💬 Message: ${lastMsgForAuto || 'No text'}\n` +
-              `⏰ Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
-
-            await waSendText(ADMIN_WA, body);
-
-            if (DEBUG) {
-              console.log('Admin alert sent for incoming message', { from: senderForAuto });
-            }
-          }
-        } catch (err) {
-          console.warn(
-            'Admin alert send failed:',
-            err && err.message ? err.message : err
+      if (faultIntent) {
+        const mediaUrl = await getMediaUrl(msg.image.id);
+        if (mediaUrl) {
+          const analysis = await analyzeCarImageFaultWithOpenAI(mediaUrl, combinedText);
+          await waSendText(
+            senderForAuto,
+            `*Preliminary check based on your photo:*\n\n${analysis}`
           );
+          setLastService(senderForAuto, "FAULT_ANALYSIS");
+          // If you want to stop further processing for this message:
+          // return res.sendStatus(200);
         }
+      }
+    }
+  } catch (err) {
+    console.warn("AI vision fault analysis failed:", err && (err.message || err));
+    // Don't break the rest of the flow; just continue.
+  }
+
+// ------------------------------------------------------------------
+// STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
+// ------------------------------------------------------------------
+try {
+  if (await trySmartNewCarIntent(lastMsgForAuto, senderForAuto)) {
+    if (DEBUG) console.log("SMART NEW CAR INTENT handled.");
+    return res.sendStatus(200); 
+  }
+} catch (e) {
+  console.warn("Smart intent engine failed:", e?.message || e);
+}
+        await autoIngest({
+  bot: "MR.CAR",
+  channel: "whatsapp",
+  from: senderForAuto,
+  name: senderNameForAuto,
+  lastMessage: lastMsgForAuto,
+  meta: { source: "webhook-auto" }
+});
+
+// --- Admin Alert: New Lead Received (IST time) ---
+try {
+  if (ADMIN_WA && senderForAuto !== ADMIN_WA) {
+    await waSendText(
+      ADMIN_WA,
+      `🔔 *New Lead Received*\n\n` +
+      `👤 Name: ${senderNameForAuto}\n` +
+      `📱 Phone: ${senderForAuto}\n` +
+      `💬 Message: ${lastMsgForAuto || 'No text'}\n` +
+      `⏰ Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
+    );
+  }
+} catch (e) {
+  console.warn("Admin alert failed:", e?.message || e);
+}
+
       }
     } catch (e) {
       console.warn("AUTO-INGEST FAILED:", e?.message || e);
     }
+
     // ---- WhatsApp delivery status tracking ----
 if (value.statuses && !value.messages) {
   for (const st of value.statuses) {
@@ -3055,38 +2683,6 @@ if (value.statuses && !value.messages) {
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
     }
-    // ------------------------------------------------------------------
-    // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
-    // ------------------------------------------------------------------
-    try {
-      const smartText = (typeof msgText === 'string' && msgText.trim())
-        ? msgText.trim()
-        : '';
-
-      const smartFrom = from || null;
-
-      if (smartText && smartFrom) {
-        const handled = await trySmartNewCarIntent(smartText, smartFrom);
-        if (handled) {
-          if (DEBUG) {
-            console.log("SMART NEW CAR INTENT handled.", {
-              from: smartFrom,
-              text: smartText
-            });
-          }
-          // We already replied from trySmartNewCarIntent
-          return res.sendStatus(200);
-        }
-      } else if (DEBUG) {
-        console.log("SMART NEW CAR INTENT skipped (missing smartText or smartFrom)", {
-          smartText,
-          smartFrom
-        });
-      }
-    } catch (e) {
-      console.warn("Smart intent engine failed:", e?.message || e);
-    }
-
     // ---- Admin alert for real incoming messages ----
     try {
       // Only if ADMIN_WA is set, we have a sender, and it’s not the admin number itself
@@ -3709,80 +3305,22 @@ async function waSendImage(to, mediaId, caption="") {
   return j;
 }
 
-// === WhatsApp media helper: download and expose via our server ===
+// === Get a temporary media URL from WhatsApp for a given media_id ===
 async function getMediaUrl(mediaId) {
-  try {
-    if (!mediaId) throw new Error("No mediaId provided");
-
-    if (!META_TOKEN) {
-      throw new Error("META_TOKEN missing – cannot fetch media");
+  const metaUrl = `https://graph.facebook.com/v21.0/${mediaId}`;
+  const resp = await fetch(metaUrl, {
+    headers: {
+      Authorization: `Bearer ${META_TOKEN}`
     }
+  });
 
-    const GRAPH_API_BASE = process.env.GRAPH_API_BASE || "https://graph.facebook.com/v21.0";
-    const baseUrl = process.env.PUBLIC_BASE_URL || "";
-
-    if (!baseUrl) {
-      throw new Error("PUBLIC_BASE_URL not set – cannot expose media URL");
-    }
-
-    // 1) First call: get media metadata (URL) from Graph API
-    const metaResp = await fetch(`${GRAPH_API_BASE}/${mediaId}`, {
-      headers: {
-        Authorization: `Bearer ${META_TOKEN}`
-      }
-    });
-
-    if (!metaResp.ok) {
-      const errText = await metaResp.text();
-      throw new Error(`Media meta fetch failed: ${metaResp.status} ${errText}`);
-    }
-
-    const metaJson = await metaResp.json();
-    const waUrl = metaJson.url;
-    if (!waUrl) throw new Error("No url field in media meta");
-
-    // 2) Second call: download actual binary from that URL
-    const fileResp = await fetch(waUrl, {
-      headers: {
-        Authorization: `Bearer ${META_TOKEN}`
-      }
-    });
-
-    if (!fileResp.ok) {
-      const errText = await fileResp.text();
-      throw new Error(`Media download failed: ${fileResp.status} ${errText}`);
-    }
-
-    const contentType = fileResp.headers.get("content-type") || "image/jpeg";
-    const arrayBuf = await fileResp.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
-
-    // Decide file extension
-    let ext = "jpg";
-    if (contentType.includes("png")) ext = "png";
-    else if (contentType.includes("jpeg")) ext = "jpg";
-    else if (contentType.includes("webp")) ext = "webp";
-
-    // Ensure uploads directory exists
-    const uploadsDir = path.join(__dirname, "public", "uploads");
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-
-    // Save file locally
-    const fileName = `wa_${mediaId}.${ext}`;
-    const filePath = path.join(uploadsDir, fileName);
-    await fs.promises.writeFile(filePath, buf);
-
-    // Public URL for OpenAI
-    const publicUrl = `${baseUrl}/uploads/${fileName}`;
-    if (DEBUG) console.log("getMediaUrl: stored media at", publicUrl);
-
-    return publicUrl;
-  } catch (err) {
-    console.warn("getMediaUrl failed:", err?.message || err);
-    return null;
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`getMediaUrl failed: ${resp.status} ${txt}`);
   }
+
+  const json = await resp.json();
+  return json.url || null;
 }
 
 // === Forward existing WhatsApp media to another number ===
