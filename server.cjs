@@ -2620,8 +2620,7 @@ if (userBudget && allMatches.length < 3) {
   allMatches.sort((a, b) => b.score - a.score);
 }
 // ---------------------------------------------------------
-// STRICT MODEL MATCHING ENGINE (Option A)
-// Prevents ANY model mixing (Fortuner/Hycross, GLA/X1, etc.)
+// STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
 // ---------------------------------------------------------
 
 let strictModel = null;
@@ -2632,7 +2631,7 @@ const ALL_MODEL_KEYWORDS = new Set();
 // MODEL_ALIASES canonical + synonyms
 if (typeof MODEL_ALIASES !== 'undefined') {
   for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
-    ALL_MODEL_KEYWORDS.add(canon.toUpperCase());
+    if (canon) ALL_MODEL_KEYWORDS.add(String(canon).toUpperCase());
     if (Array.isArray(syns)) {
       for (const s of syns) {
         if (s) ALL_MODEL_KEYWORDS.add(String(s).toUpperCase());
@@ -2641,48 +2640,60 @@ if (typeof MODEL_ALIASES !== 'undefined') {
   }
 }
 
-// BRAND_HINTS also contains model names
+// BRAND_HINTS also contains models/variants
 if (typeof BRAND_HINTS !== 'undefined') {
   for (const arr of Object.values(BRAND_HINTS)) {
     if (!Array.isArray(arr)) continue;
     for (const v of arr) {
-      ALL_MODEL_KEYWORDS.add(String(v).toUpperCase());
+      if (v) ALL_MODEL_KEYWORDS.add(String(v).toUpperCase());
     }
   }
 }
 
-// 2) Detect exact model the user typed
-for (const tk of tokens) {
+// 2) Choose token source: prefer coreTokens (non-generic) if available
+const tokenSource = (typeof coreTokens !== 'undefined' && coreTokens.length) ? coreTokens : (tokens && tokens.length ? tokens : []);
+
+// 3) Detect exact model token (single token only) — conservative detection
+for (const tk of tokenSource) {
   const t = String(tk || '').toUpperCase().trim();
+  if (!t) continue;
   if (ALL_MODEL_KEYWORDS.has(t)) {
     strictModel = t;
     break;
   }
 }
 
-// 3) STRICT FILTER: Only rows of THAT model are allowed
+// 4) If strictModel found, filter into a temporary array first (safe)
 if (strictModel) {
-  allMatches = allMatches.filter(m => {
+  const filteredMatches = allMatches.filter(m => {
+    if (!m || typeof m.idxModel === 'undefined' || m.idxModel < 0) return false;
     const mdl = String(m.row[m.idxModel] || '').toUpperCase();
+    if (!mdl) return false;
     return mdl.includes(strictModel);
   });
 
-  // If multiple variants exist → respond immediately with a variant list
-  if (allMatches.length > 1) {
-    const out = [];
-    out.push(`*Available variants — ${strictModel}*`);
+  // If nothing matched the strictModel, DO NOT enforce strict mode (fallback)
+  if (!filteredMatches.length) {
+    // fallback: don't enforce strict filtering — keep original allMatches
+    strictModel = null;
+  } else {
+    // If there are filtered matches, use them and respond with variants if >1
+    allMatches = filteredMatches;
 
-    allMatches.forEach((m, i) => {
-      const mdl = String(m.row[m.idxModel]   || '');
-      const varr = String(m.row[m.idxVariant] || '');
-      out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
-    });
-
-    await waSendText(to, out.join("\n"));
-    return true;
+    if (allMatches.length > 1) {
+      const out = [];
+      out.push(`*Available variants — ${strictModel}*`);
+      allMatches.forEach((m, i) => {
+        const mdl = String(m.row[m.idxModel]   || '').trim();
+        const varr = String(m.row[m.idxVariant] || '').trim();
+        out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
+      });
+      await waSendText(to, out.join("\n"));
+      return true;
+    }
+    // else, exactly one match remains and regular single-best flow continues
   }
 }
-
     // if user asked only the brand/model (very short query) — show short variant list
     const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
     const coreTokens = tokens.filter(tk => tk && !genericWords.has(tk));
