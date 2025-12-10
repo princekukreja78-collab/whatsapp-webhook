@@ -2206,13 +2206,6 @@ if (brandGuess) {
   // Build a simple alias map from your tables' keys:
   const brandAliasMap = {};
 
-  const commonModelToBrand = {
-    'fortuner': 'TOYOTA',
-    'legender': 'TOYOTA',
-    'hycross': 'TOYOTA'
-  };
-
-
   // small curated model -> brand map to fix common collisions (expand as needed)
   const commonModelToBrand = {
     'fortuner': 'TOYOTA',

@@ -1836,14 +1836,21 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
   }
 }
 // ============================================================================
-// SMART NEW-CAR INTENT ENGINE — SAFE ADDITIVE BLOCK
-// Place ABOVE tryQuickNewCarQuote()
-// This does NOT modify existing logic; only handles new intents FIRST
-// ============================================================================
-// ============================================================================
-// SMART NEW-CAR INTENT ENGINE — SAFE ADDITIVE BLOCK
+// SMART NEW-CAR INTENT ENGINE + ENHANCED tryQuickNewCarQuote
+// Complete additive block — preserves your original features and adds fixes
+// - Fixes: SPECIAL_WORDS comparison, let allMatches, coreTokens/exactModelHit order
+// - Adds: normalized strictModel matching, min-score pruning, capped relaxed matches
+// - Keeps: budget parsing, brand alias strengthening, RAG/spec fallback, waiting periods
+// NOTE: This file expects helper functions available in your runtime:
+//  - normForMatch(s), detectBrandFromText(text), detectModelsFromText(text)
+//  - toHeaderIndexMap(header), pickFuelIndex(idxMap), detectExShowIdx(idxMap),
+//  - pickOnRoadPriceIndex(idxMap, cityToken, audience), loadPricingFromSheets(),
+//  - SignatureAI_RAG(prompt), findRelevantChunks(query, n), waSendText(to, text),
+//  - sendNewCarButtons(to), incrementQuoteUsage(to), setLastService(to),
+//  - canSendQuote(to), fmtMoney(n), calcEmiSimple(amount, roi, months)
 // ============================================================================
 
+// ---------------- SAFE ADDITIVE: handle smart intents BEFORE tryQuickNewCarQuote ----------------
 async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
   const t = String(msgText || "").toLowerCase().trim();
@@ -1875,21 +1882,17 @@ async function trySmartNewCarIntent(msgText, to) {
   // 1️⃣ COMPARISON INTENT
   // ------------------------------
   if (/vs|compare|better|difference between/.test(t)) {
-    const foundModels = detectModelsFromText(t);   // uses global MODEL_ALIASES
+    const foundModels = typeof detectModelsFromText === 'function' ? detectModelsFromText(t) : [];
 
-    if (foundModels.length >= 2) {
+    if (foundModels && foundModels.length >= 2) {
       const m1 = foundModels[0];
       const m2 = foundModels[1];
 
-      const comparison = await SignatureAI_RAG(
-        `Provide a clean customer-friendly comparison between ${m1} and ${m2} covering:
-         - Price
-         - Engine & performance
-         - Mileage
-         - Features & safety
-         - Comfort & space
-         - Best for which type of customer`
-      );
+      const comparison = typeof SignatureAI_RAG === 'function'
+        ? await SignatureAI_RAG(
+          `Provide a clean customer-friendly comparison between ${m1} and ${m2} covering:\n - Price\n - Engine & performance\n - Mileage\n - Features & safety\n - Comfort & space\n - Best for which type of customer`
+        )
+        : `Comparison: ${m1} vs ${m2}`;
 
       await waSendText(
         to,
@@ -1985,9 +1988,9 @@ async function trySmartNewCarIntent(msgText, to) {
   // ------------------------------
   for (const ft of FEATURE_TOPICS) {
     if (t.includes(ft)) {
-      const expl = await SignatureAI_RAG(
-        `Explain "${ft}" in simple car-buyer language (2–3 short paragraphs, India context).`
-      );
+      const expl = typeof SignatureAI_RAG === 'function'
+        ? await SignatureAI_RAG(`Explain "${ft}" in simple car-buyer language (2–3 short paragraphs, India context).`)
+        : `Explanation for ${ft}`;
       await waSendText(
         to,
         `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`
@@ -2048,9 +2051,6 @@ async function trySmartNewCarIntent(msgText, to) {
   return false;
 }
 
-// ============================================================================
-// END OF SMART BLOCK
-// ============================================================================
 // ---------------- tryQuickNewCarQuote ----------------
 async function tryQuickNewCarQuote(msgText, to) {
   try {
@@ -2082,7 +2082,7 @@ async function tryQuickNewCarQuote(msgText, to) {
     const tUpper = t.toUpperCase();
 
     // --- unified brand detection (uses global helper) ---
-    let brandGuess = detectBrandFromText(t);
+    let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
 
     // city detection
     let cityMatch =
@@ -2106,58 +2106,59 @@ async function tryQuickNewCarQuote(msgText, to) {
     // map profile → audience for price selection
     const audience =
       /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
-// ---------- BUDGET PARSER + PRICE RANGE ----------
-function parseBudgetFromText(s) {
-  if (!s) return null;
-  const norm = String(s).toLowerCase().replace(/[,₹]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // direct plain number (no unit)
-  const plainNum = (norm.match(/\b([0-9]{5,9})\b/ ) || [])[1];
-  if (plainNum) {
-    const v = Number(plainNum);
-    if (v > 10000) return v;
-  }
+    // ---------- BUDGET PARSER + PRICE RANGE ----------
+    function parseBudgetFromText(s) {
+      if (!s) return null;
+      const norm = String(s).toLowerCase().replace(/[,₹]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // lakh / lac / l
-  let m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(lakh|lac|l|k)\b/);
-  if (!m) m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(l)\b/);
-  if (m) {
-    const v = Number(m[1]) * 100000;
-    if (!Number.isNaN(v)) return v;
-  }
+      // direct plain number (no unit)
+      const plainNum = (norm.match(/\b([0-9]{5,9})\b/ ) || [])[1];
+      if (plainNum) {
+        const v = Number(plainNum);
+        if (v > 10000) return v;
+      }
 
-  // crore
-  m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(crore|cr|c)\b/);
-  if (m) {
-    const v = Number(m[1]) * 10000000;
-    if (!Number.isNaN(v)) return v;
-  }
+      // lakh / lac / l
+      let m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(lakh|lac|l|k)\b/);
+      if (!m) m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(l)\b/);
+      if (m) {
+        const v = Number(m[1]) * 100000;
+        if (!Number.isNaN(v)) return v;
+      }
 
-  // compact like 15k (thousand)
-  m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*k\b/);
-  if (m) {
-    const v = Number(m[1]) * 1000;
-    if (!Number.isNaN(v)) return v;
-  }
+      // crore
+      m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(crore|cr|c)\b/);
+      if (m) {
+        const v = Number(m[1]) * 10000000;
+        if (!Number.isNaN(v)) return v;
+      }
 
-  // fallback: find any large number token
-  const tokens = norm.split(/\s+/).filter(Boolean);
-  for (const tok of tokens) {
-    const n = Number(tok);
-    if (!Number.isNaN(n) && n >= 50000) return n;
-  }
-  return null;
-}
+      // compact like 15k (thousand)
+      m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*k\b/);
+      if (m) {
+        const v = Number(m[1]) * 1000;
+        if (!Number.isNaN(v)) return v;
+      }
 
-const userBudget = parseBudgetFromText(t); // in INR rupees, integer or null
-let budgetMin = null, budgetMax = null;
-if (userBudget) {
-  const MARGIN = Number(process.env.NEW_CAR_BUDGET_MARGIN || 0.20); // default 20% if not set
-  budgetMin = Math.round(userBudget * (1 - MARGIN));
-  budgetMax = Math.round(userBudget * (1 + MARGIN));
-  if (DEBUG) console.log("User budget parsed:", userBudget, "range:", budgetMin, budgetMax);
-}
-// ---------- end BUDGET block ----------
+      // fallback: find any large number token
+      const tokens = norm.split(/\s+/).filter(Boolean);
+      for (const tok of tokens) {
+        const n = Number(tok);
+        if (!Number.isNaN(n) && n >= 50000) return n;
+      }
+      return null;
+    }
+
+    const userBudget = parseBudgetFromText(t); // in INR rupees, integer or null
+    let budgetMin = null, budgetMax = null;
+    if (userBudget) {
+      const MARGIN = Number(process.env.NEW_CAR_BUDGET_MARGIN || 0.20); // default 20% if not set
+      budgetMin = Math.round(userBudget * (1 - MARGIN));
+      budgetMax = Math.round(userBudget * (1 + MARGIN));
+      if (DEBUG) console.log("User budget parsed:", userBudget, "range:", budgetMin, budgetMax);
+    }
+    // ---------- end BUDGET block ----------
 
     // broaden raw: normalize 'auto' / 'automatic' to 'at' to match your variant suffix scheme
     let raw = t
@@ -2191,221 +2192,139 @@ if (userBudget) {
       return new RegExp('\\b' + escaped.join('[\\s\\W_]*') + '\\b', 'i');
     }
 
-const cityToken = city.split(' ')[0].toUpperCase();
+    const cityToken = city.split(' ')[0].toUpperCase();
 
-const allMatches = [];
+    // ----------------- PRECOMPUTE: coreTokens, exactModelHit -----------------
+    const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
+    const coreTokensArr = (userNorm || '').split(' ').filter(tk => tk && !genericWords.has(tk));
 
-// ---------- MULTI-BRAND DETECTION ----------
-let allowedBrandSet = null;
-
-if (brandGuess) {
-  // If user mentioned a brand, keep it fixed
-  allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
-} else {
-    // Otherwise detect multiple brand names from the query
-  const mentionBrands = [];
-  const allBrands = Object.keys(tables || {});
-
-    // ----------------- STRENGTHEN BRAND DETECTION -----------------
-  // Build a simple alias map from your tables' keys:
-  const brandAliasMap = {};
-
-// DUPLICATE REMOVED:   const commonModelToBrand = {
-// DUPLICATE REMOVED:     'fortuner': 'TOYOTA',
-// DUPLICATE REMOVED:     'legender': 'TOYOTA',
-// DUPLICATE REMOVED:     'hycross': 'TOYOTA'
-// DUPLICATE REMOVED:   };
-// DUPLICATE REMOVED: 
-// DUPLICATE REMOVED: 
-  // small curated model -> brand map to fix common collisions (expand as needed)
-  const commonModelToBrand = {
-    'fortuner': 'TOYOTA',
-    'legender': 'TOYOTA',
-    'hycross': 'TOYOTA',
-    'innova': 'TOYOTA',
-    'x1': 'BMW',
-    'x3': 'BMW',
-    'x5': 'BMW',
-    'creta': 'HYUNDAI',
-    'venue': 'HYUNDAI',
-    'city': 'HONDA',
-    'swift': 'MARUTI',
-    'eeco': 'MARUTI'
-  };
-
-  // helper: normalize token (lowercase, strip non-alphanum except space)
-  const normalize = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // 1) seed alias map from canonical brand keys (your `tables` keys)
-  for (const b of allBrands) {
-    if (!b) continue;
-    const raw = String(b).trim();
-    const lower = raw.toLowerCase();
-    const canonical = raw;
-
-    // whole-name -> canonical
-    brandAliasMap[normalize(lower)] = canonical;
-
-    // first token (toyota innova -> "toyota")
-    const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
-    if (first) brandAliasMap[normalize(first)] = canonical;
-
-    // strip common company suffixes (motors, cars, pvt, ltd, etc)
-    const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
-    if (stripped) brandAliasMap[normalize(stripped)] = canonical;
-
-    // short alias for short first tokens
-    if (first && first.length <= 6) brandAliasMap[normalize(first)] = canonical;
-  }
-
-  // 2) merge the curated model->brand map (ensures fortuner, legender, hycross map to TOYOTA)
-  for (const [m, b] of Object.entries(commonModelToBrand)) {
-    const key = normalize(m);
-    if (key && !brandAliasMap[key]) brandAliasMap[key] = b;
-  }
-
-  // 3) if `tables` contains models/variants, add their tokens too (defensive)
-  try {
-    if (typeof tables === 'object' && tables !== null) {
-      for (const canonical of Object.keys(tables)) {
-        const entry = tables[canonical];
-        // support common shapes: entry.models, entry.variants, entry.items, entry.list
-        const variants = entry && (entry.models || entry.variants || entry.items || entry.list || []);
-        if (Array.isArray(variants) && variants.length) {
-          for (const v of variants) {
-            if (!v) continue;
-            const vRaw = (typeof v === 'string') ? v : (v.name || v.model || String(v));
-            const key = normalize(vRaw).split(/\s+/)[0]; // use first token of variant
-            if (key && !brandAliasMap[key]) brandAliasMap[key] = canonical;
-          }
-        } else if (entry && typeof entry === 'object') {
-          // handle nested object keys as variant names
-          for (const k2 of Object.keys(entry)) {
-            const key2 = normalize(k2).split(/\s+/)[0];
-            if (key2 && !brandAliasMap[key2]) brandAliasMap[key2] = canonical;
+    let exactModelHit = false;
+    try {
+      if (typeof MODEL_ALIASES !== 'undefined') {
+        const allModelSyns = new Set();
+        for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
+          if (canon) allModelSyns.add(String(normForMatch(canon)).toUpperCase());
+          if (Array.isArray(syns)) syns.forEach(s => s && allModelSyns.add(String(normForMatch(s)).toUpperCase()));
+        }
+        for (const tk of coreTokensArr) {
+          if (!tk) continue;
+          if (allModelSyns.has(String(normForMatch(tk)).toUpperCase())) {
+            exactModelHit = true;
+            break;
           }
         }
       }
+    } catch (e) {
+      if (DEBUG) console.warn('exactModelHit detection failed:', e && e.message);
     }
-  } catch (e) {
-    if (DEBUG) console.log("model->brand map error:", e && e.message);
-  }
 
-  // detect brands by token and by substring
-  const detectedBrands = new Set();
-  const txtLower = normalize(t); // normalized text
+    // ---------- MULTI-BRAND DETECTION (strengthened) ----------
+    let allowedBrandSet = null;
 
-  // 1) token-level detection (prefer exact token matches to alias map and curated model map)
-  const tokens = txtLower.split(/\s+/).filter(Boolean);
-  for (const token of tokens) {
-    const tnorm = token.replace(/[^a-z0-9]/g, '');
-    if (!tnorm) continue;
-    // check brand alias map first
-    if (brandAliasMap[tnorm]) {
-      detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase());
-      continue;
-    }
-    // then check curated model->brand fallback
-    if (commonModelToBrand[tnorm]) {
-      detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase());
-      continue;
-    }
-  }
-
-  // 2) substring detection (handles multi-word mentions like "toyota innova")
-  for (const b of allBrands) {
-    if (!b) continue;
-    const bLow = normalize(String(b).toLowerCase());
-    if (bLow.length > 2 && txtLower.includes(bLow)) {
-      detectedBrands.add(String(b).toUpperCase());
-    }
-  }
-
-  // 3) normalise fuzzy single-brand guesses from detectBrandFromText (if present)
-  if (brandGuess) {
-    const bgLow = normalize(String(brandGuess || ''));
-    const exactKey = allBrands.find(x => normalize(String(x)) === bgLow);
-    if (exactKey) {
-      brandGuess = String(exactKey).toUpperCase();
-      detectedBrands.add(brandGuess);
+    if (brandGuess) {
+      allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
     } else {
-      const partial = allBrands.find(x => normalize(String(x)).includes(bgLow));
-      if (partial) {
-        brandGuess = String(partial).toUpperCase();
-        detectedBrands.add(brandGuess);
+      // build brand alias map from tables
+      const allBrands = Object.keys(tables || {});
+      const brandAliasMap = {};
+
+      const normalize = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+      // curated model -> brand
+      const commonModelToBrand = {
+        'fortuner': 'TOYOTA', 'legender': 'TOYOTA', 'hycross': 'TOYOTA', 'innova': 'TOYOTA',
+        'x1': 'BMW','x3': 'BMW','x5': 'BMW','creta': 'HYUNDAI','venue': 'HYUNDAI',
+        'city': 'HONDA','swift': 'MARUTI','eeco': 'MARUTI'
+      };
+
+      for (const b of allBrands) {
+        if (!b) continue;
+        const rawB = String(b).trim();
+        const lower = rawB.toLowerCase();
+        brandAliasMap[normalize(lower)] = rawB;
+        const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
+        if (first) brandAliasMap[normalize(first)] = rawB;
+        const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
+        if (stripped) brandAliasMap[normalize(stripped)] = rawB;
+        if (first && first.length <= 6) brandAliasMap[normalize(first)] = rawB;
+      }
+
+      for (const [m, b] of Object.entries(commonModelToBrand)) {
+        const key = normalize(m);
+        if (key && !brandAliasMap[key]) brandAliasMap[key] = b;
+      }
+
+      // defensive: add model/variant tokens found inside each table (first token)
+      try {
+        for (const canonical of Object.keys(tables)) {
+          const entry = tables[canonical];
+          const variants = entry && (entry.models || entry.variants || entry.items || entry.list || []);
+          if (Array.isArray(variants) && variants.length) {
+            for (const v of variants) {
+              if (!v) continue;
+              const vRaw = (typeof v === 'string') ? v : (v.name || v.model || String(v));
+              const key = normalize(vRaw).split(/\s+/)[0];
+              if (key && !brandAliasMap[key]) brandAliasMap[key] = canonical;
+            }
+          } else if (entry && typeof entry === 'object') {
+            for (const k2 of Object.keys(entry)) {
+              const key2 = normalize(k2).split(/\s+/)[0];
+              if (key2 && !brandAliasMap[key2]) brandAliasMap[key2] = canonical;
+            }
+          }
+        }
+      } catch (e) {
+        if (DEBUG) console.log("model->brand map error:", e && e.message);
+      }
+
+      // detect brands by tokens & substring
+      const detectedBrands = new Set();
+      const txtLower = normalize(t);
+      const tokensTxt = txtLower.split(/\s+/).filter(Boolean);
+      for (const token of tokensTxt) {
+        const tnorm = token.replace(/[^a-z0-9]/g, '');
+        if (!tnorm) continue;
+        if (brandAliasMap[tnorm]) {
+          detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase());
+          continue;
+        }
+        if (commonModelToBrand[tnorm]) {
+          detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase());
+          continue;
+        }
+      }
+
+      for (const b of allBrands) {
+        if (!b) continue;
+        const bLow = normalize(String(b).toLowerCase());
+        if (bLow.length > 2 && txtLower.includes(bLow)) detectedBrands.add(String(b).toUpperCase());
+        if (txtLower.replace(/\s+/g, '').includes(bLow.replace(/\s+/g, ''))) detectedBrands.add(String(b).toUpperCase());
+      }
+
+      if (detectedBrands.size > 0) allowedBrandSet = new Set(Array.from(detectedBrands));
+      else allowedBrandSet = null;
+
+      if (allowedBrandSet && allowedBrandSet.size === 0) allowedBrandSet = null;
+
+      if (DEBUG) {
+        console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,12));
+        console.log("Tokens:", tokensTxt);
+        console.log("Detected brand candidates from text:", Array.from(detectedBrands));
+        console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
       }
     }
-  }
 
-  // Finalize allowedBrandSet: prefer explicit detected brands, else fall back to brandGuess if present
-  if (detectedBrands.size > 0) {
-    allowedBrandSet = new Set(Array.from(detectedBrands));
-  } else if (brandGuess) {
-    allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
-  } else {
-    allowedBrandSet = null; // keep null to allow all brands
-  }
+    // ---------- MATCHING LOOP ----------
+    let allMatches = []; // use let so we can reassign filtered versions safely
 
-  // Safety fallback: if a Set was created but ended up empty, treat as ALL (null)
-  if (allowedBrandSet && allowedBrandSet.size === 0) {
-    if (DEBUG) console.log("allowedBrandSet empty -> switching to ALL (null) fallback");
-    allowedBrandSet = null;
-  }
-
-  if (DEBUG) {
-    console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,12));
-    console.log("Tokens:", tokens);
-    console.log("Detected brand candidates from text:", Array.from(detectedBrands));
-    console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
-  }
-  // ----------------- END brand strengthening -----------------
-  
-  const txt = t.toLowerCase();
-// --- strengthened multi-brand detection ---
-for (const b of allBrands) {
-  const bNorm = b.toLowerCase();
-  // exact brand word match → very strong signal
-  if (txt.includes(bNorm)) {
-    mentionBrands.push(b);
-  }
-  // remove spaces: "landrover" = "land rover"
-  if (txt.replace(/\s+/g, '').includes(bNorm.replace(/\s+/g, ''))) {
-    mentionBrands.push(b);
-  }
-}
-
-// If multiple brands found → pick the strongest one
-if (mentionBrands.length === 1) {
-  brandGuess = mentionBrands[0];
-} else if (mentionBrands.length > 1) {
-  // choose brand mention with longest overlap
-  brandGuess = mentionBrands.sort((a, b) => b.length - a.length)[0];
-}
-  for (const b of allBrands) {
-    const bLow = String(b || '').toLowerCase();
-    if (!bLow) continue;
-
-    // clean: remove symbols (toyota → toyota, mahindra-suv → mahindra)
-    const bClean = bLow.replace(/[^a-z0-9]/g, ' ').split(/\s+/)[0];
-
-    if (bClean && txt.includes(bClean)) {
-      mentionBrands.push(String(b).toUpperCase());
-    }
-  }
-  if (mentionBrands.length) {
-    allowedBrandSet = new Set(mentionBrands);
-    if (DEBUG) console.log("Multi-brand detection:", mentionBrands);
-  }
-}
-// ---------- END MULTI-BRAND DETECTION ----------
-
-for (const [brand, tab] of Object.entries(tables)) {
-       if (!tab || !tab.data) continue;
+    for (const [brand, tab] of Object.entries(tables)) {
+      if (!tab || !tab.data) continue;
 
       const brandKey = String(brand || '').toUpperCase();
 
       // strong brand lock: if we know the brand, ignore other sheets
-      if (brandGuess && brandKey !== brandGuess.toUpperCase()) continue;
+      if (brandGuess && brandKey !== String(brandGuess).toUpperCase()) continue;
+      if (allowedBrandSet && !allowedBrandSet.has(brandKey)) continue;
 
       const header = tab.header.map(h => String(h || '').toUpperCase());
       const idxMap = tab.idxMap || toHeaderIndexMap(header);
@@ -2426,17 +2345,24 @@ for (const [brand, tab] of Object.entries(tables)) {
         // HARD FILTER for very short model tokens (GLA/GLS/E200/X5 etc.)
         if (brandGuess && isShortModelToken) {
           const modelWords = modelNorm.split(' ').filter(Boolean);
-          if (!modelWords.includes(modelTok)) {
-            continue; // row is NOT this model → SKIP
-          }
+          if (!modelWords.includes(modelTok)) continue; // row is NOT this model → SKIP
         }
 
         let score = 0;
 
-        // stronger signals for exact substring matches (keeps prior behaviour)
-        if (modelCell && modelCell.includes(modelGuess)) score += 40;
-        if (variantCell && variantCell.includes(modelGuess)) score += 45;
-        if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
+        // stronger signals for exact substring matches (keeps prior behaviour) — prefer normalized compares
+        try {
+          const modelGuessNorm = normForMatch(modelGuess || '');
+          const rawNorm = userNorm;
+          if (modelNorm && modelGuessNorm && modelNorm.includes(modelGuessNorm)) score += 40;
+          if (variantNorm && modelGuessNorm && variantNorm.includes(modelGuessNorm)) score += 45;
+          if (rawNorm && (modelNorm.includes(rawNorm) || variantNorm.includes(rawNorm))) score += 30;
+        } catch (e) {
+          // fallback to previous raw string checks
+          if (modelCell && modelCell.includes(modelGuess)) score += 40;
+          if (variantCell && variantCell.includes(modelGuess)) score += 45;
+          if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
+        }
 
         // normalized-match signals
         if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) {
@@ -2492,12 +2418,15 @@ for (const [brand, tab] of Object.entries(tables)) {
         const variantUpper = String(variantCell || '').toUpperCase();
         const varKwUpper = String(varKwNorm || '').toUpperCase();
         for (const sw of SPECIAL_WORDS) {
-          if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw.toLowerCase())) {
+          // both sides uppercase for correct comparison — only penalise if user did not ask for it
+          if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw)) {
             score -= 25;
           }
         }
-	
-        if (score <= 0) continue;
+
+        // require a minimum useful score before considering
+        const ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
+        if (score <= 0 || score < ABS_MIN_SCORE) continue;
 
         // pick on-road price column (Delhi INDIVIDUAL / CORPORATE)
         let priceIdx = globalPriceIdx;
@@ -2518,229 +2447,233 @@ for (const [brand, tab] of Object.entries(tables)) {
 
         const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
 
-       let priceOk = true;
-let priceScoreDelta = 0;
+        // Price-based boosting/penalty when user provided budget
+        let priceOk = true;
+        let priceScoreDelta = 0;
 
-if (userBudget) {
-  if (onroad >= budgetMin && onroad <= budgetMax) {
-    priceScoreDelta += 60;
-  } else {
-    const mid = (budgetMin + budgetMax) / 2;
-    const rel = Math.abs(onroad - mid) / (mid || 1);
+        if (userBudget) {
+          if (onroad >= budgetMin && onroad <= budgetMax) {
+            priceScoreDelta += 60;
+          } else {
+            const mid = (budgetMin + budgetMax) / 2;
+            const rel = Math.abs(onroad - mid) / (mid || 1);
 
-    // allow up to 60% price float when no strict matches exist
-if (rel <= 0.30) {
-  priceScoreDelta -= Math.round(rel * 100);
-} else if (rel <= 0.60) {
-  priceScoreDelta -= Math.round(rel * 80);   // still consider, but lower score
-} else {
-  priceOk = false; // completely irrelevant model
-}
+            if (rel <= 0.30) {
+              priceScoreDelta -= Math.round(rel * 100);
+            } else if (rel <= 0.60) {
+              priceScoreDelta -= Math.round(rel * 80);
+            } else {
+              priceOk = false; // completely irrelevant model
+            }
+          }
+        }
 
-  }
-}
+        if (!priceOk) continue;
 
-if (!priceOk) continue;
-
-allMatches.push({
-  brand: brandKey,
-  row,
-  idxModel,
-  idxVariant,
-  idxMap,
-  onroad,
-  exShow,
-  score: score + priceScoreDelta,
-  fuel: fuelCell
-});
+        allMatches.push({
+          brand: brandKey,
+          row,
+          idxModel,
+          idxVariant,
+          idxMap,
+          onroad,
+          exShow,
+          score: score + priceScoreDelta,
+          fuel: fuelCell
+        });
       }
     }
 
-   // ---------- RELAXED MATCHING (safe) ----------
-// Relax only if there are *very few* strict matches
-if (userBudget && allMatches.length < 3) {
-
-  if (DEBUG) console.log("Relaxing budget filter because strict matches < 3.");
-
-  const relaxedMatches = [];
-
-  for (const [brand, tab] of Object.entries(tables)) {
-    if (!tab || !tab.data) continue;
-
-    const brandKey2 = String(brand || '').toUpperCase();
-
-    // respect brand lock — avoid mixing Toyota with Maruti etc.
-    if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue;
-
-    const header2 = tab.header.map(h => String(h || '').toUpperCase());
-    const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
-    const priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
-
-    for (const row2 of tab.data) {
-      const priceStr2 = priceIdx2 >= 0 ? String(row2[priceIdx2] || '') : '';
-      const onroad2 = Number(priceStr2.replace(/[,₹\s]/g, '')) || 0;
-      if (!onroad2) continue;
-
-      // lower priority so strict matches stay top-ranked
-      relaxedMatches.push({
-        brand: brandKey2,
-        row: row2,
-        idxModel: header2.findIndex(h => h.includes("MODEL") || h.includes("VEHICLE")),
-        idxVariant: header2.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX")),
-        idxMap: idxMap2,
-        onroad: onroad2,
-        exShow: 0,
-        score: 0,
-        fuel: ""
-      });
+    // ---------- PRUNE & RELAXED MATCHING ----------
+    if (!allMatches.length) {
+      // If no strict matches and no userBudget, bail out early
+      if (!userBudget) return false;
     }
-  }
 
-  // append relaxed matches AFTER strict matches
-  if (relaxedMatches.length) {
-    allMatches.push(...relaxedMatches);
-  }
-} else if (!userBudget && !allMatches.length) {
-  // no budget + no matches → fail cleanly
-  return false;
-}
-// ---------- END RELAXED MATCHING ----------
+    // prune extremely weak results (absolute & relative floor)
+    if (allMatches.length > 0) {
+      const topScore = Math.max(...allMatches.map(m => m.score || 0));
+      const REL_MIN_FRAC = 0.12;
+      const ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
+      const before = allMatches.length;
+      allMatches = allMatches.filter(m => {
+        const s = m.score || 0;
+        if (s < ABS_MIN_SCORE && s < topScore * REL_MIN_FRAC) return false;
+        return true;
+      });
+      if (DEBUG) console.log(`Pruned matches: before=${before}, after=${allMatches.length}, topScore=${topScore}`);
+    }
 
-    // sort by score desc
-    if (userBudget) {
-  const mid = (budgetMin + budgetMax) / 2;
-  allMatches.sort((a, b) => {
-    const diff = b.score - a.score;
-    if (diff !== 0) return diff;
-    const da = Math.abs((a.onroad || 0) - mid);
-    const db = Math.abs((b.onroad || 0) - mid);
-    return da - db; // closer to budget comes first
-  });
-} else {
-  allMatches.sort((a, b) => b.score - a.score);
-}
-console.log("DEBUG_QUICK: tokens=", tokens && tokens.slice(0,6));
-console.log("DEBUG_QUICK: coreTokens=", (typeof coreTokens !== 'undefined') ? coreTokens.slice(0,6) : 'undef');
-console.log("DEBUG_QUICK: allMatches_before=", Array.isArray(allMatches) ? allMatches.length : typeof allMatches);
+    // Relaxed matching: only when userBudget present and strict matches < 3
+    if (userBudget && allMatches.length < 3) {
+      if (DEBUG) console.log("Relaxing budget filter because strict matches < 3.");
 
-// ---------------------------------------------------------
-// STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
-// Inserted: enforces one-model-only responses when user typed a known model token.
-// ---------------------------------------------------------
+      const relaxedMatches = [];
+      const RELAX_LIMIT = Number(process.env.RELAXED_LIMIT || 25);
+      const mid = (budgetMin + budgetMax) / 2;
 
-let strictModel = null;
+      for (const [brand, tab] of Object.entries(tables)) {
+        if (!tab || !tab.data) continue;
+        const brandKey2 = String(brand || '').toUpperCase();
+        if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue;
 
-// Build a model keyword list from MODEL_ALIASES and BRAND_HINTS
-const ALL_MODEL_KEYWORDS = new Set();
-if (typeof MODEL_ALIASES !== 'undefined') {
-  for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
-    if (canon) ALL_MODEL_KEYWORDS.add(String(canon).toUpperCase());
-    if (Array.isArray(syns)) {
-      for (const s of syns) {
-        if (s) ALL_MODEL_KEYWORDS.add(String(s).toUpperCase());
+        const header2 = tab.header.map(h => String(h || '').toUpperCase());
+        const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
+        const priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
+
+        for (const row2 of tab.data) {
+          if (relaxedMatches.length >= RELAX_LIMIT) break;
+          const priceStr2 = priceIdx2 >= 0 ? String(row2[priceIdx2] || '') : '';
+          const onroad2 = Number(priceStr2.replace(/[,₹\s]/g, '')) || 0;
+          if (!onroad2) continue;
+          const distFrac = Math.abs(onroad2 - mid) / (mid || 1);
+          if (distFrac <= 1.2) {
+            let rscore = Math.max(5, Math.round(100 - distFrac * 120));
+            relaxedMatches.push({
+              brand: brandKey2,
+              row: row2,
+              idxModel: header2.findIndex(h => h.includes("MODEL") || h.includes("VEHICLE")),
+              idxVariant: header2.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX")),
+              idxMap: idxMap2,
+              onroad: onroad2,
+              exShow: 0,
+              score: rscore,
+              fuel: ""
+            });
+          }
+        }
+        if (relaxedMatches.length >= RELAX_LIMIT) break;
+      }
+      if (relaxedMatches.length) allMatches.push(...relaxedMatches);
+    }
+
+    // sort by score desc; if budget present, prefer closeness to budget
+    if (userBudget && allMatches.length) {
+      const mid = (budgetMin + budgetMax) / 2;
+      allMatches.sort((a, b) => {
+        const diff = (b.score || 0) - (a.score || 0);
+        if (diff !== 0) return diff;
+        const da = Math.abs((a.onroad || 0) - mid);
+        const db = Math.abs((b.onroad || 0) - mid);
+        return da - db; // closer to budget comes first
+      });
+    } else {
+      allMatches.sort((a, b) => (b.score || 0) - (a.score || 0));
+    }
+
+    if (DEBUG) {
+      console.log("DEBUG_QUICK: tokens=", tokens && tokens.slice(0,6));
+      console.log("DEBUG_QUICK: coreTokens=", coreTokensArr.slice(0,6));
+      console.log("DEBUG_QUICK: allMatches_before=", Array.isArray(allMatches) ? allMatches.length : typeof allMatches);
+      console.log("DEBUG_QUICK top 8:", (allMatches||[]).slice(0,8).map(m=>({brand:m.brand, score:m.score, onroad:m.onroad, model:(m.row && m.idxModel>=0)?m.row[m.idxModel]:null, variant:(m.row && m.idxVariant>=0)?m.row[m.idxVariant]:null})));
+    }
+
+    // ---------------------------------------------------------
+    // STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
+    // ---------------------------------------------------------
+    let strictModel = null;
+
+    try {
+      const ALL_MODEL_KEYWORDS = new Set();
+      if (typeof MODEL_ALIASES !== 'undefined') {
+        for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
+          if (canon) ALL_MODEL_KEYWORDS.add(String(normForMatch(canon)).toUpperCase());
+          if (Array.isArray(syns)) syns.forEach(s => s && ALL_MODEL_KEYWORDS.add(String(normForMatch(s)).toUpperCase()));
+        }
+      }
+      if (typeof BRAND_HINTS !== 'undefined') {
+        for (const arr of Object.values(BRAND_HINTS)) {
+          if (!Array.isArray(arr)) continue;
+          for (const v of arr) {
+            if (v) ALL_MODEL_KEYWORDS.add(String(normForMatch(v)).toUpperCase());
+          }
+        }
+      }
+
+      const tokenSource = (coreTokensArr && coreTokensArr.length) ? coreTokensArr : (tokens && tokens.length ? tokens : []);
+      for (const tk of tokenSource) {
+        const tku = String(normForMatch(tk || '')).toUpperCase();
+        if (!tku) continue;
+        if (ALL_MODEL_KEYWORDS.has(tku)) { strictModel = tku; break; }
+      }
+    } catch (e) {
+      if (DEBUG) console.warn('strictModel engine failed:', e && e.message);
+    }
+
+    if (strictModel) {
+      const filteredMatches = allMatches.filter(m => {
+        if (!m || typeof m.idxModel === 'undefined' || m.idxModel < 0) return false;
+        const mdl = String(m.row[m.idxModel] || '').toUpperCase();
+        const mdlNorm = String(normForMatch(mdl)).toUpperCase();
+        return mdlNorm.includes(strictModel);
+      });
+
+      if (DEBUG) console.log("DEBUG_QUICK: strictModel=", strictModel, "filteredMatches=", filteredMatches.length);
+
+      if (filteredMatches.length > 0) {
+        allMatches = filteredMatches; // adopt filtered set
+
+        if (allMatches.length > 1) {
+          const out = [];
+          out.push(`*Available variants — ${strictModel}*`);
+          allMatches.forEach((m, i) => {
+            const mdl = String(m.row[m.idxModel] || '').trim();
+            const varr = String(m.row[m.idxVariant] || '').trim();
+            out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
+          });
+          await waSendText(to, out.join("\n"));
+          setLastService(to, 'NEW');
+          return true;
+        }
+        // else single match — continue
+      } else {
+        strictModel = null; // fallback
       }
     }
-  }
-}
-if (typeof BRAND_HINTS !== 'undefined') {
-  for (const arr of Object.values(BRAND_HINTS)) {
-    if (!Array.isArray(arr)) continue;
-    for (const v of arr) {
-      if (v) ALL_MODEL_KEYWORDS.add(String(v).toUpperCase());
-    }
-  }
-}
 
-// Prefer coreTokens (non-generic) when available
-const tokenSource = (typeof coreTokens !== 'undefined' && coreTokens.length) ? coreTokens : (tokens && tokens.length ? tokens : []);
-
-// Conservative detection: single-token exact match only (avoid false positives)
-for (const tk of tokenSource) {
-  const t = String(tk || '').toUpperCase().trim();
-  if (!t) continue;
-  if (ALL_MODEL_KEYWORDS.has(t)) {
-    strictModel = t;
-    break;
-  }
-}
-
-// Safe-apply strict filter into temporary array
-if (strictModel) {
-  const filteredMatches = allMatches.filter(m => {
-    if (!m || typeof m.idxModel === 'undefined' || m.idxModel < 0) return false;
-    const mdl = String(m.row[m.idxModel] || '').toUpperCase();
-    if (!mdl) return false;
-    return mdl.includes(strictModel);
-  });
-
-console.log("DEBUG_QUICK: strictModel=", strictModel, "filteredMatches=", filteredMatches.length);
-
-  // If nothing matched the strictModel, DO NOT enforce strict mode (fallback)
-  if (!filteredMatches.length) {
-    strictModel = null;
-  } else {
-    // Use the filtered results
-    allMatches = filteredMatches;
-
-    // If multiple variants exist => reply with variant list and terminate
-    if (allMatches.length > 1) {
-      const out = [];
-      out.push(`*Available variants — ${strictModel}*`);
-      allMatches.forEach((m, i) => {
-        const mdl = String(m.row[m.idxModel]   || '').trim();
-        const varr = String(m.row[m.idxVariant] || '').trim();
-        out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
-      });
-
-console.log("DEBUG_QUICK: sending variant list for", strictModel, "count=", allMatches.length);
-
-      await waSendText(to, out.join("\n"));
-      return true;
-    }
-    // else exactly 1 match — continue to single-best output below
-  }
-}
     // if user asked only the brand/model (very short query) — show short variant list
-    const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
-    const coreTokens = tokens.filter(tk => tk && !genericWords.has(tk));
-    // Do NOT enter variant-pooling mode for exact model matches
-if (coreTokens.length === 1 && !exactModelHit) {
+    if (coreTokensArr.length === 1 && !exactModelHit) {
       // gather top distinct variants for that model/brand
       const distinct = [];
       const seenTitles = new Set();
       for (const m of allMatches) {
+        if (allowedBrandSet && !allowedBrandSet.has(m.brand)) continue;
+        if ((m.score || 0) < Number(process.env.MIN_MATCH_SCORE || 12)) continue;
         const row = m.row;
         const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
         const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
-        const titleParts = [];
-        if (modelVal) titleParts.push(modelVal);
-        if (variantVal) titleParts.push(variantVal);
-        const title = titleParts.join(' ').trim();
+        const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
         if (!title) continue;
-        if (!seenTitles.has(title)) {
-          seenTitles.add(title);
-          distinct.push({ title, onroad: m.onroad, brand: m.brand });
-        }
+        if (seenTitles.has(title)) continue;
+        seenTitles.add(title);
+        distinct.push({ title, onroad: m.onroad || 0, brand: m.brand, score: m.score || 0 });
         if (distinct.length >= VARIANT_LIST_LIMIT) break;
       }
 
       if (distinct.length > 1) {
-       const lines = [];
-lines.push(`*Available variants (${distinct.length}) — ${coreTokens[0].toUpperCase()}*`);
+        // sort distinct by score then by budget closeness
+        if (userBudget) {
+          const mid = (budgetMin + budgetMax) / 2;
+          distinct.sort((a,b) => (b.score - a.score) || (Math.abs(a.onroad - mid) - Math.abs(b.onroad - mid)));
+        } else {
+          distinct.sort((a,b) => b.score - a.score);
+        }
 
-// show budget if user provided one
-if (userBudget) {
-  lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/1000)/1000}L - ${Math.round((budgetMax||userBudget)/1000)/1000}L)`);
-  lines.push(''); // blank line
-}
+        const lines = [];
+        lines.push(`*Available variants (${distinct.length}) — ${coreTokensArr[0].toUpperCase()}*`);
 
-for (let i = 0; i < distinct.length; i++) {
-  const d = distinct[i];
-  lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
-}
-lines.push('');
-lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
-await waSendText(to, lines.join('\n'));
+        if (userBudget) {
+          lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/100000)/10}L - ${Math.round((budgetMax||userBudget)/100000)/10}L)`);
+          lines.push('');
+        }
+
+        for (let i = 0; i < distinct.length; i++) {
+          const d = distinct[i];
+          lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
+        }
+        lines.push('');
+        lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
+        await waSendText(to, lines.join('\n'));
 
         setLastService(to, 'NEW');
         return true;
@@ -2769,11 +2702,10 @@ await waSendText(to, lines.join('\n'));
         `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
       );
     }
-        lines.push('\n*Terms & Conditions Apply ✅*');
+    lines.push('\n*Terms & Conditions Apply ✅*');
 
     // --- SPEC SHEET: first try RAG, then fallback to Signature AI ---
     try {
-      // 🔥 Make "specs / specification / features" all work
       const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
 
       if (specIntent.test(t)) {
@@ -2850,6 +2782,10 @@ Keep it concise, readable on WhatsApp and avoid marketing fluff.
     return false;
   }
 }
+
+// ============================================================================
+// END OF BLOCK
+// ============================================================================
 
 // ---------------- webhook verify & health ----------------
 app.get('/healthz', (req, res) => {
