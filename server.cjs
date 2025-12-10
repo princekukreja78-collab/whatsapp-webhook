@@ -1835,34 +1835,28 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
     return null;
   }
 }
+
 // ============================================================================
-// SMART NEW-CAR INTENT ENGINE — FULL CONSOLIDATED VERSION
-// Complete, ready-to-drop file. Preserves your original features and applies
-// robust fixes: brand alias strengthening, tolerant short-token handling,
-// normalized strict-model filtering, price-index heuristics, score pruning,
-// capped relaxed matches, token-based & highest-onroad fallbacks for single-best.
-//
-// This file expects the following helper functions available in your runtime:
-//   normForMatch(s), detectBrandFromText(text), detectModelsFromText(text),
-//   toHeaderIndexMap(header), pickFuelIndex(idxMap), detectExShowIdx(idxMap),
-//   pickOnRoadPriceIndex(idxMap, cityToken, audience), loadPricingFromSheets(),
-//   SignatureAI_RAG(prompt), findRelevantChunks(query, n), waSendText(to, text),
-//   sendNewCarButtons(to), incrementQuoteUsage(to), setLastService(to),
-//   canSendQuote(to), fmtMoney(n), calcEmiSimple(amount, roi, months)
-//
-// Environment knobs (optional):
-//   MIN_MATCH_SCORE (default 12), NEW_CAR_BUDGET_MARGIN (default 0.20),
-//   VARIANT_LIST_LIMIT (default 12), RELAXED_LIMIT (default 25)
+// SMART NEW-CAR INTENT ENGINE + ENHANCED tryQuickNewCarQuote (FULL REPLACEMENT)
+// - Adaptive min-score, normalized comparisons, brand alias strengthening,
+//   softer suffix penalties, robust price index fallback, improved RAG/spec retry,
+//   capped relaxed matches and improved debug logs.
+// NOTE: relies on existing runtime helpers listed earlier in your system.
 // ============================================================================
 
-// ---------------- SAFE ADDITIVE: handle smart intents BEFORE tryQuickNewCarQuote ----------------
+/* eslint-disable no-unused-vars */
+
 async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
-  const t = String(msgText || "").toLowerCase().trim();
+  const tRaw = String(msgText || "");
+  const t = tRaw.toLowerCase().trim();
 
-  // If user is clearly asking for technical specs, let main new-car flow handle it
+  // let the main spec flow handle explicit 'spec' requests
   if (/\b(spec|specs|specification|specifications)\b/i.test(t)) return false;
 
+  // ------------------------------
+  // DICTIONARIES
+  // ------------------------------
   const FEATURE_TOPICS = [
     "adas","cvt","at","mt","diesel","hybrid","ev","awd","4x4","cruise","toyota safety sense",
     "airbags","turbo","sunroof","engine","mileage","bs6","e20"
@@ -1878,327 +1872,812 @@ async function trySmartNewCarIntent(msgText, to) {
     "toyota hyryder": "6–10 weeks."
   };
 
-  // 1) Comparison intent
-  if (/\b(vs|compare|better|difference between)\b/.test(t)) {
-    const foundModels = typeof detectModelsFromText === 'function' ? detectModelsFromText(t) : [];
+  // ------------------------------
+  // 1️⃣ COMPARISON INTENT
+  // ------------------------------
+  if (/vs|compare|better|difference between/.test(t)) {
+    const foundModels = (typeof detectModelsFromText === 'function') ? await detectModelsFromText(t) : [];
     if (foundModels && foundModels.length >= 2) {
       const m1 = foundModels[0];
       const m2 = foundModels[1];
-      const comparison = typeof SignatureAI_RAG === 'function'
-        ? await SignatureAI_RAG(`Provide a clean customer-friendly comparison between ${m1} and ${m2} covering:\n- Price\n- Engine & performance\n- Mileage\n- Features & safety\n- Comfort & space\n- Best for which type of customer`)
+      const comparison = (typeof SignatureAI_RAG === 'function')
+        ? await SignatureAI_RAG(
+          `Provide a clean customer-friendly comparison between ${m1} and ${m2} covering:\n - Price\n - Engine & performance\n - Mileage\n - Features & safety\n - Comfort & space\n - Best for which type of customer`
+        )
         : `Comparison: ${m1} vs ${m2}`;
       await waSendText(to, `*${m1} vs ${m2} — Detailed Comparison*\n\n${comparison}`);
       setLastService(to, "NEW");
       return true;
+    } else {
+      await waSendText(to, "Please tell me the two car models you want me to compare (e.g., *Creta vs Hyryder*).");
+      return true;
     }
-    await waSendText(to, "Please tell me the two car models you want me to compare (e.g., *Creta vs Hyryder*).");
-    return true;
   }
 
-  // 2) Budget intent
+  // ------------------------------
+  // 2️⃣ BUDGET INTENT (SUV / Sedan / Hatch)
+  // ------------------------------
   let budget = null;
   const budgetMatch = t.match(/\b(\d{1,2})\s?(lakh|lakhs|lac|lacs)\b/);
   if (budgetMatch) budget = Number(budgetMatch[1]) * 100000;
   else {
     const priceNumber = t.match(/\b(\d{5,7})\b/);
-    if (priceNumber) { const v = Number(priceNumber[1]); if (v >= 300000 && v <= 4000000) budget = v; }
+    if (priceNumber) {
+      const v = Number(priceNumber[1]);
+      if (v >= 300000 && v <= 4000000) budget = v;
+    }
   }
+
   const wantsSUV = /\bsuv\b/.test(t);
   const wantsSedan = /\bsedan\b/.test(t);
   const wantsHatch = /\bhatch|hatchback\b/.test(t);
 
   if (budget) {
     const CARS = [
-      { model:"Toyota Glanza", type:"HATCH", price:750000 },
-      { model:"Toyota Hyryder", type:"SUV", price:1200000 },
-      { model:"Toyota Rumion", type:"MPV", price:1100000 },
-      { model:"Hyundai Creta", type:"SUV", price:1150000 },
-      { model:"Hyundai Venue", type:"SUV", price:900000 },
-      { model:"Honda City", type:"SEDAN", price:1200000 },
-      { model:"Maruti Brezza", type:"SUV", price:900000 },
-      { model:"Kia Sonet", type:"SUV", price:900000 },
-      { model:"Kia Carens", type:"MPV", price:1100000 }
+      { model:"Toyota Glanza",        type:"HATCH", price:750000 },
+      { model:"Toyota Hyryder",       type:"SUV",   price:1200000 },
+      { model:"Toyota Rumion",        type:"MPV",   price:1100000 },
+      { model:"Hyundai Creta",        type:"SUV",   price:1150000 },
+      { model:"Hyundai Venue",        type:"SUV",   price:900000 },
+      { model:"Honda City",           type:"SEDAN", price:1200000 },
+      { model:"Maruti Brezza",        type:"SUV",   price:900000 },
+      { model:"Kia Sonet",            type:"SUV",   price:900000 },
+      { model:"Kia Carens",           type:"MPV",   price:1100000 }
     ];
-    const picks = CARS.filter(c => c.price <= budget && ((wantsSUV && c.type==='SUV') || (wantsSedan && c.type==='SEDAN') || (wantsHatch && c.type==='HATCH') || (!wantsSUV && !wantsSedan && !wantsHatch)));
-    if (picks.length) {
-      const out = [`*Best New Car Options Under ₹${fmtMoney(budget)}*`, ''];
-      if (wantsSUV) out.push('• Segment: *SUV*'); else if (wantsSedan) out.push('• Segment: *Sedan*'); else if (wantsHatch) out.push('• Segment: *Hatchback*'); else out.push('• Segment: *Any*');
-      out.push(''); picks.slice(0,6).forEach(c => out.push(`• *${c.model}* — starts at ₹${fmtMoney(c.price)}`));
-      out.push('', 'Tell me the model name for exact *on-road price*, *offers* and *EMI*.');
+
+    try {
+      const sheets = await loadPricingFromSheets();
+      if (sheets && Object.keys(sheets).length) {
+        const dynamicPicks = [];
+        for (const [brand, tab] of Object.entries(sheets)) {
+          if (!tab || !tab.data) continue;
+          const header = Array.isArray(tab.header) ? tab.header.map(h => String(h || '').toUpperCase()) : [];
+          const idxMap = tab.idxMap || toHeaderIndexMap(header);
+          const priceIdx = pickOnRoadPriceIndex(idxMap, (budget && 'DELHI') || '', 'individual') || -1;
+          const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+          const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+
+          for (const row of tab.data) {
+            let onroad = 0;
+            if (priceIdx >= 0) onroad = Number(String(row[priceIdx] || '').replace(/[,₹\s]/g, '')) || 0;
+            if (!onroad) {
+              for (let i=0;i<row.length;i++) {
+                const v = String(row[i] || '').replace(/[,₹\s]/g,'');
+                if (v && /^\d+$/.test(v)) { const n = Number(v); if (n >= 200000) { onroad = n; break; } }
+              }
+            }
+            if (!onroad) continue;
+            const modelCell = idxModel>=0 ? String(row[idxModel]||'').toLowerCase() : '';
+            const variantCell = idxVariant>=0 ? String(row[idxVariant]||'').toLowerCase() : '';
+            const segText = (modelCell + ' ' + variantCell);
+            let seg = 'ANY';
+            if (/\b(suv|brezza|creta|seltos|sonet|venue|brezza)\b/.test(segText)) seg = 'SUV';
+            if (/\b(sedan|city|verna|civic)\b/.test(segText)) seg = 'SEDAN';
+            if (/\b(hatch|swift|baleno|glanza|alto)\b/.test(segText)) seg = 'HATCH';
+            if ((wantsSUV && seg !== 'SUV') || (wantsSedan && seg !== 'SEDAN') || (wantsHatch && seg !== 'HATCH')) continue;
+            if (onroad <= budget * 1.2) {
+              const titleParts = [];
+              if (idxModel>=0 && row[idxModel]) titleParts.push(String(row[idxModel]).trim());
+              if (idxVariant>=0 && row[idxVariant]) titleParts.push(String(row[idxVariant]).trim());
+              dynamicPicks.push({ brand, model: titleParts.join(' '), onroad, seg });
+            }
+          }
+        }
+        if (dynamicPicks.length) {
+          dynamicPicks.sort((a,b) => Math.abs(a.onroad - budget) - Math.abs(b.onroad - budget));
+          const out = [];
+          out.push(`*Best New Car Options Under ₹${fmtMoney(budget)}*`);
+          out.push('');
+          if (wantsSUV) out.push('• Segment: *SUV*'); else if (wantsSedan) out.push('• Segment: *Sedan*'); else if (wantsHatch) out.push('• Segment: *Hatchback*'); else out.push('• Segment: *Any*');
+          out.push('');
+          dynamicPicks.slice(0,6).forEach(p => out.push(`• *${p.brand} ${p.model || ''}* — On-road ~ ₹${fmtMoney(p.onroad)}`));
+          out.push('', 'Reply with the model name for exact *on-road price*, *offers* and *EMI*.');
+          await waSendText(to, out.join('\n'));
+          setLastService(to, 'NEW');
+          return true;
+        }
+      }
+    } catch (e) {
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn('Dynamic budget picks failed, falling back to static list:', e && e.message);
+    }
+
+    // Fallback static behaviour
+    const picks = CARS.filter(c => c.price <= budget && ((wantsSUV && c.type === "SUV") || (wantsSedan && c.type === "SEDAN") || (wantsHatch && c.type === "HATCH") || (!wantsSUV && !wantsSedan && !wantsHatch)));
+    if (picks.length > 0) {
+      const out = [];
+      out.push(`*Best New Car Options Under ₹${fmtMoney(budget)}*`);
+      if (wantsSUV) out.push("• Segment: *SUV*"); else if (wantsSedan) out.push("• Segment: *Sedan*"); else if (wantsHatch) out.push("• Segment: *Hatchback*"); else out.push("• Segment: *Any*");
+      out.push("");
+      picks.slice(0, 6).forEach(c => { out.push(`• *${c.model}* — starts at ₹${fmtMoney(c.price)}`); });
+      out.push("");
+      out.push("Tell me the model name for exact *on-road price*, *offers* and *EMI*.");
       await waSendText(to, out.join('\n'));
-      setLastService(to, 'NEW');
+      setLastService(to, "NEW");
       return true;
     }
+
     await waSendText(to, `I noted your budget of *₹${fmtMoney(budget)}*.\nDo you prefer *SUV*, *Sedan* or *Hatchback*?`);
-    setLastService(to, 'NEW');
+    setLastService(to, "NEW");
     return true;
   }
 
-  // 3) Feature explanations (RAG)
-  for (const ft of FEATURE_TOPICS) if (t.includes(ft)) {
-    const expl = typeof SignatureAI_RAG === 'function' ? await SignatureAI_RAG(`Explain "${ft}" in simple car-buyer language (2–3 short paragraphs, India context).`) : `Explanation for ${ft}`;
-    await waSendText(to, `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`);
-    setLastService(to, 'NEW');
-    return true;
+  // ------------------------------
+  // 3️⃣ FEATURE EXPLANATION MODE (RAG)
+  // ------------------------------
+  for (const ft of FEATURE_TOPICS) {
+    if (t.includes(ft)) {
+      const expl = (typeof SignatureAI_RAG === 'function') ? await SignatureAI_RAG(`Explain "${ft}" in simple car-buyer language (2–3 short paragraphs, India context).`) : `Explanation for ${ft}`;
+      await waSendText(to, `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`);
+      setLastService(to, "NEW");
+      return true;
+    }
   }
 
-  // 4) Recommendation prompt
+  // ------------------------------
+  // 4️⃣ RECOMMENDATION MODE
+  // ------------------------------
   if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t)) {
-    await waSendText(to, "*I'll help you pick the right new car.*\n\nPlease tell me:\n1️⃣ Your *budget* (e.g., 10 lakh)\n2️⃣ Preferred *body type* (SUV / Sedan / Hatchback)\n3️⃣ Your *city*\n\nI’ll suggest the best 2–3 options with on-road pricing.");
+    await waSendText(
+      "*I'll help you pick the right new car.*\n\n" +
+      "Please tell me:\n" +
+      "1️⃣ Your *budget* (e.g., 10 lakh)\n" +
+      "2️⃣ Preferred *body type* (SUV / Sedan / Hatchback)\n" +
+      "3️⃣ Your *city*\n\n" +
+      "I’ll suggest the best 2–3 options with on-road pricing."
+    );
     return true;
   }
 
-  // 5) Waiting periods
+  // ------------------------------
+  // 5️⃣ WAITING PERIOD & DELIVERY
+  // ------------------------------
   for (const [modelName, wait] of Object.entries(WAITING_PERIODS)) {
-    const key = modelName.split(' ')[1] || modelName;
+    const key = modelName.split(" ")[1] || modelName;
     if (t.includes(key.toLowerCase())) {
       await waSendText(to, `*${modelName.toUpperCase()} — Waiting Period*\n${wait}\n\nTell me your preferred *color* and *variant* to check the closest delivery timeline.`);
-      setLastService(to, 'NEW');
+      setLastService(to, "NEW");
       return true;
     }
   }
 
-  // 6) Finance / EMI
+  // ------------------------------
+  // 6️⃣ FINANCE / EMI MODE
+  // ------------------------------
   if (/emi|finance|loan|0 down|zero down/.test(t)) {
-    await waSendText(to, "To calculate your *EMI*, please tell me:\n• Car model (e.g., *Fortuner ZX*, *Creta SX*, *City VX*)\n• City\n• Individual or Corporate profile\n\nI’ll share the approx 60-month EMI and typical down payment.");
+    await waSendText(
+      "To calculate your *EMI*, please tell me:\n" +
+      "• Car model (e.g., *Fortuner ZX*, *Creta SX*, *City VX*)\n" +
+      "• City\n" +
+      "• Individual or Corporate profile\n\n" +
+      "I’ll share the approx 60-month EMI and typical down payment."
+    );
     return true;
   }
 
+  // If no smart intent detected → let main flow handle it
   return false;
 }
 
-// ---------------- tryQuickNewCarQuote ----------------
+// ---------------- tryQuickNewCarQuote (FULL REWRITE) ----------------
 async function tryQuickNewCarQuote(msgText, to) {
   try {
     if (!msgText || !msgText.trim()) return false;
 
+    // If user included a year (e.g. "2024"), treat as USED
     const yearMatch = (String(msgText).match(/\b(19|20)\d{2}\b/) || [])[0];
-    if (yearMatch) { const y = Number(yearMatch); const nowYear = new Date().getFullYear(); if (y >= 1990 && y <= nowYear) { if (DEBUG) console.log('User query contains year -> treat as USED:', msgText); return false; } }
+    if (yearMatch) {
+      const y = Number(yearMatch);
+      const nowYear = new Date().getFullYear();
+      if (y >= 1990 && y <= nowYear) {
+        if (typeof DEBUG !== 'undefined' && DEBUG) console.log('User query contains year -> treat as USED:', msgText);
+        return false;
+      }
+    }
 
-    if (!canSendQuote(to)) { await waSendText(to, 'You’ve reached today’s assistance limit for quotes. Please try again tomorrow or provide your details for a personalised quote.'); return true; }
+    if (!canSendQuote(to)) {
+      await waSendText('You’ve reached today’s assistance limit for quotes. Please try again tomorrow or provide your details for a personalised quote.');
+      return true;
+    }
 
-    const tables = await loadPricingFromSheets(); if (!tables || Object.keys(tables).length === 0) return false;
+    const tables = await loadPricingFromSheets();
+    if (!tables || Object.keys(tables).length === 0) {
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.log('No pricing tables loaded — aborting new-car quick quote.');
+      return false;
+    }
 
-    const t = String(msgText || '').toLowerCase(); const tUpper = t.toUpperCase();
+    const tRaw = String(msgText || '');
+    const t = tRaw.toLowerCase();
+    const tUpper = t.toUpperCase();
+
+    // --- unified brand detection (uses global helper) ---
     let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
 
-    let cityMatch = (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/) || [])[1] || null;
-    if (cityMatch) { if (cityMatch === 'dilli') cityMatch = 'delhi'; if (cityMatch === 'hr') cityMatch = 'haryana'; if (cityMatch === 'chd') cityMatch = 'chandigarh'; if (cityMatch === 'up') cityMatch = 'uttar pradesh'; if (cityMatch === 'hp') cityMatch = 'himachal pradesh'; if (cityMatch === 'bombay') cityMatch = 'mumbai'; } else cityMatch = 'delhi';
+    // city detection (default to delhi)
+    let cityMatch =
+      (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/) || [])[1] ||
+      null;
+    if (cityMatch) {
+      if (cityMatch === 'dilli') cityMatch = 'delhi';
+      if (cityMatch === 'hr') cityMatch = 'haryana';
+      if (cityMatch === 'chd') cityMatch = 'chandigarh';
+      if (cityMatch === 'up') cityMatch = 'uttar pradesh';
+      if (cityMatch === 'hp') cityMatch = 'himachal pradesh';
+      if (cityMatch === 'bombay') cityMatch = 'mumbai';
+    } else {
+      cityMatch = 'delhi';
+    }
     const city = cityMatch;
 
     const profile = (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
     const audience = /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
 
-    // Budget parser
+    // ---------- BUDGET PARSER ----------
     function parseBudgetFromText(s) {
-      if (!s) return null; const norm = String(s).toLowerCase().replace(/[,₹]/g,' ').replace(/\s+/g,' ').trim();
-      const plainNum = (norm.match(/\b([0-9]{5,9})\b/) || [])[1]; if (plainNum) { const v = Number(plainNum); if (v > 10000) return v; }
-      let m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(lakh|lac|l|k)\b/); if (!m) m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(l)\b/); if (m) { const v = Number(m[1]) * 100000; if (!Number.isNaN(v)) return v; }
-      m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(crore|cr|c)\b/); if (m) { const v = Number(m[1]) * 10000000; if (!Number.isNaN(v)) return v; }
-      m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*k\b/); if (m) { const v = Number(m[1]) * 1000; if (!Number.isNaN(v)) return v; }
-      const tokens = norm.split(/\s+/).filter(Boolean); for (const tok of tokens) { const n = Number(tok); if (!Number.isNaN(n) && n >= 50000) return n; } return null;
+      if (!s) return null;
+      const norm = String(s).toLowerCase().replace(/[,₹]/g, ' ').replace(/\s+/g, ' ').trim();
+
+      const plainNum = (norm.match(/\b([0-9]{5,9})\b/ ) || [])[1];
+      if (plainNum) {
+        const v = Number(plainNum);
+        if (v > 10000) return v;
+      }
+
+      let m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(lakh|lac|l|k)\b/);
+      if (!m) m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(l)\b/);
+      if (m) {
+        const v = Number(m[1]) * 100000;
+        if (!Number.isNaN(v)) return v;
+      }
+
+      m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*(crore|cr|c)\b/);
+      if (m) {
+        const v = Number(m[1]) * 10000000;
+        if (!Number.isNaN(v)) return v;
+      }
+
+      m = norm.match(/\b([0-9]+(?:\.[0-9]+)?)\s*k\b/);
+      if (m) {
+        const v = Number(m[1]) * 1000;
+        if (!Number.isNaN(v)) return v;
+      }
+
+      const tokens = norm.split(/\s+/).filter(Boolean);
+      for (const tok of tokens) {
+        const n = Number(tok);
+        if (!Number.isNaN(n) && n >= 50000) return n;
+      }
+      return null;
     }
 
-    const userBudget = parseBudgetFromText(t); let budgetMin = null, budgetMax = null; if (userBudget) { const MARGIN = Number(process.env.NEW_CAR_BUDGET_MARGIN || 0.20); budgetMin = Math.round(userBudget * (1 - MARGIN)); budgetMax = Math.round(userBudget * (1 + MARGIN)); if (DEBUG) console.log("User budget parsed:", userBudget, "range:", budgetMin, budgetMax); }
+    const userBudget = parseBudgetFromText(t);
+    let budgetMin = null, budgetMax = null;
+    if (userBudget) {
+      const MARGIN = Number(process.env.NEW_CAR_BUDGET_MARGIN || 0.20);
+      budgetMin = Math.round(userBudget * (1 - MARGIN));
+      budgetMax = Math.round(userBudget * (1 + MARGIN));
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.log("User budget parsed:", userBudget, "range:", budgetMin, budgetMax);
+    }
 
-    let raw = t.replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/g,' ').replace(/\b(individual|company|corporate|firm|personal)\b/g,' ').replace(/\b(automatic transmission|automatic|auto)\b/g,' at ').replace(/[^\w\s]/g,' ').replace(/\s+/g,' ').trim(); if (!raw) return false;
+    // Preprocess input to remove city/profile tokens and normalize
+    let raw = t
+      .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/g, ' ')
+      .replace(/\b(individual|company|corporate|firm|personal)\b/g, ' ')
+      .replace(/\b(automatic transmission|automatic|auto)\b/g, ' at ')
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-    let modelGuess = raw.split(' ').slice(0,4).join(' ');
+    if (!raw) return false;
+
+    let modelGuess = raw.split(' ').slice(0, 4).join(' ');
     const userNorm = normForMatch(raw);
     const tokens = userNorm.split(' ').filter(Boolean);
+
     const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
     const isShortModelToken = modelTok && modelTok.length <= 4;
+
     const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 12);
-    const SPECIAL_WORDS = ['LEADER','LEGENDER','GRS'];
-    function _makeLoosePat(sfx) { const parts = (sfx||'').toString().toLowerCase().split(''); const escaped = parts.map(ch=>ch.replace(/[^a-z0-9]/g,'\\$&')); return new RegExp('\\b'+escaped.join('[\\s\\W_]*')+'\\b','i'); }
-    const cityToken = city.split(' ')[0].toUpperCase();
+    const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
 
-    // precompute core tokens & exactModelHit
-    const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
-    const coreTokensArr = (userNorm||'').split(' ').filter(tk=>tk && !genericWords.has(tk));
-    let exactModelHit = false;
-    try { if (typeof MODEL_ALIASES !== 'undefined') { const allModelSyns = new Set(); for (const [canon,syns] of Object.entries(MODEL_ALIASES)) { if (canon) allModelSyns.add(String(normForMatch(canon)).toUpperCase()); if (Array.isArray(syns)) syns.forEach(s=>s && allModelSyns.add(String(normForMatch(s)).toUpperCase())); } for (const tk of coreTokensArr) { if (!tk) continue; if (allModelSyns.has(String(normForMatch(tk)).toUpperCase())) { exactModelHit = true; break; } } } } catch(e){ if (DEBUG) console.warn('exactModelHit detection failed:', e && e.message); }
-
-    // MULTI-BRAND DETECTION — build alias map and detect allowedBrandSet
-    let allowedBrandSet = null;
-    if (brandGuess) allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
-    else {
-      const allBrands = Object.keys(tables||{});
-      const brandAliasMap = {};
-      const normalize = s=>String(s||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
-      const commonModelToBrand = {'fortuner':'TOYOTA','legender':'TOYOTA','hycross':'TOYOTA','innova':'TOYOTA','x1':'BMW','x3':'BMW','x5':'BMW','creta':'HYUNDAI','venue':'HYUNDAI','city':'HONDA','swift':'MARUTI','eeco':'MARUTI'};
-      for (const b of allBrands) { if (!b) continue; const bRaw = String(b).trim(); const low = bRaw.toLowerCase(); brandAliasMap[normalize(low)] = bRaw; const first = low.split(/\s+/)[0]; if (first) brandAliasMap[normalize(first)] = bRaw; brandAliasMap[normalize(low.replace(/\s+/g,''))] = bRaw; brandAliasMap[normalize(low.replace(/[^a-z0-9]/g,''))] = bRaw; }
-      for (const [m,b] of Object.entries(commonModelToBrand)) { const key = normalize(m); if (key && !brandAliasMap[key]) brandAliasMap[key] = b; }
-      // extract tokens from tables (headers + cells)
-      for (const canonical of Object.keys(tables||{})) {
-        try {
-          const entry = tables[canonical];
-          const hdr = Array.isArray(entry.header) ? entry.header.join(' ') : '';
-          hdr.split(/\W+/).filter(Boolean).forEach(tok=>{ const k = normalize(tok); if (k && !brandAliasMap[k]) brandAliasMap[k] = canonical; });
-          if (entry && Array.isArray(entry.data)) {
-            entry.data.forEach(row=>{ row.forEach(cell=>{ if (!cell) return; const txt = String(cell); txt.split(/[^a-z0-9]+/i).filter(Boolean).forEach(tok=>{ const k = normalize(tok); if (k && !brandAliasMap[k]) brandAliasMap[k] = canonical; }); }); });
-          }
-        } catch(e){ if (DEBUG) console.warn('brandAliasMap build error for', canonical, e && e.message); }
-      }
-      // detect brands
-      const detectedBrands = new Set(); const txtLower = normalize(t); const tokensTxt = txtLower.split(/\s+/).filter(Boolean);
-      for (const token of tokensTxt) { const tnorm = token.replace(/[^a-z0-9]/g,''); if (!tnorm) continue; if (brandAliasMap[tnorm]) { detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase()); continue; } if (commonModelToBrand[tnorm]) { detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase()); continue; } }
-      for (const b of allBrands) { if (!b) continue; const bLow = normalize(String(b).toLowerCase()); if (bLow.length>2 && txtLower.includes(bLow)) detectedBrands.add(String(b).toUpperCase()); if (txtLower.replace(/\s+/g,'').includes(bLow.replace(/\s+/g,''))) detectedBrands.add(String(b).toUpperCase()); }
-      if (detectedBrands.size>0) allowedBrandSet = new Set(Array.from(detectedBrands)); else allowedBrandSet = null; if (allowedBrandSet && allowedBrandSet.size===0) allowedBrandSet = null;
-      if (DEBUG) console.log('Final allowedBrandSet:', allowedBrandSet ? Array.from(allowedBrandSet) : 'ALL');
+    function _makeLoosePat(sfx) {
+      const parts = (sfx || '').toString().toLowerCase().split('');
+      const escaped = parts.map(ch => ch.replace(/[^a-z0-9]/g, '\\$&'));
+      return new RegExp('\\b' + escaped.join('[\\s\\W_]*') + '\\b', 'i');
     }
 
-    // MATCHING LOOP
+    const cityToken = city.split(' ')[0].toUpperCase();
+
+    // ----------------- PRECOMPUTE: coreTokens, exactModelHit -----------------
+    const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
+    const coreTokensArr = (userNorm || '').split(' ').filter(tk => tk && !genericWords.has(tk));
+
+    let exactModelHit = false;
+    try {
+      if (typeof MODEL_ALIASES !== 'undefined') {
+        const allModelSyns = new Set();
+        for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
+          if (canon) allModelSyns.add(String(normForMatch(canon)).toUpperCase());
+          if (Array.isArray(syns)) syns.forEach(s => s && allModelSyns.add(String(normForMatch(s)).toUpperCase()));
+        }
+        for (const tk of coreTokensArr) {
+          if (!tk) continue;
+          if (allModelSyns.has(String(normForMatch(tk)).toUpperCase())) {
+            exactModelHit = true; break;
+          }
+        }
+      }
+    } catch (e) {
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn('exactModelHit detection failed:', e && e.message);
+    }
+
+    // ---------- MULTI-BRAND DETECTION (strengthened) ----------
+    let allowedBrandSet = null;
+
+    if (brandGuess) {
+      allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
+    } else {
+      const allBrands = Object.keys(tables || {});
+      const brandAliasMap = {};
+
+      const normalize = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+      // curated model -> brand map (expanded)
+      const commonModelToBrand = {
+        'fortuner': 'TOYOTA', 'legender': 'TOYOTA', 'hycross': 'TOYOTA', 'innova': 'TOYOTA',
+        'x1': 'BMW','x3': 'BMW','x5': 'BMW','creta': 'HYUNDAI','venue': 'HYUNDAI',
+        'city': 'HONDA','swift': 'MARUTI','eeco': 'MARUTI',
+        'grs': 'TOYOTA','zxo': 'TOYOTA','zx': 'TOYOTA','vx': 'TOYOTA','gx': 'TOYOTA','vxo':'TOYOTA','gxo':'TOYOTA'
+      };
+
+      // build alias map from sheet names + normalized tokens
+      for (const b of allBrands) {
+        if (!b) continue;
+        const rawB = String(b).trim();
+        const lower = rawB.toLowerCase();
+        brandAliasMap[normalize(lower)] = rawB;
+        const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
+        if (first) brandAliasMap[normalize(first)] = rawB;
+        const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
+        if (stripped) brandAliasMap[normalize(stripped)] = rawB;
+        if (first && first.length <= 6) brandAliasMap[normalize(first)] = rawB;
+      }
+
+      // merge curated map
+      for (const [m, b] of Object.entries(commonModelToBrand)) {
+        const key = normalize(m);
+        if (key && !brandAliasMap[key]) brandAliasMap[key] = b;
+      }
+
+      // defensive: add model/variant tokens found inside each table
+      try {
+        for (const canonical of Object.keys(tables)) {
+          const entry = tables[canonical];
+          const variants = entry && (entry.models || entry.variants || entry.items || entry.list || []);
+          if (Array.isArray(variants) && variants.length) {
+            for (const v of variants) {
+              if (!v) continue;
+              const vRaw = (typeof v === 'string') ? v : (v.name || v.model || String(v));
+              const key = normalize(vRaw).split(/\s+/)[0];
+              if (key && !brandAliasMap[key]) brandAliasMap[key] = canonical;
+            }
+          } else if (entry && typeof entry === 'object') {
+            for (const k2 of Object.keys(entry)) {
+              const key2 = normalize(k2).split(/\s+/)[0];
+              if (key2 && !brandAliasMap[key2]) brandAliasMap[key2] = canonical;
+            }
+          }
+        }
+      } catch (e) {
+        if (typeof DEBUG !== 'undefined' && DEBUG) console.log("model->brand map error:", e && e.message);
+      }
+
+      // detect brands by tokens & substring
+      const detectedBrands = new Set();
+      const txtLower = normalize(t);
+      const tokensTxt = txtLower.split(/\s+/).filter(Boolean);
+      for (const token of tokensTxt) {
+        const tnorm = token.replace(/[^a-z0-9]/g,'');
+        if (!tnorm) continue;
+        if (brandAliasMap[tnorm]) { detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase()); continue; }
+        if (commonModelToBrand[tnorm]) { detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase()); continue; }
+      }
+
+      for (const b of allBrands) {
+        if (!b) continue;
+        const bLow = normalize(String(b).toLowerCase());
+        if (bLow.length > 2 && txtLower.includes(bLow)) detectedBrands.add(String(b).toUpperCase());
+        if (txtLower.replace(/\s+/g,'').includes(bLow.replace(/\s+/g,''))) detectedBrands.add(String(b).toUpperCase());
+      }
+
+      if (detectedBrands.size > 0) allowedBrandSet = new Set(Array.from(detectedBrands)); else allowedBrandSet = null;
+      if (allowedBrandSet && allowedBrandSet.size === 0) allowedBrandSet = null;
+
+      if (typeof DEBUG !== 'undefined' && DEBUG) {
+        console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,12));
+        console.log("Tokens:", tokensTxt);
+        console.log("Detected brand candidates from text:", Array.from(detectedBrands));
+        console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
+      }
+    }
+
+    // ---------- MATCHING LOOP ----------
     let allMatches = [];
+
     for (const [brand, tab] of Object.entries(tables)) {
-      if (!tab || !tab.data) continue; const brandKey = String(brand||'').toUpperCase();
-      if (brandGuess && brandKey !== String(brandGuess).toUpperCase()) continue; if (allowedBrandSet && !allowedBrandSet.has(brandKey)) continue;
-      const header = tab.header.map(h=>String(h||'').toUpperCase()); const idxMap = tab.idxMap || toHeaderIndexMap(header);
-      const idxModel = header.findIndex(h=>h.includes('MODEL')||h.includes('VEHICLE'));
-      const idxVariant = header.findIndex(h=>h.includes('VARIANT')||h.includes('SUFFIX'));
-      const idxVarKw = header.findIndex(h=>h.includes('VARIANT_KEYWORDS')||h.includes('KEYWORD'));
-      const idxSuffixCol = header.findIndex(h=>h.includes('SUFFIX'));
-      const fuelIdx = pickFuelIndex(idxMap); const exIdx = detectExShowIdx(idxMap);
-      const globalPriceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience);
+      if (!tab || !tab.data) continue;
+
+      const brandKey = String(brand || '').toUpperCase();
+
+      // brand lock
+      if (brandGuess && brandKey !== String(brandGuess).toUpperCase()) continue;
+      if (allowedBrandSet && !allowedBrandSet.has(brandKey)) continue;
+
+      const header = (Array.isArray(tab.header) ? tab.header : []).map(h => String(h || '').toUpperCase());
+      const idxMap = tab.idxMap || toHeaderIndexMap(header);
+      const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+      const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+      const idxVarKw = header.findIndex(h => h.includes('VARIANT_KEYWORDS') || h.includes('KEYWORD'));
+      const idxSuffixCol = header.findIndex(h => h.includes('SUFFIX'));
+      const fuelIdx = pickFuelIndex(idxMap);
+      const exIdx = detectExShowIdx(idxMap);
+      let globalPriceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience);
+
+      // price-index fallback: try to find any likely price header
+      if (globalPriceIdx < 0) {
+        for (let i=0;i<header.length;i++) {
+          if (/(ON[-_ ]?ROAD|ONROAD|ON[-_ ]?ROAD PRICE|ONROAD PRICE|ONR|O-R|PRICE|O R|ONROAD₹)/i.test(header[i])) {
+            globalPriceIdx = i; break;
+          }
+        }
+      }
 
       for (const row of tab.data) {
-        const modelCell = idxModel>=0?String(row[idxModel]||''):''; const variantCell = idxVariant>=0?String(row[idxVariant]||''):'';
-        const modelNorm = normForMatch(modelCell); const variantNorm = normForMatch(variantCell);
+        const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
+        const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
+        const modelNorm = normForMatch(modelCell || '');
+        const variantNorm = normForMatch(variantCell || '');
 
-        // tolerant short-token handling
-        if (isShortModelToken) {
-          const shortTok = modelTok.toLowerCase(); let matchedShort = false;
-          const modelTokens = (modelNorm||'').split(' ').filter(Boolean); const variantTokens = (variantNorm||'').split(' ').filter(Boolean);
-          for (const mt of [...modelTokens,...variantTokens]) { if (!mt) continue; if (mt===shortTok || mt.includes(shortTok) || shortTok.includes(mt)) { matchedShort = true; break; } }
-          if (!matchedShort) {
-            // check alias map tokens quickly
-            try { for (const kk of Object.keys(tables||{})) { const key = String(kk||'').toLowerCase().split(/\s+/)[0]; if (!key) continue; if (key===shortTok || key.includes(shortTok) || shortTok.includes(key)) { matchedShort = true; break; } } } catch(e){}
-            if (!matchedShort && brandGuess) continue; // only strict-skip when brandGuess present
-          }
+        // HARD FILTER for very short model tokens when brand guessed
+        if (brandGuess && isShortModelToken) {
+          const modelWords = modelNorm.split(' ').filter(Boolean);
+          if (!modelWords.includes(modelTok)) continue;
         }
 
         let score = 0;
+
+        // stronger signals for substring matches (normalized)
         try {
-          const modelGuessNorm = normForMatch(modelGuess||''); const rawNorm = userNorm;
+          const modelGuessNorm = normForMatch(modelGuess || '');
+          const rawNorm = userNorm;
           if (modelNorm && modelGuessNorm && modelNorm.includes(modelGuessNorm)) score += 40;
           if (variantNorm && modelGuessNorm && variantNorm.includes(modelGuessNorm)) score += 45;
           if (rawNorm && (modelNorm.includes(rawNorm) || variantNorm.includes(rawNorm))) score += 30;
-        } catch(e) { if (modelCell && modelCell.includes(modelGuess)) score += 40; if (variantCell && variantCell.includes(modelGuess)) score += 45; if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30; }
+        } catch (e) {
+          if (modelCell && modelCell.includes(modelGuess)) score += 40;
+          if (variantCell && variantCell.includes(modelGuess)) score += 45;
+          if (raw && (modelCell.includes(raw) || variantCell.includes(raw))) score += 30;
+        }
+
         if (userNorm && modelNorm && (modelNorm.includes(userNorm) || userNorm.includes(modelNorm))) score += 35;
         if (userNorm && variantNorm && (variantNorm.includes(userNorm) || userNorm.includes(variantNorm))) score += 35;
 
-        let varKwNorm=''; let suffixNorm=''; if (idxVarKw>=0 && row[idxVarKw]!=null) varKwNorm = normForMatch(row[idxVarKw]); if (idxSuffixCol>=0 && row[idxSuffixCol]!=null) suffixNorm = normForMatch(row[idxSuffixCol]);
-        let fuelNorm=''; let fuelCell=''; if (fuelIdx>=0 && row[fuelIdx]!=null) { fuelCell = String(row[fuelIdx]||''); fuelNorm = normForMatch(fuelCell.toLowerCase()); }
-        for (const tok of tokens) { if (!tok) continue; if (modelNorm && modelNorm.includes(tok)) score += 5; if (variantNorm && variantNorm.includes(tok)) score += 8; if (suffixNorm && suffixNorm.includes(tok)) score += 10; if (varKwNorm && varKwNorm.includes(tok)) score += 15; if (fuelNorm && fuelNorm.includes(tok)) score += 6; }
+        let varKwNorm = '';
+        let suffixNorm = '';
+        if (idxVarKw >= 0 && row[idxVarKw] != null) varKwNorm = normForMatch(row[idxVarKw]);
+        if (idxSuffixCol >= 0 && row[idxSuffixCol] != null) suffixNorm = normForMatch(row[idxSuffixCol]);
 
-        const specialSuffixes = ['zxo','gxo','vxo','zx','vx','gx']; const searchTargets = [variantNorm||'', suffixNorm||'', varKwNorm||'', modelNorm||''].join(' ');
-        let userSuffix = null; for (const sfx of specialSuffixes) { const pat = _makeLoosePat(sfx); if (pat.test(userNorm) || pat.test(searchTargets)) { userSuffix = sfx; break; } }
-        if (userSuffix) { const sPat = _makeLoosePat(userSuffix); const rowHasSuffix = sPat.test(variantNorm) || sPat.test(suffixNorm) || sPat.test(varKwNorm) || sPat.test(modelNorm); if (rowHasSuffix) score += 80; else score -= 15; }
+        let fuelNorm = '';
+        let fuelCell = '';
+        if (fuelIdx >= 0 && row[fuelIdx] != null) {
+          fuelCell = String(row[fuelIdx] || '');
+          fuelNorm = normForMatch(fuelCell.toLowerCase());
+        }
 
-        const variantUpper = String(variantCell||'').toUpperCase(); const varKwUpper = String(varKwNorm||'').toUpperCase(); for (const sw of SPECIAL_WORDS) { if ((variantUpper.includes(sw) || varKwUpper.includes(sw)) && !tUpper.includes(sw)) score -= 25; }
+        for (const tok of tokens) {
+          if (!tok) continue;
+          if (modelNorm && modelNorm.includes(tok)) score += 5;
+          if (variantNorm && variantNorm.includes(tok)) score += 8;
+          if (suffixNorm && suffixNorm.includes(tok)) score += 10;
+          if (varKwNorm && varKwNorm.includes(tok)) score += 15;
+          if (fuelNorm && fuelNorm.includes(tok)) score += 6;
+        }
 
-        const ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12); if (score <= 0 || score < ABS_MIN_SCORE) continue;
+        // improved suffix detection (loose)
+        const specialSuffixes = ['zxo', 'gxo', 'vxo', 'zx', 'vx', 'gx'];
+        const searchTargets = [variantNorm || '', suffixNorm || '', varKwNorm || '', modelNorm || ''].join(' ');
+        let userSuffix = null;
+        for (const sfx of specialSuffixes) {
+          const pat = _makeLoosePat(sfx);
+          if (pat.test(userNorm) || pat.test(searchTargets)) {
+            userSuffix = sfx; break;
+          }
+        }
+        if (userSuffix) {
+          const sPat = _makeLoosePat(userSuffix);
+          const rowHasSuffix = sPat.test(variantNorm) || sPat.test(suffixNorm) || sPat.test(varKwNorm) || sPat.test(modelNorm);
+          if (rowHasSuffix) score += 80;
+          else {
+            // softer penalty: only penalize strongly if user clearly typed suffix longer than 1 char
+            if (userSuffix.length > 1) score -= 8;
+          }
+        }
 
-        // robust price detection
+        // NORMALIZE SPECIAL_WORDS comparison using normForMatch
+        const variantNormUpper = String(normForMatch(String(variantCell || ''))).toUpperCase();
+        const varKwNormUpper = String(varKwNorm || '').toUpperCase();
+        const userNormUpper = String(normForMatch(String(t || ''))).toUpperCase();
+        for (const sw of SPECIAL_WORDS) {
+          if ((variantNormUpper.includes(sw) || varKwNormUpper.includes(sw)) && !userNormUpper.includes(sw)) score -= 25;
+        }
+
+        // a small extra defensive step: if user suffix is very short (<=3) and no allowedBrandSet,
+        // prefer rows that explicitly include the suffix. apply a small penalty otherwise.
+        if (userSuffix && userSuffix.length <= 3 && !allowedBrandSet) {
+          if (!(variantNorm.includes(userSuffix) || varKwNorm.includes(userSuffix) || suffixNorm.includes(userSuffix))) {
+            score -= 10;
+          }
+        }
+
+        // require a minimum useful score before considering (adaptive)
+        let ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
+        if ((coreTokensArr && coreTokensArr.length === 1) || isShortModelToken) {
+          ABS_MIN_SCORE = Math.min(8, ABS_MIN_SCORE);
+        }
+        if (score <= 0 || score < ABS_MIN_SCORE) continue;
+
+        // pick price column (globalPriceIdx) else fallback to first numeric
         let priceIdx = globalPriceIdx;
         if (priceIdx < 0) {
-          const preferTokens = [cityToken,'ON ROAD','ON-ROAD','ONROAD','PRICE','ONROAD PRICE','ON-RD','ONRD'];
-          for (const key of Object.keys(idxMap||{})) { const kUpper = String(key||'').toUpperCase(); for (const pref of preferTokens) { if (kUpper.includes(pref)) { priceIdx = idxMap[key]; break; } } if (priceIdx>=0) break; }
-          if (priceIdx<0) { let candidateIdx=-1; let candidateVal=0; for (let i=0;i<row.length;i++){ const v = String(row[i]||'').replace(/[,₹\s]/g,''); if (v && /^\d+$/.test(v)) { const num = Number(v); if (num>=200000 && num>candidateVal) { candidateVal=num; candidateIdx=i; } else if (candidateIdx<0 && num>candidateVal) { candidateVal=num; candidateIdx=i; } } } if (candidateIdx>=0) priceIdx = candidateIdx; }
-          if (DEBUG) console.log('priceIdx chosen:', priceIdx, priceIdx>=0?row[priceIdx]:null);
+          for (let i = 0; i < row.length; i++) {
+            const v = String(row[i] || '').replace(/[,₹\s]/g, '');
+            if (v && /^\d+$/.test(v)) {
+              priceIdx = i; break;
+            }
+          }
         }
 
-        const priceStr = priceIdx>=0?String(row[priceIdx]||''):''; const onroad = Number(priceStr.replace(/[,₹\s]/g,'')) || 0; if (!onroad) continue;
-        const exShow = exIdx>=0?Number(String(row[exIdx]||'').replace(/[,₹\s]/g,''))||0:0;
+        const priceStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
+        const onroad = Number(priceStr.replace(/[,₹\s]/g, '')) || 0;
+        if (!onroad) {
+          if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`skip row: no onroad price for brand=${brandKey} model=${modelCell} variant=${variantCell}`);
+          continue;
+        }
 
-        // budget boost/penalty
-        let priceOk = true; let priceScoreDelta = 0;
+        const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,₹\s]/g, '')) || 0 : 0;
+
+        // Price-based boosting/penalty when userBudget present
+        let priceOk = true;
+        let priceScoreDelta = 0;
         if (userBudget) {
-          if (onroad >= budgetMin && onroad <= budgetMax) priceScoreDelta += 60; else { const mid = (budgetMin+budgetMax)/2; const rel = Math.abs(onroad-mid)/(mid||1); if (rel <= 0.30) priceScoreDelta -= Math.round(rel*100); else if (rel <= 0.60) priceScoreDelta -= Math.round(rel*80); else priceOk = false; }
+          if (onroad >= budgetMin && onroad <= budgetMax) {
+            priceScoreDelta += 60;
+          } else {
+            const mid = (budgetMin + budgetMax) / 2;
+            const rel = Math.abs(onroad - mid) / (mid || 1);
+            if (rel <= 0.30) priceScoreDelta -= Math.round(rel * 100);
+            else if (rel <= 0.60) priceScoreDelta -= Math.round(rel * 80);
+            else priceOk = false;
+          }
         }
-        if (!priceOk) continue;
+        if (!priceOk) {
+          if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`skip row: price out of range for userBudget; onroad=${onroad}, range=${budgetMin}-${budgetMax}`);
+          continue;
+        }
 
-        allMatches.push({ brand: brandKey, row, idxModel, idxVariant, idxMap, onroad, exShow, score: score + priceScoreDelta, fuel: fuelCell });
+        allMatches.push({
+          brand: brandKey,
+          row,
+          idxModel,
+          idxVariant,
+          idxMap,
+          onroad,
+          exShow,
+          score: score + priceScoreDelta,
+          fuel: fuelCell
+        });
       }
     }
 
-    // prune & relax
+    // ---------- PRUNE & RELAXED MATCHING ----------
     if (!allMatches.length && !userBudget) return false;
-    if (allMatches.length>0) {
-      const topScore = Math.max(...allMatches.map(m=>m.score||0)); const REL_MIN_FRAC = 0.12; const ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE||12); const before = allMatches.length; allMatches = allMatches.filter(m=>{ const s=m.score||0; if (s<ABS_MIN_SCORE && s<topScore*REL_MIN_FRAC) return false; return true; }); if (DEBUG) console.log(`Pruned matches: before=${before}, after=${allMatches.length}, topScore=${topScore}`);
+
+    if (allMatches.length > 0) {
+      const topScore = Math.max(...allMatches.map(m => m.score || 0));
+      const REL_MIN_FRAC = 0.12;
+      const ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
+      const before = allMatches.length;
+      allMatches = allMatches.filter(m => {
+        const s = m.score || 0;
+        if (s < ABS_MIN_SCORE && s < topScore * REL_MIN_FRAC) return false;
+        return true;
+      });
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`Pruned matches: before=${before}, after=${allMatches.length}, topScore=${topScore}`);
     }
 
+    // Relaxed matching when needed
     if (userBudget && allMatches.length < 3) {
-      if (DEBUG) console.log('Relaxing budget filter because strict matches < 3.');
-      const relaxedMatches = []; const RELAX_LIMIT = Number(process.env.RELAXED_LIMIT || 25); const mid = (budgetMin + budgetMax)/2;
-      for (const [brand, tab] of Object.entries(tables)) { if (!tab || !tab.data) continue; const brandKey2 = String(brand||'').toUpperCase(); if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue; const header2 = tab.header.map(h=>String(h||'').toUpperCase()); const idxMap2 = tab.idxMap || toHeaderIndexMap(header2); const priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience); for (const row2 of tab.data) { if (relaxedMatches.length >= RELAX_LIMIT) break; const priceStr2 = priceIdx2>=0?String(row2[priceIdx2]||'') : ''; const onroad2 = Number(priceStr2.replace(/[,₹\s]/g,'')) || 0; if (!onroad2) continue; const distFrac = Math.abs(onroad2-mid)/(mid||1); if (distFrac <= 1.2) { let rscore = Math.max(5, Math.round(100 - distFrac*120)); relaxedMatches.push({ brand: brandKey2, row: row2, idxModel: header2.findIndex(h=>h.includes('MODEL')||h.includes('VEHICLE')), idxVariant: header2.findIndex(h=>h.includes('VARIANT')||h.includes('SUFFIX')), idxMap: idxMap2, onroad: onroad2, exShow: 0, score: rscore, fuel: '' }); } } if (relaxedMatches.length >= RELAX_LIMIT) break; }
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.log("Relaxing budget filter because strict matches < 3.");
+
+      const relaxedMatches = [];
+      const RELAX_LIMIT = Number(process.env.RELAXED_LIMIT || 25);
+      const mid = (budgetMin + budgetMax) / 2;
+
+      for (const [brand, tab] of Object.entries(tables)) {
+        if (!tab || !tab.data) continue;
+        const brandKey2 = String(brand || '').toUpperCase();
+        if (allowedBrandSet && !allowedBrandSet.has(brandKey2)) continue;
+
+        const header2 = (Array.isArray(tab.header) ? tab.header : []).map(h => String(h || '').toUpperCase());
+        const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
+        let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
+        if (priceIdx2 < 0) {
+          for (let i=0;i<header2.length;i++) {
+            if (/(ON[-_ ]?ROAD|ONROAD|PRICE|ONROAD PRICE)/i.test(header2[i])) { priceIdx2 = i; break; }
+          }
+        }
+
+        for (const row2 of tab.data) {
+          if (relaxedMatches.length >= RELAX_LIMIT) break;
+          const priceStr2 = priceIdx2 >= 0 ? String(row2[priceIdx2] || '') : '';
+          const onroad2 = Number(priceStr2.replace(/[,₹\s]/g, '')) || 0;
+          if (!onroad2) continue;
+          const distFrac = Math.abs(onroad2 - mid) / (mid || 1);
+          if (distFrac <= 1.2) {
+            let rscore = Math.max(5, Math.round(100 - distFrac * 120));
+            relaxedMatches.push({
+              brand: brandKey2,
+              row: row2,
+              idxModel: header2.findIndex(h => h.includes("MODEL") || h.includes("VEHICLE")),
+              idxVariant: header2.findIndex(h => h.includes("VARIANT") || h.includes("SUFFIX")),
+              idxMap: idxMap2,
+              onroad: onroad2,
+              exShow: 0,
+              score: rscore,
+              fuel: ""
+            });
+          }
+        }
+        if (relaxedMatches.length >= RELAX_LIMIT) break;
+      }
       if (relaxedMatches.length) allMatches.push(...relaxedMatches);
     }
 
-    // If allowedBrandSet prevented all matches, retry a lightweight scan without brand lock
-    if (allMatches.length === 0 && allowedBrandSet) {
-      if (DEBUG) console.log('No matches under allowedBrandSet — retrying without brand lock'); allowedBrandSet = null; for (const [brand, tab] of Object.entries(tables)) { if (!tab || !tab.data) continue; const brandKey = String(brand||'').toUpperCase(); const header = tab.header.map(h=>String(h||'').toUpperCase()); const idxMap = tab.idxMap || toHeaderIndexMap(header); const priceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience) || -1; for (const row of tab.data) { let onroadVal = 0; if (priceIdx >= 0) onroadVal = Number(String(row[priceIdx]||'').replace(/[,₹\s]/g,''))||0; if (!onroadVal) { for (let i=0;i<row.length;i++){ const v = String(row[i]||'').replace(/[,₹\s]/g,''); if (v && /^\d+$/.test(v)) { onroadVal = Math.max(onroadVal, Number(v)); } } } if (onroadVal) allMatches.push({ brand: brandKey, row, idxModel: header.findIndex(h=>h.includes('MODEL')||h.includes('VEHICLE')), idxVariant: header.findIndex(h=>h.includes('VARIANT')||h.includes('SUFFIX')), idxMap, onroad: onroadVal, exShow: 0, score: 10 }); } }
-      allMatches.sort((a,b)=> (b.score||0)-(a.score||0));
+    // sort
+    if (userBudget && allMatches.length) {
+      const mid = (budgetMin + budgetMax) / 2;
+      allMatches.sort((a, b) => {
+        const diff = (b.score || 0) - (a.score || 0);
+        if (diff !== 0) return diff;
+        const da = Math.abs((a.onroad || 0) - mid);
+        const db = Math.abs((b.onroad || 0) - mid);
+        return da - db;
+      });
+    } else {
+      allMatches.sort((a, b) => (b.score || 0) - (a.score || 0));
     }
 
-    // sort by score & budget proximity
-    if (userBudget && allMatches.length) { const mid = (budgetMin+budgetMax)/2; allMatches.sort((a,b)=>{ const diff = (b.score||0)-(a.score||0); if (diff !== 0) return diff; const da=Math.abs((a.onroad||0)-mid); const db=Math.abs((b.onroad||0)-mid); return da-db; }); } else { allMatches.sort((a,b)=>(b.score||0)-(a.score||0)); }
+    if (typeof DEBUG !== 'undefined' && DEBUG) {
+      console.log("DEBUG_QUICK: tokens=", tokens && tokens.slice(0,6));
+      console.log("DEBUG_QUICK: coreTokens=", coreTokensArr.slice(0,6));
+      console.log("DEBUG_QUICK: allMatches_before=", Array.isArray(allMatches) ? allMatches.length : typeof allMatches);
+      console.log("DEBUG_QUICK top 8:", (allMatches||[]).slice(0,8).map(m=>({brand:m.brand, score:m.score, onroad:m.onroad, model:(m.row && m.idxModel>=0)?m.row[m.idxModel]:null, variant:(m.row && m.idxVariant>=0)?m.row[m.idxVariant]:null})));
+    }
 
-    if (DEBUG) console.log('DEBUG_QUICK top 8:', (allMatches||[]).slice(0,8).map(m=>({brand:m.brand, score:m.score, onroad:m.onroad, model:(m.row&&m.idxModel>=0)?m.row[m.idxModel]:null, variant:(m.row&&m.idxVariant>=0)?m.row[m.idxVariant]:null})));
-
-    // STRICT MODEL MATCHING
+    // ---------------------------------------------------------
+    // STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
+    // ---------------------------------------------------------
     let strictModel = null;
     try {
-      const ALL_MODEL_KEYWORDS = new Set(); if (typeof MODEL_ALIASES !== 'undefined') { for (const [canon,syns] of Object.entries(MODEL_ALIASES)) { if (canon) ALL_MODEL_KEYWORDS.add(String(normForMatch(canon)).toUpperCase()); if (Array.isArray(syns)) syns.forEach(s=>s && ALL_MODEL_KEYWORDS.add(String(normForMatch(s)).toUpperCase())); } }
-      if (typeof BRAND_HINTS !== 'undefined') { for (const arr of Object.values(BRAND_HINTS)) { if (!Array.isArray(arr)) continue; for (const v of arr) { if (v) ALL_MODEL_KEYWORDS.add(String(normForMatch(v)).toUpperCase()); } } }
-      const tokenSource = (coreTokensArr && coreTokensArr.length) ? coreTokensArr : (tokens && tokens.length ? tokens : []);
-      for (const tk of tokenSource) { const tku = String(normForMatch(tk||'')).toUpperCase(); if (!tku) continue; if (ALL_MODEL_KEYWORDS.has(tku)) { strictModel = tku; break; } }
-    } catch(e){ if (DEBUG) console.warn('strictModel engine failed:', e && e.message); }
-
-    if (strictModel) {
-      const filteredMatches = allMatches.filter(m=>{ if (!m || typeof m.idxModel==='undefined' || m.idxModel<0) return false; const mdl = String(m.row[m.idxModel]||'').toUpperCase(); const mdlNorm = String(normForMatch(mdl)).toUpperCase(); return mdlNorm.includes(strictModel); });
-      if (DEBUG) console.log('DEBUG_QUICK: strictModel=', strictModel, 'filteredMatches=', filteredMatches.length);
-      if (filteredMatches.length>0) { allMatches = filteredMatches; if (allMatches.length>1) { const out=[]; out.push(`*Available variants — ${strictModel}*`); allMatches.forEach((m,i)=>{ const mdl=String(m.row[m.idxModel]||'').trim(); const varr=String(m.row[m.idxVariant]||'').trim(); out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`); }); await waSendText(to, out.join('\n')); setLastService(to,'NEW'); return true; } } else strictModel = null;
-    }
-
-    // VARIANT-LIST for short queries
-    if (coreTokensArr.length === 1 && !exactModelHit) {
-      const distinct=[]; const seenTitles=new Set(); for (const m of allMatches) { if (allowedBrandSet && !allowedBrandSet.has(m.brand)) continue; if ((m.score||0) < Number(process.env.MIN_MATCH_SCORE || 12)) continue; const row=m.row; const modelVal = m.idxModel>=0?String(row[m.idxModel]||'').toUpperCase():''; const variantVal = m.idxVariant>=0?String(row[m.idxVariant]||'').toUpperCase():''; const title=[modelVal,variantVal].filter(Boolean).join(' ').trim(); if (!title) continue; if (seenTitles.has(title)) continue; seenTitles.add(title); distinct.push({ title, onroad: m.onroad||0, brand: m.brand, score: m.score||0 }); if (distinct.length >= VARIANT_LIST_LIMIT) break; }
-      if (distinct.length>1) { if (userBudget) { const mid=(budgetMin+budgetMax)/2; distinct.sort((a,b)=>(b.score-a.score)||(Math.abs(a.onroad-mid)-Math.abs(b.onroad-mid))); } else distinct.sort((a,b)=>b.score-a.score);
-        const lines=[]; lines.push(`*Available variants (${distinct.length}) — ${coreTokensArr[0].toUpperCase()}*`); if (userBudget) { lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/100000)/10}L - ${Math.round((budgetMax||userBudget)/100000)/10}L)`); lines.push(''); }
-        for (let i=0;i<distinct.length;i++){ const d=distinct[i]; lines.push(`${i+1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`); } lines.push(''); lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.'); await waSendText(to, lines.join('\n')); setLastService(to,'NEW'); return true; }
-    }
-
-    // SINGLE BEST MATCH — with conservative fallbacks if allMatches is empty
-    let best = (allMatches && allMatches.length) ? allMatches[0] : null;
-
-    if (!best) {
-      if (DEBUG) console.log('No strict matches — attempting token-based fallback selection.');
-      const fallbackCandidates=[]; const coreTokensList = coreTokensArr && coreTokensArr.length ? coreTokensArr : (tokens && tokens.length ? tokens : []);
-      if (coreTokensList && coreTokensList.length) {
-        for (const [brand, tab] of Object.entries(tables||{})) {
-          if (!tab || !tab.data) continue; const header = tab.header?tab.header.map(h=>String(h||'').toUpperCase()):[]; const idxModel = header.findIndex(h=>h.includes('MODEL')||h.includes('VEHICLE')); const idxVariant = header.findIndex(h=>h.includes('VARIANT')||h.includes('SUFFIX')); const idxMap = tab.idxMap || toHeaderIndexMap(header); const priceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience) || -1;
-          for (const row of tab.data) {
-            try {
-              const modelCell = idxModel>=0?String(row[idxModel]||'') : ''; const variantCell = idxVariant>=0?String(row[idxVariant]||'') : '';
-              const modelNorm = normForMatch(modelCell||''); const variantNorm = normForMatch(variantCell||''); let tokenMatch=false; for (const tk of coreTokensList) { const tkn = String(tk||'').toLowerCase(); if (!tkn) continue; if ((modelNorm||'').toLowerCase().includes(tkn) || (variantNorm||'').toLowerCase().includes(tkn)) { tokenMatch=true; break; } }
-              if (!tokenMatch) continue; let onroadVal=0; if (priceIdx>=0) onroadVal = Number(String(row[priceIdx]||'').replace(/[,₹\s]/g,''))||0; if (!onroadVal) { for (let i=0;i<row.length;i++){ const v=String(row[i]||'').replace(/[,₹\s]/g,''); if (v && /^\d+$/.test(v)) onroadVal = Math.max(onroadVal, Number(v)); } } if (!onroadVal) continue; fallbackCandidates.push({ brand: String(brand||'').toUpperCase(), row, idxModel, idxVariant, idxMap, onroad: onroadVal, exShow:0, score:10 });
-            } catch(e){ if (DEBUG) console.warn('fallback token-scan error:', e && e.message); }
+      const ALL_MODEL_KEYWORDS = new Set();
+      if (typeof MODEL_ALIASES !== 'undefined') {
+        for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
+          if (canon) ALL_MODEL_KEYWORDS.add(String(normForMatch(canon)).toUpperCase());
+          if (Array.isArray(syns)) syns.forEach(s => s && ALL_MODEL_KEYWORDS.add(String(normForMatch(s)).toUpperCase()));
+        }
+      }
+      if (typeof BRAND_HINTS !== 'undefined') {
+        for (const arr of Object.values(BRAND_HINTS)) {
+          if (!Array.isArray(arr)) continue;
+          for (const v of arr) {
+            if (v) ALL_MODEL_KEYWORDS.add(String(normForMatch(v)).toUpperCase());
           }
         }
-        if (fallbackCandidates.length) { if (userBudget) { const mid=(budgetMin+budgetMax)/2; fallbackCandidates.sort((a,b)=>(Math.abs(a.onroad-mid)-Math.abs(b.onroad-mid))||(b.onroad-a.onroad)); } else { fallbackCandidates.sort((a,b)=>b.onroad-a.onroad); } best = fallbackCandidates[0]; if (DEBUG) console.log('Token-based fallback selected candidate:', best && {brand: best.brand, onroad: best.onroad}); }
       }
 
-      // highest-onroad fallback
-      if (!best) {
-        if (DEBUG) console.log('Token fallback failed — attempting highest-onroad fallback.'); let highest=null; for (const [brand, tab] of Object.entries(tables||{})) { if (!tab || !tab.data) continue; const header = tab.header?tab.header.map(h=>String(h||'').toUpperCase()):[]; const idxModel = header.findIndex(h=>h.includes('MODEL')||h.includes('VEHICLE')); const idxVariant = header.findIndex(h=>h.includes('VARIANT')||h.includes('SUFFIX')); const idxMap = tab.idxMap || toHeaderIndexMap(header); const priceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience) || -1; for (const row of tab.data) { let onroadVal=0; if (priceIdx>=0) onroadVal = Number(String(row[priceIdx]||'').replace(/[,₹\s]/g,''))||0; if (!onroadVal) { for (let i=0;i<row.length;i++){ const v = String(row[i]||'').replace(/[,₹\s]/g,''); if (v && /^\d+$/.test(v)) onroadVal = Math.max(onroadVal, Number(v)); } } if (!onroadVal) continue; if (!highest || onroadVal > highest.onroad) { highest = { brand: String(brand||'').toUpperCase(), row, idxModel, idxVariant, idxMap, onroad: onroadVal, exShow:0, score:5 }; } } } if (highest) { best = highest; if (DEBUG) console.log('Highest-onroad fallback selected:', {brand: best.brand, onroad: best.onroad}); }
+      const tokenSource = (coreTokensArr && coreTokensArr.length) ? coreTokensArr : (tokens && tokens.length ? tokens : []);
+      for (const tk of tokenSource) {
+        const tku = String(normForMatch(tk || '')).toUpperCase();
+        if (!tku) continue;
+        if (ALL_MODEL_KEYWORDS.has(tku)) { strictModel = tku; break; }
+      }
+    } catch (e) {
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn('strictModel engine failed:', e && e.message);
+    }
+
+    if (strictModel) {
+      const filteredMatches = allMatches.filter(m => {
+        if (!m || typeof m.idxModel === 'undefined' || m.idxModel < 0) return false;
+        const mdl = String(m.row[m.idxModel] || '').toUpperCase();
+        const mdlNorm = String(normForMatch(mdl)).toUpperCase();
+        return mdlNorm.includes(strictModel);
+      });
+
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.log("DEBUG_QUICK: strictModel=", strictModel, "filteredMatches=", filteredMatches.length);
+
+      if (filteredMatches.length > 0) {
+        allMatches = filteredMatches;
+        if (allMatches.length > 1) {
+          const out = [];
+          out.push(`*Available variants — ${strictModel}*`);
+          allMatches.forEach((m, i) => {
+            const mdl = String(m.row[m.idxModel] || '').trim();
+            const varr = String(m.row[m.idxVariant] || '').trim();
+            out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
+          });
+          await waSendText(to, out.join("\n"));
+          setLastService(to, 'NEW');
+          return true;
+        }
+      } else {
+        strictModel = null;
       }
     }
 
-    if (!best) { if (DEBUG) console.log('No candidate found after fallbacks — returning false.'); return false; }
+    // if user asked only the brand/model (very short query) — show short variant list
+    if (coreTokensArr.length === 1 && !exactModelHit) {
+      const distinct = [];
+      const seenTitles = new Set();
+      for (const m of allMatches) {
+        if (allowedBrandSet && !allowedBrandSet.has(m.brand)) continue;
+        if ((m.score || 0) < Number(process.env.MIN_MATCH_SCORE || 12)) continue;
+        const row = m.row;
+        const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
+        const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
+        const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
+        if (!title) continue;
+        if (seenTitles.has(title)) continue;
+        seenTitles.add(title);
+        distinct.push({ title, onroad: m.onroad || 0, brand: m.brand, score: m.score || 0 });
+        if (distinct.length >= VARIANT_LIST_LIMIT) break;
+      }
 
-    const loanAmt = best.exShow || best.onroad || 0; const emi60 = loanAmt ? calcEmiSimple(loanAmt, NEW_CAR_ROI, 60) : 0;
-    const modelName = best.idxModel>=0 ? String(best.row[best.idxModel]||'').toUpperCase() : ''; const variantStr = best.idxVariant>=0 ? String(best.row[best.idxVariant]||'').toUpperCase() : ''; const fuelStr = best.fuel ? String(best.fuel).toUpperCase() : '';
+      if (distinct.length > 1) {
+        if (userBudget) {
+          const mid = (budgetMin + budgetMax) / 2;
+          distinct.sort((a,b) => (b.score - a.score) || (Math.abs(a.onroad - mid) - Math.abs(b.onroad - mid)));
+        } else {
+          distinct.sort((a,b) => b.score - a.score);
+        }
+
+        const lines = [];
+        lines.push(`*Available variants (${distinct.length}) — ${coreTokensArr[0].toUpperCase()}*`);
+        if (userBudget) {
+          lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/100000)/10}L - ${Math.round((budgetMax||userBudget)/100000)/10}L)`);
+          lines.push('');
+        }
+        for (let i = 0; i < distinct.length; i++) {
+          const d = distinct[i];
+          lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
+        }
+        lines.push('');
+        lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
+        await waSendText(to, lines.join('\n'));
+        setLastService(to, 'NEW');
+        return true;
+      }
+    }
+
+    // Single best match: pick top
+    const best = allMatches[0];
+    if (!best) return false;
+
+    const loanAmt = best.exShow || best.onroad || 0;
+    const roi = Number(process.env.NEW_CAR_ROI || 10.5); // default ROI
+    const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
+
+    const modelName  = best.idxModel   >= 0 ? String(best.row[best.idxModel]   || '').toUpperCase() : '';
+    const variantStr = best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
+    const fuelStr    = best.fuel ? String(best.fuel).toUpperCase() : '';
 
     const lines = [];
     lines.push(`*${best.brand}* ${modelName} ${variantStr}`);
@@ -2206,23 +2685,55 @@ async function tryQuickNewCarQuote(msgText, to) {
     if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
     if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
     if (best.onroad) lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
-    if (loanAmt) lines.push(`*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${NEW_CAR_ROI}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`);
+    if (loanAmt) {
+      lines.push(`*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${roi}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`);
+    }
     lines.push('\n*Terms & Conditions Apply ✅*');
 
-    // SPEC SHEET: RAG -> SignatureAI
+    // --- SPEC SHEET: try RAG then SignatureAI_RAG with retry
     try {
       const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
-      if (specIntent.test(t)) {
+      if (specIntent.test(t) || /feature|features/.test(t)) {
         const specQuery = `${best.brand} ${modelName} ${variantStr} full technical specifications for India (engine, bhp, torque, seating, dimensions, tyres, safety, mileage).`;
-        let specText = '';
-        try { if (typeof findRelevantChunks === 'function') { const chunks = await findRelevantChunks(specQuery, 4); if (Array.isArray(chunks) && chunks.length) { const joined = chunks.map(c=>(c.text||c.content||'').trim()).filter(Boolean).join('\n'); if (joined && joined.length>80) specText = joined; } } } catch(ragErr){ if (DEBUG) console.warn('Spec RAG (chunks) failed:', ragErr && (ragErr.message || ragErr)); }
-        if (!specText && typeof SignatureAI_RAG === 'function') {
-          const specPrompt = `You are Mr.Car Signature AI.\n\nGive a clean, bullet-point technical specification sheet for:\n${best.brand} ${modelName} ${variantStr}\n\nInclude (India-spec, approximate ok):\n- Engine type & displacement\n- Power (BHP / kW) and torque (Nm)\n- Transmission (MT / AT / CVT / DCT) and drive type (FWD / RWD / AWD / 4x4)\n- Fuel type and claimed mileage\n- Seating capacity\n- Tyre & wheel size\n- Key safety features (airbags, ABS, ESP, ADAS if applicable)\nKeep it concise, readable on WhatsApp and avoid marketing fluff.`.trim();
-          try { const aiSpec = await SignatureAI_RAG(specPrompt); if (aiSpec && aiSpec.trim().length > 40) specText = aiSpec.trim(); } catch(aiErr){ if (DEBUG) console.warn('Spec SignatureAI_RAG failed:', aiErr && (aiErr.message || aiErr)); }
+        let specText = "";
+
+        // RAG attempt
+        try {
+          if (typeof findRelevantChunks === "function") {
+            const chunks = await findRelevantChunks(specQuery, 4);
+            if (Array.isArray(chunks) && chunks.length) {
+              const joined = chunks.map(c => (c.text || c.content || "").trim()).filter(Boolean).join("\n");
+              if (joined && joined.length > 80) specText = joined;
+            }
+          }
+        } catch (ragErr) {
+          if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec RAG (chunks) failed:", ragErr && (ragErr.message || ragErr));
         }
-        if (specText) { lines.push(''); lines.push('*Key Specifications (approx., India spec)*'); lines.push(specText); }
+
+        // Signature AI fallback with retry
+        if (!specText && typeof SignatureAI_RAG === "function") {
+          const specPrompt = `You are Mr.Car Signature AI.\nProvide a concise bullet-point technical specification for ${best.brand} ${modelName} ${variantStr} (India-spec, approximate ok):\n- Engine & displacement\n- Power (BHP) & torque (Nm)\n- Transmission & drive\n- Fuel & mileage (claimed)\n- Seating\n- Tyres & wheel size\n- Safety features (airbags, ABS, ESP, ADAS)\nKeep it short and whatsapp-friendly.`;
+          try {
+            let aiSpec = await SignatureAI_RAG(specPrompt);
+            if (!aiSpec || aiSpec.trim().length < 40) {
+              const specPrompt2 = `Short bullets (6 lines) for ${best.brand} ${modelName} ${variantStr}: engine, power, transmission, mileage, seating, 2 key safety features.`;
+              aiSpec = await SignatureAI_RAG(specPrompt2);
+            }
+            if (aiSpec && aiSpec.trim().length > 30) specText = aiSpec.trim();
+          } catch (aiErr) {
+            if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec SignatureAI_RAG retry failed:", aiErr && aiErr.message);
+          }
+        }
+
+        if (specText) {
+          lines.push("");
+          lines.push("*Key Specifications (approx., India spec)*");
+          lines.push(specText);
+        }
       }
-    } catch(err){ if (DEBUG) console.warn('Spec block failed:', err && (err.message || err)); }
+    } catch (err) {
+      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec block failed:", err && (err.message || err));
+    }
 
     await waSendText(to, lines.join('\n'));
     await sendNewCarButtons(to);
@@ -2230,11 +2741,14 @@ async function tryQuickNewCarQuote(msgText, to) {
     setLastService(to, 'NEW');
     return true;
 
-  } catch(e) { console.error('tryQuickNewCarQuote error', e && e.stack ? e.stack : e); return false; }
+  } catch (e) {
+    console.error('tryQuickNewCarQuote error', e && e.stack ? e.stack : e);
+    return false;
+  }
 }
 
 // ============================================================================
-// END OF FILE
+// END OF REPLACEMENT BLOCK
 // ============================================================================
 
 // ---------------- webhook verify & health ----------------
