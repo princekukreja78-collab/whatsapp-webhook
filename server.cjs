@@ -2009,7 +2009,7 @@ async function tryQuickNewCarQuote(msgText, to) {
     const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
     const isShortModelToken = modelTok && modelTok.length <= 4;
     const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 12);
-    const SPECIAL_WORDS = ['LEADER','LEGENDER','GRS'];
+    const SPECIAL_WORDS = ['LEADER','LEGENDER','GRS','FORTUNER' , ];
     function _makeLoosePat(sfx) { const parts = (sfx||'').toString().toLowerCase().split(''); const escaped = parts.map(ch=>ch.replace(/[^a-z0-9]/g,'\\$&')); return new RegExp('\\b'+escaped.join('[\\s\\W_]*')+'\\b','i'); }
     const cityToken = city.split(' ')[0].toUpperCase();
 
