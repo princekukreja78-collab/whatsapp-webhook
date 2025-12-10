@@ -2619,16 +2619,19 @@ if (userBudget && allMatches.length < 3) {
 } else {
   allMatches.sort((a, b) => b.score - a.score);
 }
+console.log("DEBUG_QUICK: tokens=", tokens && tokens.slice(0,6));
+console.log("DEBUG_QUICK: coreTokens=", (typeof coreTokens !== 'undefined') ? coreTokens.slice(0,6) : 'undef');
+console.log("DEBUG_QUICK: allMatches_before=", Array.isArray(allMatches) ? allMatches.length : typeof allMatches);
+
 // ---------------------------------------------------------
 // STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
+// Inserted: enforces one-model-only responses when user typed a known model token.
 // ---------------------------------------------------------
 
 let strictModel = null;
 
-// 1) Build a model keyword list from MODEL_ALIASES and BRAND_HINTS
+// Build a model keyword list from MODEL_ALIASES and BRAND_HINTS
 const ALL_MODEL_KEYWORDS = new Set();
-
-// MODEL_ALIASES canonical + synonyms
 if (typeof MODEL_ALIASES !== 'undefined') {
   for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
     if (canon) ALL_MODEL_KEYWORDS.add(String(canon).toUpperCase());
@@ -2639,8 +2642,6 @@ if (typeof MODEL_ALIASES !== 'undefined') {
     }
   }
 }
-
-// BRAND_HINTS also contains models/variants
 if (typeof BRAND_HINTS !== 'undefined') {
   for (const arr of Object.values(BRAND_HINTS)) {
     if (!Array.isArray(arr)) continue;
@@ -2650,10 +2651,10 @@ if (typeof BRAND_HINTS !== 'undefined') {
   }
 }
 
-// 2) Choose token source: prefer coreTokens (non-generic) if available
+// Prefer coreTokens (non-generic) when available
 const tokenSource = (typeof coreTokens !== 'undefined' && coreTokens.length) ? coreTokens : (tokens && tokens.length ? tokens : []);
 
-// 3) Detect exact model token (single token only) — conservative detection
+// Conservative detection: single-token exact match only (avoid false positives)
 for (const tk of tokenSource) {
   const t = String(tk || '').toUpperCase().trim();
   if (!t) continue;
@@ -2663,7 +2664,7 @@ for (const tk of tokenSource) {
   }
 }
 
-// 4) If strictModel found, filter into a temporary array first (safe)
+// Safe-apply strict filter into temporary array
 if (strictModel) {
   const filteredMatches = allMatches.filter(m => {
     if (!m || typeof m.idxModel === 'undefined' || m.idxModel < 0) return false;
@@ -2672,14 +2673,16 @@ if (strictModel) {
     return mdl.includes(strictModel);
   });
 
+console.log("DEBUG_QUICK: strictModel=", strictModel, "filteredMatches=", filteredMatches.length);
+
   // If nothing matched the strictModel, DO NOT enforce strict mode (fallback)
   if (!filteredMatches.length) {
-    // fallback: don't enforce strict filtering — keep original allMatches
     strictModel = null;
   } else {
-    // If there are filtered matches, use them and respond with variants if >1
+    // Use the filtered results
     allMatches = filteredMatches;
 
+    // If multiple variants exist => reply with variant list and terminate
     if (allMatches.length > 1) {
       const out = [];
       out.push(`*Available variants — ${strictModel}*`);
@@ -2688,10 +2691,13 @@ if (strictModel) {
         const varr = String(m.row[m.idxVariant] || '').trim();
         out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
       });
+
+console.log("DEBUG_QUICK: sending variant list for", strictModel, "count=", allMatches.length);
+
       await waSendText(to, out.join("\n"));
       return true;
     }
-    // else, exactly one match remains and regular single-best flow continues
+    // else exactly 1 match — continue to single-best output below
   }
 }
     // if user asked only the brand/model (very short query) — show short variant list
