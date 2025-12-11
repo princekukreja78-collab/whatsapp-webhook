@@ -2775,7 +2775,7 @@ if (allMatches.length > 0) {
     if (!best) return false;
 
     const loanAmt = best.exShow || best.onroad || 0;
-    const roi = Number(process.env.NEW_CAR_ROI || 10.5); // default ROI
+    const roi = Number(process.env.NEW_CAR_ROI || 8.1); // default ROI
     const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
 
     const modelName  = best.idxModel   >= 0 ? String(best.row[best.idxModel]   || '').toUpperCase() : '';
