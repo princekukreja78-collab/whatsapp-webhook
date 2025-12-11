@@ -1853,6 +1853,35 @@ async function trySmartNewCarIntent(msgText, to) {
 
   // let the main spec flow handle explicit 'spec' requests
   if (/\b(spec|specs|specification|specifications)\b/i.test(t)) return false;
+// ---------- PRICE INDEX FALLBACK helper ----------
+function findPriceIndexFallback(header, tab) {
+  // header: array of header strings (uppercased)
+  // tab: table object containing .data (rows)
+  if (!Array.isArray(header) || header.length === 0) return -1;
+
+  // common header patterns first
+  for (let i = 0; i < header.length; i++) {
+    const h = header[i] || '';
+    if (/(ON[-_ ]?ROAD|ONROAD|ON[-_ ]?ROAD PRICE|ONROAD PRICE|OTR|ON-RD|ONR|ONROAD₹|ONSITE PRICE|ONROADAMOUNT|PRICE)/i.test(h)) return i;
+    if (/(ON[-_ ]?ROAD|ONROAD|PRICE|AMOUNT)/i.test(h) && /₹|rs|inr/i.test(String(header[i+1] || ''))) return i;
+  }
+
+  // fallback: pick the column with the most numeric cells (likely a price column)
+  let bestIdx = -1;
+  let bestCount = 0;
+  for (let i = 0; i < header.length; i++) {
+    let cnt = 0;
+    if (!tab || !Array.isArray(tab.data)) continue;
+    for (const r of tab.data) {
+      const v = String(r[i] || '').replace(/[,₹\s]/g, '');
+      if (/^\d{4,}$/.test(v)) cnt++; // number with 4+ digits likely a price
+    }
+    if (cnt > bestCount) { bestCount = cnt; bestIdx = i; }
+  }
+  // require at least 2 numeric occurrences to be considered valid
+  return bestCount >= 2 ? bestIdx : -1;
+}
+// ---------- end PRICE INDEX FALLBACK helper ----------
 
   // ------------------------------
   // DICTIONARIES
@@ -2079,11 +2108,25 @@ async function tryQuickNewCarQuote(msgText, to) {
       return true;
     }
 
-    const tables = await loadPricingFromSheets();
-    if (!tables || Object.keys(tables).length === 0) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.log('No pricing tables loaded — aborting new-car quick quote.');
-      return false;
-    }
+    // ---------- ROBUST SHEET LOADING (with one retry) ----------
+let tables = null;
+try {
+  tables = await loadPricingFromSheets();
+} catch (loadErr) {
+  if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Initial loadPricingFromSheets failed:", loadErr && loadErr.message);
+  try {
+    // short retry
+    tables = await loadPricingFromSheets();
+  } catch (loadErr2) {
+    if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Retry loadPricingFromSheets also failed:", loadErr2 && loadErr2.message);
+    tables = null;
+  }
+}
+
+if (!tables || Object.keys(tables).length === 0) {
+  if (typeof DEBUG !== 'undefined' && DEBUG) console.log('loadPricingFromSheets returned empty tables. Continuing but dynamic pricing may be limited.');
+}
+// ---------- end ROBUST SHEET LOADING ----------
 
     const tRaw = String(msgText || '');
     const t = tRaw.toLowerCase();
@@ -2210,95 +2253,101 @@ async function tryQuickNewCarQuote(msgText, to) {
       if (typeof DEBUG !== 'undefined' && DEBUG) console.warn('exactModelHit detection failed:', e && e.message);
     }
 
-    // ---------- MULTI-BRAND DETECTION (strengthened) ----------
-    let allowedBrandSet = null;
+   // ---------- MULTI-BRAND DETECTION (strengthened) ----------
+let allowedBrandSet = null;
 
-    if (brandGuess) {
-      allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
-    } else {
-      const allBrands = Object.keys(tables || {});
-      const brandAliasMap = {};
+if (brandGuess) {
+  allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
+} else {
+  const allBrands = Object.keys(tables || {});
+  const brandAliasMap = {};
 
-      const normalize = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalize = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 
-      // curated model -> brand map (expanded)
-      const commonModelToBrand = {
-        'fortuner': 'TOYOTA', 'legender': 'TOYOTA', 'hycross': 'TOYOTA', 'innova': 'TOYOTA',
-        'x1': 'BMW','x3': 'BMW','x5': 'BMW','creta': 'HYUNDAI','venue': 'HYUNDAI',
-        'city': 'HONDA','swift': 'MARUTI','eeco': 'MARUTI',
-        'grs': 'TOYOTA','zxo': 'TOYOTA','zx': 'TOYOTA','vx': 'TOYOTA','gx': 'TOYOTA','vxo':'TOYOTA','gxo':'TOYOTA'
-      };
+  // curated model -> brand map (expanded)
+  const commonModelToBrand = {
+    'fortuner': 'TOYOTA', 'legender': 'TOYOTA', 'hycross': 'TOYOTA', 'innova': 'TOYOTA', 'hyryder': 'TOYOTA', 'rumion': 'TOYOTA',
+    'x1': 'BMW','x3': 'BMW','x5': 'BMW',
+    'creta': 'HYUNDAI','venue': 'HYUNDAI','verna':'HYUNDAI',
+    'city': 'HONDA','civic':'HONDA',
+    'swift': 'MARUTI','baleno':'MARUTI','glanza':'TOYOTA',
+    // explicit short token aliases
+    'grs': 'TOYOTA','leg':'TOYOTA','zxo':'TOYOTA','zx':'TOYOTA','vx':'TOYOTA','gx':'TOYOTA','vxo':'TOYOTA','gxo':'TOYOTA'
+  };
 
-      // build alias map from sheet names + normalized tokens
-      for (const b of allBrands) {
-        if (!b) continue;
-        const rawB = String(b).trim();
-        const lower = rawB.toLowerCase();
-        brandAliasMap[normalize(lower)] = rawB;
-        const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
-        if (first) brandAliasMap[normalize(first)] = rawB;
-        const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
-        if (stripped) brandAliasMap[normalize(stripped)] = rawB;
-        if (first && first.length <= 6) brandAliasMap[normalize(first)] = rawB;
-      }
+  // build alias map from sheet names + normalized tokens
+  for (const b of allBrands) {
+    if (!b) continue;
+    const rawB = String(b).trim();
+    const lower = rawB.toLowerCase();
+    brandAliasMap[normalize(lower)] = rawB;
+    const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
+    if (first) brandAliasMap[normalize(first)] = rawB;
+    const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
+    if (stripped) brandAliasMap[normalize(stripped)] = rawB;
+    if (first && first.length <= 6) brandAliasMap[normalize(first)] = rawB;
+  }
 
-      // merge curated map
-      for (const [m, b] of Object.entries(commonModelToBrand)) {
-        const key = normalize(m);
-        if (key && !brandAliasMap[key]) brandAliasMap[key] = b;
-      }
+  // merge curated map (do not overwrite existing sheet-derived aliases)
+  for (const [m, b] of Object.entries(commonModelToBrand)) {
+    const key = normalize(m);
+    if (key && !brandAliasMap[key]) brandAliasMap[key] = b;
+  }
 
-      // defensive: add model/variant tokens found inside each table
-      try {
-        for (const canonical of Object.keys(tables)) {
-          const entry = tables[canonical];
-          const variants = entry && (entry.models || entry.variants || entry.items || entry.list || []);
-          if (Array.isArray(variants) && variants.length) {
-            for (const v of variants) {
-              if (!v) continue;
-              const vRaw = (typeof v === 'string') ? v : (v.name || v.model || String(v));
-              const key = normalize(vRaw).split(/\s+/)[0];
-              if (key && !brandAliasMap[key]) brandAliasMap[key] = canonical;
-            }
-          } else if (entry && typeof entry === 'object') {
-            for (const k2 of Object.keys(entry)) {
-              const key2 = normalize(k2).split(/\s+/)[0];
-              if (key2 && !brandAliasMap[key2]) brandAliasMap[key2] = canonical;
-            }
+  // defensive: add model/variant tokens found inside each table (first two tokens)
+  try {
+    for (const canonical of Object.keys(tables)) {
+      const entry = tables[canonical];
+      const variants = entry && (entry.models || entry.variants || entry.items || entry.list || []);
+      if (Array.isArray(variants) && variants.length) {
+        for (const v of variants) {
+          if (!v) continue;
+          const vRaw = (typeof v === 'string') ? v : (v.name || v.model || String(v));
+          const parts = normalize(vRaw).split(/\s+/).slice(0,2); // first two tokens
+          for (const p of parts) {
+            if (p && !brandAliasMap[p]) brandAliasMap[p] = canonical;
           }
         }
-      } catch (e) {
-        if (typeof DEBUG !== 'undefined' && DEBUG) console.log("model->brand map error:", e && e.message);
-      }
-
-      // detect brands by tokens & substring
-      const detectedBrands = new Set();
-      const txtLower = normalize(t);
-      const tokensTxt = txtLower.split(/\s+/).filter(Boolean);
-      for (const token of tokensTxt) {
-        const tnorm = token.replace(/[^a-z0-9]/g,'');
-        if (!tnorm) continue;
-        if (brandAliasMap[tnorm]) { detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase()); continue; }
-        if (commonModelToBrand[tnorm]) { detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase()); continue; }
-      }
-
-      for (const b of allBrands) {
-        if (!b) continue;
-        const bLow = normalize(String(b).toLowerCase());
-        if (bLow.length > 2 && txtLower.includes(bLow)) detectedBrands.add(String(b).toUpperCase());
-        if (txtLower.replace(/\s+/g,'').includes(bLow.replace(/\s+/g,''))) detectedBrands.add(String(b).toUpperCase());
-      }
-
-      if (detectedBrands.size > 0) allowedBrandSet = new Set(Array.from(detectedBrands)); else allowedBrandSet = null;
-      if (allowedBrandSet && allowedBrandSet.size === 0) allowedBrandSet = null;
-
-      if (typeof DEBUG !== 'undefined' && DEBUG) {
-        console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,12));
-        console.log("Tokens:", tokensTxt);
-        console.log("Detected brand candidates from text:", Array.from(detectedBrands));
-        console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
+      } else if (entry && typeof entry === 'object') {
+        for (const k2 of Object.keys(entry)) {
+          const key2 = normalize(k2).split(/\s+/)[0];
+          if (key2 && !brandAliasMap[key2]) brandAliasMap[key2] = canonical;
+        }
       }
     }
+  } catch (e) {
+    if (typeof DEBUG !== 'undefined' && DEBUG) console.log("model->brand map error:", e && e.message);
+  }
+
+  // detect brands by tokens & substring
+  const detectedBrands = new Set();
+  const txtLower = normalize(t);
+  const tokensTxt = txtLower.split(/\s+/).filter(Boolean);
+  for (const token of tokensTxt) {
+    const tnorm = token.replace(/[^a-z0-9]/g,'');
+    if (!tnorm) continue;
+    if (brandAliasMap[tnorm]) { detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase()); continue; }
+    if (commonModelToBrand[tnorm]) { detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase()); continue; }
+  }
+
+  for (const b of allBrands) {
+    if (!b) continue;
+    const bLow = normalize(String(b).toLowerCase());
+    if (bLow.length > 2 && txtLower.includes(bLow)) detectedBrands.add(String(b).toUpperCase());
+    if (txtLower.replace(/\s+/g,'').includes(bLow.replace(/\s+/g,''))) detectedBrands.add(String(b).toUpperCase());
+  }
+
+  if (detectedBrands.size > 0) allowedBrandSet = new Set(Array.from(detectedBrands)); else allowedBrandSet = null;
+  if (allowedBrandSet && allowedBrandSet.size === 0) allowedBrandSet = null;
+
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,12));
+    console.log("Tokens:", tokensTxt);
+    console.log("Detected brand candidates from text:", Array.from(detectedBrands));
+    console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
+  }
+}
+// ---------- end MULTI-BRAND DETECTION ----------
 
     // ---------- MATCHING LOOP ----------
     let allMatches = [];
@@ -2320,17 +2369,41 @@ async function tryQuickNewCarQuote(msgText, to) {
       const idxSuffixCol = header.findIndex(h => h.includes('SUFFIX'));
       const fuelIdx = pickFuelIndex(idxMap);
       const exIdx = detectExShowIdx(idxMap);
-      let globalPriceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience);
+     // --- determine globalPriceIdx (pickOnRoadPriceIndex OR header heuristics OR numeric fallback) ---
+let globalPriceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience);
 
-      // price-index fallback: try to find any likely price header
-      if (globalPriceIdx < 0) {
-        for (let i=0;i<header.length;i++) {
-          if (/(ON[-_ ]?ROAD|ONROAD|ON[-_ ]?ROAD PRICE|ONROAD PRICE|ONR|O-R|PRICE|O R|ONROAD₹)/i.test(header[i])) {
-            globalPriceIdx = i; break;
-          }
-        }
-      }
+// robust guard (in case pickOnRoadPriceIndex returns undefined)
+if (typeof globalPriceIdx === 'undefined' || globalPriceIdx < 0) {
+  // 1) header pattern scan (common names)
+  for (let i = 0; i < header.length; i++) {
+    const h = String(header[i] || '');
+    if (/(ON[-_ ]?ROAD|ONROAD|ON[-_ ]?ROAD PRICE|ONROAD PRICE|OTR|ONR|ON[-_ ]?ROAD₹|ONR PRICE|ONROADAMOUNT|ONR|PRICE|ONR PRICE)/i.test(h)) {
+      globalPriceIdx = i;
+      break;
+    }
+  }
+}
 
+// 2) fallback: pick the column with the most numeric (4+ digit) occurrences — likely a price column
+if (typeof globalPriceIdx === 'undefined' || globalPriceIdx < 0) {
+  let bestIdx = -1;
+  let bestCnt = 0;
+  for (let i = 0; i < header.length; i++) {
+    let cnt = 0;
+    for (const r of (tab.data || [])) {
+      const v = String(r[i] || '').replace(/[,₹\s]/g, '');
+      if (/^\d{4,}$/.test(v)) cnt++;
+    }
+    if (cnt > bestCnt) { bestCnt = cnt; bestIdx = i; }
+  }
+  // require at least 2 numeric occurrences to consider it valid
+  if (bestCnt >= 2) globalPriceIdx = bestIdx;
+}
+
+// DEBUG: show what we picked
+if (typeof DEBUG !== 'undefined' && DEBUG) {
+  console.log(`globalPriceIdx resolved=${globalPriceIdx} (headerCount=${header.length}) for brand=${brandKey}`);
+}
       for (const row of tab.data) {
         const modelCell = idxModel >= 0 ? String(row[idxModel] || '').toLowerCase() : '';
         const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').toLowerCase() : '';
@@ -2402,28 +2475,47 @@ async function tryQuickNewCarQuote(msgText, to) {
           }
         }
 
-        // NORMALIZE SPECIAL_WORDS comparison using normForMatch
-        const variantNormUpper = String(normForMatch(String(variantCell || ''))).toUpperCase();
-        const varKwNormUpper = String(varKwNorm || '').toUpperCase();
-        const userNormUpper = String(normForMatch(String(t || ''))).toUpperCase();
-        for (const sw of SPECIAL_WORDS) {
-          if ((variantNormUpper.includes(sw) || varKwNormUpper.includes(sw)) && !userNormUpper.includes(sw)) score -= 25;
-        }
+       // ---------- NORMALIZE SPECIAL_WORDS comparison + defensive suffix penalty ----------
+const variantNorm = String(normForMatch(String(variantCell || ''))).toLowerCase(); // normalized lowercase token used elsewhere
+const variantNormUpper = variantNorm.toUpperCase();
+const varKwNormUpper = String(varKwNorm || '').toUpperCase();
+const userNormUpper = String(normForMatch(String(t || ''))).toUpperCase();
 
-        // a small extra defensive step: if user suffix is very short (<=3) and no allowedBrandSet,
-        // prefer rows that explicitly include the suffix. apply a small penalty otherwise.
-        if (userSuffix && userSuffix.length <= 3 && !allowedBrandSet) {
-          if (!(variantNorm.includes(userSuffix) || varKwNorm.includes(userSuffix) || suffixNorm.includes(userSuffix))) {
-            score -= 10;
-          }
-        }
+const SPECIAL_WORDS_LIST = (typeof SPECIAL_WORDS !== 'undefined' && Array.isArray(SPECIAL_WORDS)) ? SPECIAL_WORDS : ['LEADER','LEGENDER','GRS'];
 
-        // require a minimum useful score before considering (adaptive)
-        let ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
-        if ((coreTokensArr && coreTokensArr.length === 1) || isShortModelToken) {
-          ABS_MIN_SCORE = Math.min(8, ABS_MIN_SCORE);
-        }
-        if (score <= 0 || score < ABS_MIN_SCORE) continue;
+for (const sw of SPECIAL_WORDS_LIST) {
+  if ((variantNormUpper.includes(sw) || varKwNormUpper.includes(sw)) && !userNormUpper.includes(sw)) {
+    score -= 25;
+    if (typeof DEBUG !== 'undefined' && DEBUG) {
+      console.log(`Penalty: SPECIAL_WORD ${sw} present in row but not in user text -> -25 (model=${modelCell}, variant=${variantCell})`);
+    }
+  }
+}
+
+// small extra defensive step: if userSuffix is very short (<=3) and no allowedBrandSet,
+// prefer rows that explicitly include the suffix; penalize slightly otherwise.
+if (userSuffix && userSuffix.length <= 3 && !allowedBrandSet) {
+  const suf = String(userSuffix).toLowerCase();
+  const suffixPresent = (variantNorm.includes(suf) || (varKwNorm && String(varKwNorm).toLowerCase().includes(suf)) || (suffixNorm && String(suffixNorm).toLowerCase().includes(suf)));
+  if (!suffixPresent) {
+    score -= 10;
+    if (typeof DEBUG !== 'undefined' && DEBUG) {
+      console.log(`Penalty: userSuffix '${userSuffix}' not found in row -> -10 (model=${modelCell}, variant=${variantCell})`);
+    }
+  }
+}
+// ---------- end SPECIAL_WORDS / suffix block ----------
+
+        // ---------- ADAPTIVE MIN SCORE (per-row) ----------
+let ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
+
+// Relax the absolute floor for short queries / single token model guesses
+if ((coreTokensArr && coreTokensArr.length === 1) || isShortModelToken) {
+  ABS_MIN_SCORE = Math.min(8, ABS_MIN_SCORE); // allow down to 8 for short queries
+}
+
+if (score <= 0 || score < ABS_MIN_SCORE) continue;
+// ---------- end ADAPTIVE MIN SCORE ----------
 
         // pick price column (globalPriceIdx) else fallback to first numeric
         let priceIdx = globalPriceIdx;
@@ -2478,21 +2570,32 @@ async function tryQuickNewCarQuote(msgText, to) {
       }
     }
 
-    // ---------- PRUNE & RELAXED MATCHING ----------
-    if (!allMatches.length && !userBudget) return false;
+    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
+if (!allMatches.length && !userBudget) return false;
 
-    if (allMatches.length > 0) {
-      const topScore = Math.max(...allMatches.map(m => m.score || 0));
-      const REL_MIN_FRAC = 0.12;
-      const ABS_MIN_SCORE = Number(process.env.MIN_MATCH_SCORE || 12);
-      const before = allMatches.length;
-      allMatches = allMatches.filter(m => {
-        const s = m.score || 0;
-        if (s < ABS_MIN_SCORE && s < topScore * REL_MIN_FRAC) return false;
-        return true;
-      });
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.log(`Pruned matches: before=${before}, after=${allMatches.length}, topScore=${topScore}`);
-    }
+if (allMatches.length > 0) {
+  const topScore = Math.max(...allMatches.map(m => m.score || 0));
+  const REL_MIN_FRAC = 0.12;
+
+  // Recompute an adaptive absolute floor for pruning (mirror per-row behavior)
+  let pruneAbsFloor = Number(process.env.MIN_MATCH_SCORE || 12);
+  if ((coreTokensArr && coreTokensArr.length === 1) || isShortModelToken) {
+    pruneAbsFloor = Math.min(8, pruneAbsFloor);
+  }
+
+  const before = allMatches.length;
+  allMatches = allMatches.filter(m => {
+    const s = m.score || 0;
+    // Keep match if it exceeds the absolute floor OR is close enough to topScore
+    if (s >= pruneAbsFloor) return true;
+    if (topScore > 0 && s >= Math.max(pruneAbsFloor * 0.8, topScore * REL_MIN_FRAC)) return true;
+    return false;
+  });
+
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    console.log(`Pruned matches: before=${before}, after=${allMatches.length}, topScore=${topScore}, pruneAbsFloor=${pruneAbsFloor}`);
+  }
+}
 
     // Relaxed matching when needed
     if (userBudget && allMatches.length < 3) {
