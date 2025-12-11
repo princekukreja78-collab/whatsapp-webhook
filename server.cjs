@@ -2476,8 +2476,8 @@ if (typeof DEBUG !== 'undefined' && DEBUG) {
         }
 
        // ---------- NORMALIZE SPECIAL_WORDS comparison + defensive suffix penalty ----------
-const variantNorm = String(normForMatch(String(variantCell || ''))).toLowerCase(); // normalized lowercase token used elsewhere
-const variantNormUpper = variantNorm.toUpperCase();
+const outerVariantNorm = String(normForMatch(String(variantCell || ''))).toLowerCase();
+const variantNormUpper = outerVariantNorm.toUpperCase();
 const varKwNormUpper = String(varKwNorm || '').toUpperCase();
 const userNormUpper = String(normForMatch(String(t || ''))).toUpperCase();
 
