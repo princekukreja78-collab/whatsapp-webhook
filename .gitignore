@@ -30,3 +30,10 @@ dist/
 .vite/
 .env.bak
 .credentials/
+
+# local backups
+server.cjs.bak*
+server.cjs.pre_*
+server.cjs.truncated*
+server.cjs.before_*
+server.cjs.borked*

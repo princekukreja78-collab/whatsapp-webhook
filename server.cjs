@@ -2793,51 +2793,66 @@ if (allMatches.length > 0) {
     }
     lines.push('\n*Terms & Conditions Apply ✅*');
 
-    // --- SPEC SHEET: try RAG then SignatureAI_RAG with retry
+   // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
+try {
+  const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
+
+  if (specIntent.test(t)) {
+    const specQuery = `${best.brand} ${modelName} ${variantStr} full technical specifications for India (engine, bhp, torque, seating, dimensions, tyres, safety, mileage).`;
+    let specText = "";
+
+    // 1) RAG attempt
     try {
-      const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
-      if (specIntent.test(t) || /feature|features/.test(t)) {
-        const specQuery = `${best.brand} ${modelName} ${variantStr} full technical specifications for India (engine, bhp, torque, seating, dimensions, tyres, safety, mileage).`;
-        let specText = "";
-
-        // RAG attempt
-        try {
-          if (typeof findRelevantChunks === "function") {
-            const chunks = await findRelevantChunks(specQuery, 4);
-            if (Array.isArray(chunks) && chunks.length) {
-              const joined = chunks.map(c => (c.text || c.content || "").trim()).filter(Boolean).join("\n");
-              if (joined && joined.length > 80) specText = joined;
-            }
-          }
-        } catch (ragErr) {
-          if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec RAG (chunks) failed:", ragErr && (ragErr.message || ragErr));
-        }
-
-        // Signature AI fallback with retry
-        if (!specText && typeof SignatureAI_RAG === "function") {
-          const specPrompt = `You are Mr.Car Signature AI.\nProvide a concise bullet-point technical specification for ${best.brand} ${modelName} ${variantStr} (India-spec, approximate ok):\n- Engine & displacement\n- Power (BHP) & torque (Nm)\n- Transmission & drive\n- Fuel & mileage (claimed)\n- Seating\n- Tyres & wheel size\n- Safety features (airbags, ABS, ESP, ADAS)\nKeep it short and whatsapp-friendly.`;
-          try {
-            let aiSpec = await SignatureAI_RAG(specPrompt);
-            if (!aiSpec || aiSpec.trim().length < 40) {
-              const specPrompt2 = `Short bullets (6 lines) for ${best.brand} ${modelName} ${variantStr}: engine, power, transmission, mileage, seating, 2 key safety features.`;
-              aiSpec = await SignatureAI_RAG(specPrompt2);
-            }
-            if (aiSpec && aiSpec.trim().length > 30) specText = aiSpec.trim();
-          } catch (aiErr) {
-            if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec SignatureAI_RAG retry failed:", aiErr && aiErr.message);
-          }
-        }
-
-        if (specText) {
-          lines.push("");
-          lines.push("*Key Specifications (approx., India spec)*");
-          lines.push(specText);
+      if (typeof findRelevantChunks === "function") {
+        const chunks = await findRelevantChunks(specQuery, 4);
+        if (Array.isArray(chunks) && chunks.length) {
+          const joined = chunks
+            .map(c => (c.text || c.content || "").trim())
+            .filter(Boolean)
+            .join("\n");
+          if (joined && joined.length > 80) specText = joined;
         }
       }
-    } catch (err) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.warn("Spec block failed:", err && (err.message || err));
+    } catch (e) {
+      if (DEBUG) console.warn("Spec RAG failed:", e?.message);
     }
 
+    // 2) Signature AI fallback (with retry)
+    if (!specText && typeof SignatureAI_RAG === "function") {
+      try {
+        let aiSpec = await SignatureAI_RAG(
+          `Provide concise India-spec technical specs for ${best.brand} ${modelName} ${variantStr}:\n` +
+          `- Engine & displacement\n- Power & torque\n- Transmission\n- Mileage\n- Seating\n- Safety highlights`
+        );
+
+        if (!aiSpec || aiSpec.trim().length < 40) {
+          aiSpec = await SignatureAI_RAG(
+            `6 bullet technical highlights for ${best.brand} ${modelName} ${variantStr}`
+          );
+        }
+
+        if (aiSpec && aiSpec.trim().length > 30) specText = aiSpec.trim();
+      } catch (e) {
+        if (DEBUG) console.warn("Spec SignatureAI fallback failed:", e?.message);
+      }
+    }
+
+    // Append safely
+    if (specText) {
+      const MAX_SPEC_LEN = 1200;
+      lines.push("");
+      lines.push("*Key Specifications (Approx., India spec)*");
+      lines.push(
+        specText.length > MAX_SPEC_LEN
+          ? specText.slice(0, MAX_SPEC_LEN) + "…"
+          : specText
+      );
+    }
+  }
+} catch (err) {
+  if (DEBUG) console.warn("Spec block error:", err?.message);
+}
+// ---------------- END SPEC SHEET ----------------
     await waSendText(to, lines.join('\n'));
     await sendNewCarButtons(to);
     incrementQuoteUsage(to);
