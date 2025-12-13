@@ -1852,7 +1852,11 @@ async function trySmartNewCarIntent(msgText, to) {
   const t = tRaw.toLowerCase().trim();
 
   // let the main spec flow handle explicit 'spec' requests
-  if (/\b(spec|specs|specification|specifications)\b/i.test(t)) return false;
+  if (/\b(spec|specs|specification|specifications|features)\b/i.test(t)) {
+  // Let quote engine run, but DO NOT short-circuit intent handling
+  return false;
+}
+
 // ---------- PRICE INDEX FALLBACK helper ----------
 function findPriceIndexFallback(header, tab) {
   // header: array of header strings (uppercased)
@@ -2131,6 +2135,10 @@ if (!tables || Object.keys(tables).length === 0) {
     const tRaw = String(msgText || '');
     const t = tRaw.toLowerCase();
     const tUpper = t.toUpperCase();
+// ---------- PAN-INDIA / ALL-STATES INTENT ----------
+const wantsAllStates =
+  /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
+
 
     // --- unified brand detection (uses global helper) ---
     let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
@@ -2370,7 +2378,9 @@ if (brandGuess) {
       const fuelIdx = pickFuelIndex(idxMap);
       const exIdx = detectExShowIdx(idxMap);
      // --- determine globalPriceIdx (pickOnRoadPriceIndex OR header heuristics OR numeric fallback) ---
-let globalPriceIdx = pickOnRoadPriceIndex(idxMap, cityToken, audience);
+let globalPriceIdx = wantsAllStates
+  ? findPriceIndexFallback(header, tab)
+  : pickOnRoadPriceIndex(idxMap, cityToken, audience);
 
 // robust guard (in case pickOnRoadPriceIndex returns undefined)
 if (typeof globalPriceIdx === 'undefined' || globalPriceIdx < 0) {
@@ -2571,7 +2581,19 @@ if (score <= 0 || score < ABS_MIN_SCORE) continue;
     }
 
     // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
-if (!allMatches.length && !userBudget) return false;
+if (!allMatches.length) {
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    console.log("No matches after filtering. userBudget=", userBudget);
+  }
+  await waSendText(
+    to,
+    "I couldn’t find an exact match for that query.\n" +
+    "Please try:\n" +
+    "• Model + Variant (e.g. *Hycross ZX(O)*)\n" +
+    "• Or add city (e.g. *Delhi*, *HR*)"
+  );
+  return true;
+}
 
 if (allMatches.length > 0) {
   const topScore = Math.max(...allMatches.map(m => m.score || 0));
@@ -2665,7 +2687,27 @@ if (allMatches.length > 0) {
       console.log("DEBUG_QUICK: allMatches_before=", Array.isArray(allMatches) ? allMatches.length : typeof allMatches);
       console.log("DEBUG_QUICK top 8:", (allMatches||[]).slice(0,8).map(m=>({brand:m.brand, score:m.score, onroad:m.onroad, model:(m.row && m.idxModel>=0)?m.row[m.idxModel]:null, variant:(m.row && m.idxVariant>=0)?m.row[m.idxVariant]:null})));
     }
+if (wantsAllStates && allMatches.length) {
+  const byState = {};
+  for (const m of allMatches) {
+    const state = (m.idxMap && m.idxMap.state) ? m.idxMap.state : 'STATE';
+    if (!byState[state]) byState[state] = [];
+    byState[state].push(m);
+  }
 
+  const out = [];
+  out.push(`*${modelName} ${variantStr} — All States Pricing*`);
+  out.push("");
+
+  Object.keys(byState).slice(0, 10).forEach(st => {
+    const best = byState[st].sort((a,b)=>a.onroad-b.onroad)[0];
+    out.push(`• *${st}* → ₹ ${fmtMoney(best.onroad)}`);
+  });
+
+  await waSendText(to, out.join("\n"));
+  setLastService(to, 'NEW');
+  return true;
+}
     // ---------------------------------------------------------
     // STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
     // ---------------------------------------------------------
@@ -2797,7 +2839,8 @@ if (allMatches.length > 0) {
 try {
   const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
 
-  if (specIntent.test(t)) {
+  if (wantsSpecs) {
+
     const specQuery = `${best.brand} ${modelName} ${variantStr} full technical specifications for India (engine, bhp, torque, seating, dimensions, tyres, safety, mileage).`;
     let specText = "";
 
