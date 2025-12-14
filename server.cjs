@@ -1909,7 +1909,7 @@ function resolveStateFromRow(row, idxMap) {
   // DICTIONARIES
   // ------------------------------
   const FEATURE_TOPICS = [
-    "adas","cvt","at","mt","diesel","hybrid","ev","awd","4x4","cruise","toyota safety sense",
+    "adas","cvt","automatic","mt","diesel","hybrid","ev","awd","4x4","cruise","toyota safety sense",
     "airbags","turbo","sunroof","engine","mileage","bs6","e20"
   ];
 
@@ -2048,7 +2048,7 @@ function resolveStateFromRow(row, idxMap) {
 // INTENT GUARDS (used by feature / spec / price flows)
 // ------------------------------
 const hasPricingIntent =
-  /\b(price|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
+  /\b(price|prices|pricing|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
 
   /\b(spec|specs|specification|specifications)\b/i.test(t);
 
@@ -2061,12 +2061,14 @@ const hasComparisonIntent =
 // ------------------------------
 for (const ft of FEATURE_TOPICS) {
   if (
-    t.includes(ft) &&
-    !hasPricingIntent &&
-    !hasSpecIntent &&
-    !hasComparisonIntent &&
-    !wantsAllStates
-  ) {
+  t.includes(ft) &&
+  !hasPricingIntent &&
+  !hasSpecIntent &&
+  !hasComparisonIntent &&
+  !wantsAllStates &&
+  !userBudget
+) {
+
     const expl = (typeof SignatureAI_RAG === 'function')
       ? await SignatureAI_RAG(
           `Explain "${ft}" in simple car-buyer language (India context, concise, non-technical).`
