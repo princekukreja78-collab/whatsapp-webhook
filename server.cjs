@@ -137,148 +137,77 @@ function rowHasSuffix(variantNorm, suffixNorm, varKwNorm) {
 
 /* ===== END SUFFIX MATCH PATCH ===== */
 // ============================================================================
-// GLOBAL CAR BRAND & MODEL DICTIONARY + HELPERS
+// AUTO-DISCOVERED BRAND & MODEL DETECTION (SHEET-DRIVEN, INDIA-WIDE)
 // ============================================================================
 
-// Brand hints: any of these tokens in user text strongly suggest that brand
-const BRAND_HINTS = {
-  MERCEDES: [
-    'mercedes','merc','benz',
-    'gla','gle','gls',
-    'e200','e 200','e220','e 220','e250','e 250','e300','e 300','e350','e 350',
-    'e class','e-class','eclass',
-    'c class','c-class','cclass','c200','c 200','c220',
-    's class','s-class','sclass','s350','s 350','s450','s 450','maybach','eqs'
-  ],
-  BMW: [
-    'bmw','b m w','beemer','bemer',
-    'x1','x 1','x3','x 3','x5','x 5','x7','x 7',
-    '3 series','3-series','3series','320d','320 d','330i','330 i',
-    '5 series','5-series','5series','520d','520 d','530i','530 i',
-    '7 series','7-series','7series','730ld','730 ld'
-  ],
-  AUDI: [
-    'audi','odi','awdi',
-    'a3','a 3','a4','a 4','a6','a 6','a8','a 8',
-    'q3','q 3','q5','q 5','q7','q 7'
-  ],
-  VOLVO: [
-    'volvo','wolvo','vulvo',
-    'xc40','xc 40','xc60','xc 60','xc90','xc 90','c40','c 40','recharge'
-  ],
-  TOYOTA: [
-    'toyota','toyata',
-    'innova','crysta','hycross','hykros','hy ryder','hyryder',
-    'fortuner','fortu',
-'legender','legend',
-'glanza','camry','rumion'
+// Global registries (populated once pricing sheets are loaded)
+const GLOBAL_BRAND_SET   = new Set();
+const GLOBAL_MODEL_SET   = new Set();
+const GLOBAL_MODEL_BRAND = {}; // modelNorm -> BRAND
 
-  ],
-  HYUNDAI: [
-    'hyundai','hundai',
-    'creta','venue','exter','alcazar','tucson','verna','i20','i 20','grand i10','i10'
-  ],
-  KIA: [
-    'kia','seltos','sonet','carens','ev6'
-  ],
-  MAHINDRA: [
-    'mahindra','mahindara','m&m',
-    'xuv700','xuv 700','700','xuv300','xuv 300','scorpio','scorpio n','thar','bolero'
-  ],
-  MARUTI: [
-    'maruti','suzuki','maruti suzuki',
-    'swift','baleno','brezza','fronx','ciaz','dzire','ertiga'
-  ],
-  HONDA: [
-    'honda','city','amaz','amaze','elevate','wrv'
-  ]
-};
+function buildGlobalRegistryFromSheets(tables) {
+  if (!tables || typeof tables !== 'object') return;
 
-// Model aliases: map a "canonical model name" → list of ways people type it.
-// Keep this focused on ambiguous / popular models only.
-const MODEL_ALIASES = {
-  'mercedes gla': ['gla','gla 200','gla 220d'],
-  'mercedes gls': ['gls','gls 450','gls 600','gls maybach'],
-  'mercedes e class': ['e class','e-class','eclass','e200','e 200','e220d','e 220d','e350'],
-  'mercedes c class': ['c class','c-class','cclass','c200','c 200','c220'],
-  'mercedes s class': ['s class','s-class','sclass','s350','s 350','s450','s 450'],
-  'bmw 3 series': ['3 series','3-series','3series','320d','320 d','330i','330 i'],
-  'bmw 5 series': ['5 series','5-series','5series','520d','520 d','530i','530 i'],
-  'bmw 7 series': ['7 series','7-series','7series','730ld','730 ld'],
-  'bmw x1': ['x1','x 1'],
-  'bmw x3': ['x3','x 3'],
-  'bmw x5': ['x5','x 5'],
-  'bmw x7': ['x7','x 7'],
-  'audi q3': ['q3','q 3'],
-  'audi q5': ['q5','q 5'],
-  'audi q7': ['q7','q 7'],
-  'volvo xc40': ['xc40','xc 40'],
-  'volvo xc60': ['xc60','xc 60'],
-  'volvo xc90': ['xc90','xc 90'],
-  'toyota innova hycross': ['hycross','innova hycross','hycros','hykros'],
-  'toyota innova crysta': ['crysta','innova crysta'],
-  'toyota fortuner': ['fortuner','fortu'],
-'toyota legender': ['legender','legend'],
-  'toyota hyryder': ['hyryder','hy ryder'],
-  'hyundai creta': ['creta'],
-  'hyundai venue': ['venue'],
-  'kia seltos': ['seltos'],
-  'kia sonet': ['sonet'],
-  'mahindra xuv700': ['xuv700','xuv 700','700'],
-  'mahindra scorpio n': ['scorpio n','scorpion','scropio n'],
-  'mahindra thar': ['thar','thaar']
-};
+  for (const [brandKey, tab] of Object.entries(tables)) {
+    if (!tab || !Array.isArray(tab.data)) continue;
 
-// -------- Helper: detect brand from free text --------
+    const BRAND = String(brandKey).toUpperCase().trim();
+    GLOBAL_BRAND_SET.add(BRAND);
+
+    const header = (tab.header || []).map(h => String(h || '').toUpperCase());
+    const idxModel = header.findIndex(h => h.includes('MODEL'));
+
+    if (idxModel < 0) continue;
+
+    for (const row of tab.data) {
+      if (!row || !row[idxModel]) continue;
+
+      const modelRaw  = String(row[idxModel]).trim();
+      const modelNorm = normForMatch(modelRaw);
+
+      if (!modelNorm) continue;
+
+      GLOBAL_MODEL_SET.add(modelNorm);
+      GLOBAL_MODEL_BRAND[modelNorm] = BRAND;
+    }
+  }
+
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    console.log(
+      `[GLOBAL REGISTRY] Brands=${GLOBAL_BRAND_SET.size}, Models=${GLOBAL_MODEL_SET.size}`
+    );
+  }
+}
+
+// -------- Detect brand from text (NO hardcoding) --------
 function detectBrandFromText(text) {
-  const t = String(text || '').toLowerCase();
-  // 1) direct brand words
-  if (/\bbmw\b/.test(t)) return 'BMW';
-  if (/\baudi\b/.test(t)) return 'AUDI';
-  if (/\b(mercedes|merc|benz)\b/.test(t)) return 'MERCEDES';
-  if (/\b(volvo|wolvo|vulvo)\b/.test(t)) return 'VOLVO';
-  if (/\b(toyota|toyata)\b/.test(t)) return 'TOYOTA';
-  if (/\b(hyundai|hundai)\b/.test(t)) return 'HYUNDAI';
-  if (/\bkia\b/.test(t)) return 'KIA';
-  if (/\bmahindra\b/.test(t)) return 'MAHINDRA';
-  if (/\bmaruti\b|\bsuzuki\b/.test(t)) return 'MARUTI';
-  if (/\bhonda\b/.test(t)) return 'HONDA';
+  const t = normForMatch(text);
 
-  // 2) brand hints (model short codes etc.)
-  outer: for (const [brand, hints] of Object.entries(BRAND_HINTS)) {
-    for (const h of hints) {
-      const pat = new RegExp(`\\b${h.replace(/\s+/g, '\\s*')}\\b`, 'i');
-      if (pat.test(t)) {
-        return brand; // e.g. "MERCEDES"
-      }
+  // 1️⃣ Explicit brand words
+  for (const brand of GLOBAL_BRAND_SET) {
+    if (t.includes(normForMatch(brand))) return brand;
+  }
+
+  // 2️⃣ Infer brand from model name
+  for (const model of GLOBAL_MODEL_SET) {
+    if (t.includes(model)) {
+      return GLOBAL_MODEL_BRAND[model] || null;
     }
   }
 
   return null;
 }
 
-// -------- Helper: detect possible models in free text (for comparison, logging, etc.) --------
+// -------- Detect models from text (for comparison, logging, etc.) --------
 function detectModelsFromText(text) {
-  const t = String(text || '').toLowerCase();
+  const t = normForMatch(text);
   const found = [];
 
-  for (const [canonical, aliases] of Object.entries(MODEL_ALIASES)) {
-    const canPat = new RegExp(`\\b${canonical.replace(/\s+/g, '\\s*')}\\b`, 'i');
-    if (canPat.test(t)) {
-      found.push(canonical);
-      continue;
-    }
-    for (const a of aliases) {
-      const pat = new RegExp(`\\b${a.replace(/\s+/g, '\\s*')}\\b`, 'i');
-      if (pat.test(t)) {
-        found.push(canonical);
-        break;
-      }
-    }
+  for (const model of GLOBAL_MODEL_SET) {
+    if (t.includes(model)) found.push(model);
   }
 
-  // remove duplicates
-  return Array.from(new Set(found));
+  return Array.from(new Set(found)).slice(0, 3);
 }
 
 // server.cjs — MR.CAR webhook (New + Used, multi-bot CRM core)
@@ -1851,11 +1780,32 @@ async function trySmartNewCarIntent(msgText, to) {
   const tRaw = String(msgText || "");
   const t = tRaw.toLowerCase().trim();
 
-  // let the main spec flow handle explicit 'spec' requests
-  if (/\b(spec|specs|specification|specifications|features)\b/i.test(t)) {
-  // Let quote engine run, but DO NOT short-circuit intent handling
+ // ------------------------------------------------------------------
+// INTENT PRIORITY NORMALISER (DO NOT SHORT-CIRCUIT QUOTES)
+// Rules:
+// 1) Specs-only → allow quote engine (it appends specs safely)
+// 2) Price / EMI / Cost → MUST go to quote engine
+// 3) Model-only (no price/spec words) → allow waiting-period logic
+// ------------------------------------------------------------------
+
+const hasSpecIntent  = /\b(spec|specs|specification|specifications|features)\b/i.test(t);
+const hasPriceIntent = /\b(price|cost|on[- ]?road|emi|loan|finance)\b/i.test(t);
+
+// If user explicitly asks for price / EMI → DO NOT handle here
+if (hasPriceIntent) {
   return false;
 }
+
+// If user asks for specs (with or without model),
+// allow quote engine to run (it appends specs safely)
+if (hasSpecIntent) {
+  return false;
+}
+
+// NOTE:
+// At this point, query is NOT asking for price or specs.
+// This is where waiting-period / recommendation logic is allowed.
+
 
 // ---------- PRICE INDEX FALLBACK helper ----------
 function findPriceIndexFallback(header, tab) {
@@ -2131,6 +2081,11 @@ if (!tables || Object.keys(tables).length === 0) {
   if (typeof DEBUG !== 'undefined' && DEBUG) console.log('loadPricingFromSheets returned empty tables. Continuing but dynamic pricing may be limited.');
 }
 // ---------- end ROBUST SHEET LOADING ----------
+
+// ✅ BUILD GLOBAL BRAND / MODEL REGISTRY FROM SHEETS (ONCE PER CALL)
+if (tables && Object.keys(tables).length) {
+  buildGlobalRegistryFromSheets(tables);
+}
 
     const tRaw = String(msgText || '');
     const t = tRaw.toLowerCase();
@@ -2708,7 +2663,81 @@ if (wantsAllStates && allMatches.length) {
   setLastService(to, 'NEW');
   return true;
 }
-    // ---------------------------------------------------------
+// =========================================================
+// PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / WAITING / PAN-INDIA)
+// =========================================================
+
+// 1️⃣ WAITING PERIOD — model-only query (no price / no specs)
+const wantsWaiting =
+  !userBudget &&
+  !/\b(price|on[- ]?road|emi|loan|finance|spec|specs|features)\b/i.test(t) &&
+  coreTokensArr.length === 1;
+
+if (wantsWaiting) {
+  const key = coreTokensArr[0].toLowerCase();
+  for (const [modelKey, wait] of Object.entries(WAITING_PERIODS || {})) {
+    if (modelKey.includes(key)) {
+      await waSendText(
+        to,
+        `*${modelKey.toUpperCase()} — Waiting Period*\n${wait}\n\nTell me your *city* and *variant* for an exact on-road price.`
+      );
+      setLastService(to, 'NEW');
+      return true;
+    }
+  }
+}
+
+// 2️⃣ PAN-INDIA / ALL-STATES PRICE COMPARISON
+if (wantsAllStates && allMatches.length) {
+  const byState = {};
+  for (const m of allMatches) {
+    const state = (m.idxMap && m.idxMap.STATE >= 0)
+      ? String(m.row[m.idxMap.STATE] || 'UNKNOWN').toUpperCase()
+      : 'DEFAULT';
+
+    if (!byState[state] || byState[state].onroad > m.onroad) {
+      byState[state] = m;
+    }
+  }
+
+  const out = [];
+  out.push(`*${allMatches[0].brand} ${String(allMatches[0].row[allMatches[0].idxModel] || '').toUpperCase()}*`);
+  out.push('*Pan-India On-Road Price (Best by State)*\n');
+
+  Object.entries(byState).slice(0, 10).forEach(([st, m]) => {
+    out.push(`• *${st}* — ₹ ${fmtMoney(m.onroad)}`);
+  });
+
+  out.push('\nReply with a *state name* for a detailed breakup.');
+  await waSendText(to, out.join('\n'));
+  setLastService(to, 'NEW');
+  return true;
+}
+
+// 3️⃣ SINGLE BEST QUOTE (when exactly one strong match)
+if (allMatches.length === 1) {
+  const m = allMatches[0];
+
+  const mdl = m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
+  const varr = m.idxVariant >= 0 ? String(m.row[m.idxVariant] || '').toUpperCase() : '';
+
+  const lines = [];
+  lines.push(`*${m.brand}* ${mdl} ${varr}`);
+  lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
+  if (m.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(m.onroad)}`);
+  if (m.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(m.exShow)}`);
+  lines.push('\nReply *SPEC* for features or *EMI* for finance.');
+
+  await waSendText(to, lines.join('\n'));
+  setLastService(to, 'NEW');
+  return true;
+}
+
+// =========================================================
+// END PRE-STRICT RESPONSE HANDLER
+// =========================================================
+    
+// ---------------------------------------------------------
     // STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
     // ---------------------------------------------------------
     let strictModel = null;
