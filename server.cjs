@@ -1785,14 +1785,22 @@ async function trySmartNewCarIntent(msgText, to) {
 // Rules:
 // 1) Specs-only → allow quote engine (it appends specs safely)
 // 2) Price / EMI / Cost → MUST go to quote engine
-// 3) Model-only (no price/spec words) 
+// 3) PAN-INDIA / ALL-STATES → MUST go to quote engine
 // ------------------------------------------------------------------
 
-const hasSpecIntent  = /\b(spec|specs|specification|specifications|features)\b/i.test(t);
-const hasPriceIntent = /\b(price|cost|on[- ]?road|emi|loan|finance)\b/i.test(t);
+const hasSpecIntent =
+  /\b(spec|specs|specification|specifications|features)\b/i.test(t);
 
-// If user explicitly asks for price / EMI → DO NOT handle here
-if (hasPriceIntent) {
+const hasPriceIntent =
+  /\b(price|cost|on[- ]?road|emi|loan|finance|quote)\b/i.test(t);
+
+const wantsAllStates =
+  /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
+
+// If user explicitly asks for price / EMI / state-wise pricing
+// → DO NOT handle in smart intent engine
+// → let tryQuickNewCarQuote handle it
+if (hasPriceIntent || wantsAllStates) {
   return false;
 }
 
@@ -1847,7 +1855,10 @@ function findPriceIndexFallback(header, tab) {
   // ------------------------------
   // 1️⃣ COMPARISON INTENT
   // ------------------------------
-  if (/vs|compare|better|difference between/.test(t)) {
+  if (
+  /vs|compare|better|difference between/.test(t) &&
+  !wantsAllStates
+) {
     const foundModels = (typeof detectModelsFromText === 'function') ? await detectModelsFromText(t) : [];
     if (foundModels && foundModels.length >= 2) {
       const m1 = foundModels[0];
