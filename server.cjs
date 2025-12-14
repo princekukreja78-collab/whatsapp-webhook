@@ -1972,43 +1972,44 @@ function findPriceIndexFallback(header, tab) {
     setLastService(to, "NEW");
     return true;
   }
+// ------------------------------
+// INTENT GUARDS (used by feature / spec / price flows)
+// ------------------------------
+const hasPricingIntent =
+  /\b(price|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
+
+const hasSpecIntent =
+  /\b(spec|specs|specification|specifications)\b/i.test(t);
+
+const hasComparisonIntent =
+  /\b(vs|compare|comparison|difference)\b/i.test(t);
 
 // ------------------------------
 // 3️⃣ FEATURE EXPLANATION MODE (STRICT, SAFE)
 // Trigger ONLY when user intent is clearly educational
 // ------------------------------
-const hasPricingIntent =
-  /\b(price|on[- ]?road|emi|loan|finance|quote|cost)\b/i.test(t);
+for (const ft of FEATURE_TOPICS) {
+  if (
+    t.includes(ft) &&
+    !hasPricingIntent &&
+    !hasSpecIntent &&
+    !hasComparisonIntent &&
+    !wantsAllStates
+  ) {
+    const expl = (typeof SignatureAI_RAG === 'function')
+      ? await SignatureAI_RAG(
+          `Explain "${ft}" in simple car-buyer language (India context, concise, non-technical).`
+        )
+      : `Explanation for ${ft}`;
 
-  /\b(spec|specs|specification|specifications|features)\b/i.test(t);
-
-const hasModelSignal =
-  (typeof detectBrandFromText === 'function' && detectBrandFromText(t)) ||
-  (typeof detectModelsFromText === 'function' &&
-    (await detectModelsFromText(t)).length > 0);
-
-if (!hasPricingIntent && !hasSpecIntent && !hasModelSignal) {
-  for (const ft of FEATURE_TOPICS) {
-    // strict word boundary (prevents "fortuner")
-    const pat = new RegExp(`\\b${ft}\\b`, 'i');
-    if (pat.test(t)) {
-      const expl =
-        (typeof SignatureAI_RAG === 'function')
-          ? await SignatureAI_RAG(
-              `Explain "${ft}" in simple car-buyer language (India context, concise).`
-            )
-          : `Explanation for ${ft}`;
-
-      await waSendText(
-        to,
-        `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`
-      );
-      setLastService(to, "NEW");
-      return true;
-    }
+    await waSendText(
+      to,
+      `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`
+    );
+    setLastService(to, "NEW");
+    return true;
   }
 }
-
   // ------------------------------
   // 4️⃣ RECOMMENDATION MODE
   // ------------------------------
