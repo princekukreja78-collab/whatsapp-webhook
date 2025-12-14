@@ -2051,7 +2051,8 @@ function resolveStateFromRow(row, idxMap) {
 const hasPricingIntent =
   /\b(price|prices|pricing|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
 
-  /\b(spec|specs|specification|specifications)\b/i.test(t);
+const wantsSpecs =
+  /\b(spec|specs|specification|specifications|feature|features)\b/i.test(t);
 
 const hasComparisonIntent =
   /\b(vs|compare|comparison|difference)\b/i.test(t);
@@ -2771,7 +2772,11 @@ if ((wantsSUV || wantsLuxury) && allMatches.length) {
     }
 
     // if user asked only the brand/model (very short query) — show short variant list
-    if (coreTokensArr.length === 1 && !exactModelHit) {
+    if (
+  coreTokensArr.length === 1 &&
+  !exactModelHit &&
+  !wantsAllStates
+) {
       const distinct = [];
       const seenTitles = new Set();
       for (const m of allMatches) {
