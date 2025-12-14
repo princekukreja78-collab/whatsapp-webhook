@@ -1843,6 +1843,23 @@ function findPriceIndexFallback(header, tab) {
   return bestCount >= 2 ? bestIdx : -1;
 }
 // ---------- end PRICE INDEX FALLBACK helper ----------
+// ---------- STATE RESOLUTION helper (PAN-INDIA SAFE) ----------
+function resolveStateFromRow(row, idxMap) {
+  if (!row || !idxMap) return 'UNKNOWN';
+
+  const candidates = ['STATE', 'REGION', 'LOCATION', 'RTO', 'CITY'];
+
+  for (const key of candidates) {
+    const idx = idxMap[key];
+    if (typeof idx === 'number' && idx >= 0) {
+      const v = String(row[idx] || '').trim();
+      if (v) return v.toUpperCase();
+    }
+  }
+
+  return 'UNKNOWN';
+}
+// ---------- end STATE RESOLUTION helper ----------
 
   // ------------------------------
   // DICTIONARIES
@@ -1953,7 +1970,7 @@ function findPriceIndexFallback(header, tab) {
           out.push('');
           if (wantsSUV) out.push('• Segment: *SUV*'); else if (wantsSedan) out.push('• Segment: *Sedan*'); else if (wantsHatch) out.push('• Segment: *Hatchback*'); else out.push('• Segment: *Any*');
           out.push('');
-          dynamicPicks.slice(0,6).forEach(p => out.push(`• *${p.brand} ${p.model || ''}* — On-road ~ ₹${fmtMoney(p.onroad)}`));
+          dynamicPicks.slice(0,15).forEach(p => out.push(`• *${p.brand} ${p.model || ''}* — On-road ~ ₹${fmtMoney(p.onroad)}`));
           out.push('', 'Reply with the model name for exact *on-road price*, *offers* and *EMI*.');
           await waSendText(to, out.join('\n'));
           setLastService(to, 'NEW');
@@ -2526,7 +2543,7 @@ if (allMatches.length > 0) {
       if (typeof DEBUG !== 'undefined' && DEBUG) console.log("Relaxing budget filter because strict matches < 3.");
 
       const relaxedMatches = [];
-      const RELAX_LIMIT = Number(process.env.RELAXED_LIMIT || 25);
+      const RELAX_LIMIT = Number(process.env.RELAXED_LIMIT || 60);
       const mid = (budgetMin + budgetMax) / 2;
 
       for (const [brand, tab] of Object.entries(tables)) {
@@ -2589,126 +2606,6 @@ if (allMatches.length > 0) {
       console.log("DEBUG_QUICK: allMatches_before=", Array.isArray(allMatches) ? allMatches.length : typeof allMatches);
       console.log("DEBUG_QUICK top 8:", (allMatches||[]).slice(0,8).map(m=>({brand:m.brand, score:m.score, onroad:m.onroad, model:(m.row && m.idxModel>=0)?m.row[m.idxModel]:null, variant:(m.row && m.idxVariant>=0)?m.row[m.idxVariant]:null})));
     }
-if (wantsAllStates && allMatches.length) {
-  const byState = {};
-  for (const m of allMatches) {
-    const state = (m.idxMap && m.idxMap.state) ? m.idxMap.state : 'STATE';
-    if (!byState[state]) byState[state] = [];
-    byState[state].push(m);
-  }
-
-  const out = [];
-  out.push(`*${modelName} ${variantStr} — All States Pricing*`);
-  out.push("");
-
-  Object.keys(byState).slice(0, 10).forEach(st => {
-    const best = byState[st].sort((a,b)=>a.onroad-b.onroad)[0];
-    out.push(`• *${st}* → ₹ ${fmtMoney(best.onroad)}`);
-  });
-
-  await waSendText(to, out.join("\n"));
-  setLastService(to, 'NEW');
-  return true;
-}
-
-// =========================================================
-// PAN-INDIA / ALL-STATES PRICE COMPARISON (PRE-STRICT)
-// =========================================================
-if (wantsAllStates && allMatches.length) {
-  const byState = {};
-
-  for (const m of allMatches) {
-    const stateIdx = m.idxMap?.STATE;
-    if (stateIdx === undefined || stateIdx < 0) continue;
-
-    const state = String(m.row[stateIdx] || '').trim().toUpperCase();
-    if (!state) continue;
-
-    if (!byState[state] || m.onroad < byState[state].onroad) {
-      byState[state] = m;
-    }
-  }
-
-  const states = Object.keys(byState);
-  if (states.length) {
-    states.sort((a, b) => byState[a].onroad - byState[b].onroad);
-
-    const modelName =
-      allMatches[0]?.row?.[allMatches[0].idxModel] || 'Selected Model';
-    const variantStr =
-      allMatches[0]?.row?.[allMatches[0].idxVariant] || '';
-
-    const out = [];
-    out.push(`*${modelName} ${variantStr} — On-Road Prices (All States)*`);
-    out.push('');
-
-    states.slice(0, 12).forEach(st => {
-      out.push(`• *${st}* → ₹ ${fmtMoney(byState[st].onroad)}`);
-    });
-
-    const cheapest = states[0];
-    const costliest = states[states.length - 1];
-
-    out.push('');
-    out.push(`*Lowest:* ${cheapest} – ₹ ${fmtMoney(byState[cheapest].onroad)}`);
-    out.push(`*Highest:* ${costliest} – ₹ ${fmtMoney(byState[costliest].onroad)}`);
-
-    await waSendText(to, out.join('\n'));
-    setLastService(to, 'NEW');
-    return true;
-  }
-}
-// ======================= END PAN-INDIA =======================
-
-// =========================================================
-// PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / PAN-INDIA)
-// =========================================================
-
-// 2️⃣ PAN-INDIA / ALL-STATES PRICE COMPARISON
-if (wantsAllStates && allMatches.length) {
-  const byState = {};
-  for (const m of allMatches) {
-    const state = (m.idxMap && m.idxMap.STATE >= 0)
-      ? String(m.row[m.idxMap.STATE] || 'UNKNOWN').toUpperCase()
-      : 'DEFAULT';
-
-    if (!byState[state] || byState[state].onroad > m.onroad) {
-      byState[state] = m;
-    }
-  }
-
-  const out = [];
-  out.push(`*${allMatches[0].brand} ${String(allMatches[0].row[allMatches[0].idxModel] || '').toUpperCase()}*`);
-  out.push('*Pan-India On-Road Price (Best by State)*\n');
-
-  Object.entries(byState).slice(0, 10).forEach(([st, m]) => {
-    out.push(`• *${st}* — ₹ ${fmtMoney(m.onroad)}`);
-  });
-
-  out.push('\nReply with a *state name* for a detailed breakup.');
-  await waSendText(to, out.join('\n'));
-  setLastService(to, 'NEW');
-  return true;
-}
-
-// 3️⃣ SINGLE BEST QUOTE (when exactly one strong match)
-if (allMatches.length === 1) {
-  const m = allMatches[0];
-
-  const mdl = m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
-  const varr = m.idxVariant >= 0 ? String(m.row[m.idxVariant] || '').toUpperCase() : '';
-
-  const lines = [];
-  lines.push(`*${m.brand}* ${mdl} ${varr}`);
-  lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
-  if (m.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(m.onroad)}`);
-  if (m.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(m.exShow)}`);
-  lines.push('\nReply *SPEC* for features or *EMI* for finance.');
-
-  await waSendText(to, lines.join('\n'));
-  setLastService(to, 'NEW');
-  return true;
-}
 
 // =========================================================
 // END PRE-STRICT RESPONSE HANDLER
@@ -2750,36 +2647,6 @@ if ((wantsSUV || wantsLuxury) && allMatches.length) {
 }
  // after allMatches is populated + sorted
 // BEFORE strictModel filtering
-
-// =========================================================
-// PRE-STRICT RESPONSE HANDLER (PAN-INDIA / ALL-STATES)
-// =========================================================
-if (wantsAllStates && allMatches.length) {
-  const byState = {};
-
-  for (const m of allMatches) {
-    const state =
-      (m.idxMap && m.idxMap.STATE >= 0)
-        ? String(m.row[m.idxMap.STATE] || 'UNKNOWN').toUpperCase()
-        : 'DEFAULT';
-
-    if (!byState[state] || byState[state].onroad > m.onroad) {
-      byState[state] = m;
-    }
-  }
-
-  const out = [];
-  out.push(`*${modelName} ${variantStr} — All States Pricing*`);
-  out.push("");
-
-  Object.keys(byState).slice(0, 10).forEach(st => {
-    out.push(`• *${st}* → ₹ ${fmtMoney(byState[st].onroad)}`);
-  });
-
-  await waSendText(to, out.join("\n"));
-  setLastService(to, 'NEW');
-  return true;
-}
 
 // ---------------------------------------------------------
     // STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
@@ -2899,6 +2766,75 @@ if (wantsAllStates && allMatches.length) {
         return true;
       }
     }
+// =========================================================
+// PAN-INDIA / ALL-STATES PRICE HANDLER (FINAL)
+// =========================================================
+if (wantsAllStates && allMatches.length) {
+  const byState = {};
+
+  for (const m of allMatches) {
+    const state = resolveStateFromRow(m.row, m.idxMap);
+    if (!state || state === 'UNKNOWN') continue;
+
+    if (!byState[state] || m.onroad < byState[state].onroad) {
+      byState[state] = m;
+    }
+  }
+
+  const states = Object.keys(byState);
+  if (!states.length) {
+    await waSendText(
+      to,
+      "State-wise pricing is not available for this model. Please ask for a city-specific quote."
+    );
+    return true;
+  }
+
+  states.sort((a, b) => byState[a].onroad - byState[b].onroad);
+
+  const mdl =
+    String(allMatches[0].row[allMatches[0].idxModel] || '').toUpperCase();
+  const varr =
+    String(allMatches[0].row[allMatches[0].idxVariant] || '').toUpperCase();
+
+  const out = [];
+  out.push(`*${mdl} ${varr} — Pan-India On-Road Prices*`);
+  out.push('');
+
+  states.slice(0, 15).forEach(st => {
+    out.push(`• *${st}* → ₹ ${fmtMoney(byState[st].onroad)}`);
+  });
+
+  out.push('');
+  out.push(`*Lowest:* ${states[0]} – ₹ ${fmtMoney(byState[states[0]].onroad)}`);
+  out.push(`*Highest:* ${states[states.length - 1]} – ₹ ${fmtMoney(byState[states[states.length - 1]].onroad)}`);
+
+  await waSendText(to, out.join('\n'));
+  setLastService(to, 'NEW');
+  return true;
+}
+// =========================================================
+// PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / PAN-INDIA)
+// =========================================================
+
+// 3️⃣ SINGLE BEST QUOTE (when exactly one strong match)
+if (allMatches.length === 1) {
+  const m = allMatches[0];
+
+  const mdl = m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
+  const varr = m.idxVariant >= 0 ? String(m.row[m.idxVariant] || '').toUpperCase() : '';
+
+  const lines = [];
+  lines.push(`*${m.brand}* ${mdl} ${varr}`);
+  lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
+  if (m.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(m.onroad)}`);
+  if (m.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(m.exShow)}`);
+  lines.push('\nReply *SPEC* for features or *EMI* for finance.');
+
+  await waSendText(to, lines.join('\n'));
+  setLastService(to, 'NEW');
+  return true;
+}
 
     // Single best match: pick top
     const best = allMatches[0];
