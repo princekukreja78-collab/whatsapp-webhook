@@ -2228,104 +2228,39 @@ const wantsAllStates =
       if (typeof DEBUG !== 'undefined' && DEBUG) console.warn('exactModelHit detection failed:', e && e.message);
     }
 
-   // ---------- MULTI-BRAND DETECTION (strengthened) ----------
+  // ---------- MULTI-BRAND DETECTION (SAFE & NON-DESTRUCTIVE) ----------
 let allowedBrandSet = null;
 
+// 1) If brand was explicitly detected → hard lock
 if (brandGuess) {
   allowedBrandSet = new Set([String(brandGuess).toUpperCase()]);
 } else {
-  const allBrands = Object.keys(tables || {});
-  const brandAliasMap = {};
+  // 2) Infer brands from text using BRAND_HINTS (no table scan yet)
+  const inferredBrands = new Set();
 
-  const normalize = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // curated model -> brand map (expanded)
-  const commonModelToBrand = {
-    'fortuner': 'TOYOTA', 'legender': 'TOYOTA', 'hycross': 'TOYOTA', 'innova': 'TOYOTA', 'hyryder': 'TOYOTA', 'rumion': 'TOYOTA',
-    'x1': 'BMW','x3': 'BMW','x5': 'BMW',
-    'creta': 'HYUNDAI','venue': 'HYUNDAI','verna':'HYUNDAI',
-    'city': 'HONDA','civic':'HONDA',
-    'swift': 'MARUTI','baleno':'MARUTI','glanza':'TOYOTA',
-    // explicit short token aliases
-    'grs': 'TOYOTA','leg':'TOYOTA','zxo':'TOYOTA','zx':'TOYOTA','vx':'TOYOTA','gx':'TOYOTA','vxo':'TOYOTA','gxo':'TOYOTA'
-  };
-
-  // build alias map from sheet names + normalized tokens
-  for (const b of allBrands) {
-    if (!b) continue;
-    const rawB = String(b).trim();
-    const lower = rawB.toLowerCase();
-    brandAliasMap[normalize(lower)] = rawB;
-    const first = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)[0];
-    if (first) brandAliasMap[normalize(first)] = rawB;
-    const stripped = lower.replace(/\b(motors|cars|automobiles|auto|motors ltd|motors pvt|pvt|ltd)\b/g, ' ').replace(/\s+/g,' ').trim();
-    if (stripped) brandAliasMap[normalize(stripped)] = rawB;
-    if (first && first.length <= 6) brandAliasMap[normalize(first)] = rawB;
-  }
-
-  // merge curated map (do not overwrite existing sheet-derived aliases)
-  for (const [m, b] of Object.entries(commonModelToBrand)) {
-    const key = normalize(m);
-    if (key && !brandAliasMap[key]) brandAliasMap[key] = b;
-  }
-
-  // defensive: add model/variant tokens found inside each table (first two tokens)
-  try {
-    for (const canonical of Object.keys(tables)) {
-      const entry = tables[canonical];
-      const variants = entry && (entry.models || entry.variants || entry.items || entry.list || []);
-      if (Array.isArray(variants) && variants.length) {
-        for (const v of variants) {
-          if (!v) continue;
-          const vRaw = (typeof v === 'string') ? v : (v.name || v.model || String(v));
-          const parts = normalize(vRaw).split(/\s+/).slice(0,2); // first two tokens
-          for (const p of parts) {
-            if (p && !brandAliasMap[p]) brandAliasMap[p] = canonical;
-          }
-        }
-      } else if (entry && typeof entry === 'object') {
-        for (const k2 of Object.keys(entry)) {
-          const key2 = normalize(k2).split(/\s+/)[0];
-          if (key2 && !brandAliasMap[key2]) brandAliasMap[key2] = canonical;
+  if (typeof BRAND_HINTS !== 'undefined') {
+    for (const [brand, hints] of Object.entries(BRAND_HINTS)) {
+      for (const h of hints) {
+        const pat = new RegExp(`\\b${h.replace(/\s+/g, '\\s*')}\\b`, 'i');
+        if (pat.test(t)) {
+          inferredBrands.add(String(brand).toUpperCase());
+          break;
         }
       }
     }
-  } catch (e) {
-    if (typeof DEBUG !== 'undefined' && DEBUG) console.log("model->brand map error:", e && e.message);
   }
 
-  // detect brands by tokens & substring
-  const detectedBrands = new Set();
-  const txtLower = normalize(t);
-  const tokensTxt = txtLower.split(/\s+/).filter(Boolean);
-  for (const token of tokensTxt) {
-    const tnorm = token.replace(/[^a-z0-9]/g,'');
-    if (!tnorm) continue;
-    if (brandAliasMap[tnorm]) { detectedBrands.add(String(brandAliasMap[tnorm]).toUpperCase()); continue; }
-    if (commonModelToBrand[tnorm]) { detectedBrands.add(String(commonModelToBrand[tnorm]).toUpperCase()); continue; }
-  }
-
-  for (const b of allBrands) {
-    if (!b) continue;
-    const bLow = normalize(String(b).toLowerCase());
-    if (bLow.length > 2 && txtLower.includes(bLow)) detectedBrands.add(String(b).toUpperCase());
-    if (txtLower.replace(/\s+/g,'').includes(bLow.replace(/\s+/g,''))) detectedBrands.add(String(b).toUpperCase());
-  }
-
-  if (detectedBrands.size > 0) allowedBrandSet = new Set(Array.from(detectedBrands)); else allowedBrandSet = null;
-  if (allowedBrandSet && allowedBrandSet.size === 0) allowedBrandSet = null;
-
-  if (typeof DEBUG !== 'undefined' && DEBUG) {
-    console.log("Brand alias map (sample):", Object.keys(brandAliasMap).slice(0,12));
-    console.log("Tokens:", tokensTxt);
-    console.log("Detected brand candidates from text:", Array.from(detectedBrands));
-    console.log("Final allowedBrandSet:", allowedBrandSet ? Array.from(allowedBrandSet) : "ALL");
+  // 3) Lock inferred brands only if confident
+  if (inferredBrands.size > 0) {
+    allowedBrandSet = inferredBrands;
   }
 }
-// ---------- end MULTI-BRAND DETECTION ----------
 
-    // ---------- MATCHING LOOP ----------
-    let allMatches = [];
+// NOTE:
+// - If allowedBrandSet === null → allow all brands (important for budget/SUV)
+// - Do NOT filter tables here
+
+  let allMatches = [];
 
     for (const [brand, tab] of Object.entries(tables)) {
       if (!tab || !tab.data) continue;
@@ -2778,7 +2713,74 @@ if (allMatches.length === 1) {
 // =========================================================
 // END PRE-STRICT RESPONSE HANDLER
 // =========================================================
-    
+   // ---------- SEGMENT INTENT (SUV / LUXURY / PREMIUM) ----------
+const wantsSUV =
+  /\b(suv|compact suv|mid suv|full size suv)\b/i.test(t);
+
+const wantsLuxury =
+  /\b(luxury|premium|high end|top end)\b/i.test(t);
+
+if ((wantsSUV || wantsLuxury) && allMatches.length) {
+  const before = allMatches.length;
+
+  allMatches = allMatches.filter(m => {
+    const modelRaw =
+      m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
+
+    // SUV heuristics
+    const isSUV =
+      /(SUV|FORTUNER|LEGENDER|GLA|GLE|GLS|XUV|SCORPIO|THAR|CRETA|SELTOS|HARRIER|SAFARI|GLOSTER|XC|Q[357]|X[1357])/.test(modelRaw);
+
+    // Luxury heuristics
+    const isLuxury =
+      /(MERCEDES|BMW|AUDI|VOLVO|LEXUS|PORSCHE|LAND ROVER|JAGUAR)/.test(m.brand) ||
+      /(GLA|GLE|GLS|E CLASS|C CLASS|S CLASS|X[357]|Q[357]|XC[469])/.test(modelRaw);
+
+    if (wantsLuxury) return isLuxury;
+    if (wantsSUV) return isSUV;
+
+    return true;
+  });
+
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    console.log(
+      `Segment filter applied: before=${before}, after=${allMatches.length}, SUV=${wantsSUV}, Luxury=${wantsLuxury}`
+    );
+  }
+}
+ // after allMatches is populated + sorted
+// BEFORE strictModel filtering
+
+// =========================================================
+// PRE-STRICT RESPONSE HANDLER (PAN-INDIA / ALL-STATES)
+// =========================================================
+if (wantsAllStates && allMatches.length) {
+  const byState = {};
+
+  for (const m of allMatches) {
+    const state =
+      (m.idxMap && m.idxMap.STATE >= 0)
+        ? String(m.row[m.idxMap.STATE] || 'UNKNOWN').toUpperCase()
+        : 'DEFAULT';
+
+    if (!byState[state] || byState[state].onroad > m.onroad) {
+      byState[state] = m;
+    }
+  }
+
+  const out = [];
+  out.push(`*${modelName} ${variantStr} — All States Pricing*`);
+  out.push("");
+
+  Object.keys(byState).slice(0, 10).forEach(st => {
+    out.push(`• *${st}* → ₹ ${fmtMoney(byState[st].onroad)}`);
+  });
+
+  await waSendText(to, out.join("\n"));
+  setLastService(to, 'NEW');
+  return true;
+}
+
 // ---------------------------------------------------------
     // STRICT MODEL MATCHING ENGINE (Option A) — safer fallback
     // ---------------------------------------------------------
