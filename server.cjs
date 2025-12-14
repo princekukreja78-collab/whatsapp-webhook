@@ -1980,7 +1980,6 @@ function findPriceIndexFallback(header, tab) {
 const hasPricingIntent =
   /\b(price|on[- ]?road|emi|loan|finance|quote|cost)\b/i.test(t);
 
-const hasSpecIntent =
   /\b(spec|specs|specification|specifications|features)\b/i.test(t);
 
 const hasModelSignal =
