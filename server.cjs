@@ -973,6 +973,7 @@ function normForMatch(s) {
   return (s || '').toString().toLowerCase()
     .replace(/(automatic|automatic transmission|\bauto\b)/g, ' at ')
     .replace(/\bmanual\b/g, ' mt ')
+    .replace(/(\d)\s*\/\s*(\d)/g, '$1x$2')  
     .replace(/[\*\/\\]/g, 'x')
     .replace(/\s*x\s*/g, 'x')
     .replace(/(\d)\s*x\s*(\d)/g, '$1x$2')
