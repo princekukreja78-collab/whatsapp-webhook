@@ -2675,6 +2675,56 @@ if (wantsAllStates && allMatches.length) {
   setLastService(to, 'NEW');
   return true;
 }
+
+// =========================================================
+// PAN-INDIA / ALL-STATES PRICE COMPARISON (PRE-STRICT)
+// =========================================================
+if (wantsAllStates && allMatches.length) {
+  const byState = {};
+
+  for (const m of allMatches) {
+    const stateIdx = m.idxMap?.STATE;
+    if (stateIdx === undefined || stateIdx < 0) continue;
+
+    const state = String(m.row[stateIdx] || '').trim().toUpperCase();
+    if (!state) continue;
+
+    if (!byState[state] || m.onroad < byState[state].onroad) {
+      byState[state] = m;
+    }
+  }
+
+  const states = Object.keys(byState);
+  if (states.length) {
+    states.sort((a, b) => byState[a].onroad - byState[b].onroad);
+
+    const modelName =
+      allMatches[0]?.row?.[allMatches[0].idxModel] || 'Selected Model';
+    const variantStr =
+      allMatches[0]?.row?.[allMatches[0].idxVariant] || '';
+
+    const out = [];
+    out.push(`*${modelName} ${variantStr} — On-Road Prices (All States)*`);
+    out.push('');
+
+    states.slice(0, 12).forEach(st => {
+      out.push(`• *${st}* → ₹ ${fmtMoney(byState[st].onroad)}`);
+    });
+
+    const cheapest = states[0];
+    const costliest = states[states.length - 1];
+
+    out.push('');
+    out.push(`*Lowest:* ${cheapest} – ₹ ${fmtMoney(byState[cheapest].onroad)}`);
+    out.push(`*Highest:* ${costliest} – ₹ ${fmtMoney(byState[costliest].onroad)}`);
+
+    await waSendText(to, out.join('\n'));
+    setLastService(to, 'NEW');
+    return true;
+  }
+}
+// ======================= END PAN-INDIA =======================
+
 // =========================================================
 // PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / PAN-INDIA)
 // =========================================================
@@ -2762,11 +2812,26 @@ if (allMatches.length === 1) {
 
     if (strictModel) {
       const filteredMatches = allMatches.filter(m => {
-        if (!m || typeof m.idxModel === 'undefined' || m.idxModel < 0) return false;
-        const mdl = String(m.row[m.idxModel] || '').toUpperCase();
-        const mdlNorm = String(normForMatch(mdl)).toUpperCase();
-        return mdlNorm.includes(strictModel);
-      });
+  if (!m || typeof m.idxModel === 'undefined' || m.idxModel < 0) return false;
+
+  const mdlRaw  = String(m.row[m.idxModel] || '').toUpperCase();
+  const mdlNorm = String(normForMatch(mdlRaw)).toUpperCase();
+
+  // Exact model match
+  if (mdlNorm === strictModel) return true;
+
+  // Allow sub-variants ONLY if strictModel itself contains that keyword
+  // e.g. "FORTUNER LEGENDER" should not match "FORTUNER"
+  if (
+    mdlNorm.startsWith(strictModel + ' ') &&
+    !mdlNorm.includes('LEGENDER') &&
+    !strictModel.includes('LEGENDER')
+  ) {
+    return true;
+  }
+
+  return false;
+});
 
       if (typeof DEBUG !== 'undefined' && DEBUG) console.log("DEBUG_QUICK: strictModel=", strictModel, "filteredMatches=", filteredMatches.length);
 
