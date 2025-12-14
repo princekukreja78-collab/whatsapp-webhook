@@ -1785,7 +1785,7 @@ async function trySmartNewCarIntent(msgText, to) {
 // Rules:
 // 1) Specs-only → allow quote engine (it appends specs safely)
 // 2) Price / EMI / Cost → MUST go to quote engine
-// 3) Model-only (no price/spec words) → allow waiting-period logic
+// 3) Model-only (no price/spec words) 
 // ------------------------------------------------------------------
 
 const hasSpecIntent  = /\b(spec|specs|specification|specifications|features)\b/i.test(t);
@@ -1804,7 +1804,6 @@ if (hasSpecIntent) {
 
 // NOTE:
 // At this point, query is NOT asking for price or specs.
-// This is where waiting-period / recommendation logic is allowed.
 
 
 // ---------- PRICE INDEX FALLBACK helper ----------
@@ -1844,16 +1843,6 @@ function findPriceIndexFallback(header, tab) {
     "adas","cvt","at","mt","diesel","hybrid","ev","awd","4x4","cruise","toyota safety sense",
     "airbags","turbo","sunroof","engine","mileage","bs6","e20"
   ];
-
-  const WAITING_PERIODS = {
-    "toyota fortuner": "4–12 weeks depending on color & variant.",
-    "toyota innova hycross": "8–20 weeks (higher for ZX(O) Hybrid).",
-    "mahindra scorpio n": "4–16 weeks.",
-    "mahindra xuv700": "6–20 weeks.",
-    "hyundai creta": "2–6 weeks.",
-    "hyundai venue": "1–4 weeks.",
-    "toyota hyryder": "6–10 weeks."
-  };
 
   // ------------------------------
   // 1️⃣ COMPARISON INTENT
@@ -2009,18 +1998,6 @@ function findPriceIndexFallback(header, tab) {
       "I’ll suggest the best 2–3 options with on-road pricing."
     );
     return true;
-  }
-
-  // ------------------------------
-  // 5️⃣ WAITING PERIOD & DELIVERY
-  // ------------------------------
-  for (const [modelName, wait] of Object.entries(WAITING_PERIODS)) {
-    const key = modelName.split(" ")[1] || modelName;
-    if (t.includes(key.toLowerCase())) {
-      await waSendText(to, `*${modelName.toUpperCase()} — Waiting Period*\n${wait}\n\nTell me your preferred *color* and *variant* to check the closest delivery timeline.`);
-      setLastService(to, "NEW");
-      return true;
-    }
   }
 
   // ------------------------------
@@ -2664,28 +2641,8 @@ if (wantsAllStates && allMatches.length) {
   return true;
 }
 // =========================================================
-// PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / WAITING / PAN-INDIA)
+// PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / PAN-INDIA)
 // =========================================================
-
-// 1️⃣ WAITING PERIOD — model-only query (no price / no specs)
-const wantsWaiting =
-  !userBudget &&
-  !/\b(price|on[- ]?road|emi|loan|finance|spec|specs|features)\b/i.test(t) &&
-  coreTokensArr.length === 1;
-
-if (wantsWaiting) {
-  const key = coreTokensArr[0].toLowerCase();
-  for (const [modelKey, wait] of Object.entries(WAITING_PERIODS || {})) {
-    if (modelKey.includes(key)) {
-      await waSendText(
-        to,
-        `*${modelKey.toUpperCase()} — Waiting Period*\n${wait}\n\nTell me your *city* and *variant* for an exact on-road price.`
-      );
-      setLastService(to, 'NEW');
-      return true;
-    }
-  }
-}
 
 // 2️⃣ PAN-INDIA / ALL-STATES PRICE COMPARISON
 if (wantsAllStates && allMatches.length) {
