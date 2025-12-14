@@ -2900,9 +2900,13 @@ if (allMatches.length === 1) {
   return true;
 }
 
-    // Single best match: pick top
-    const best = allMatches[0];
-    if (!best) return false;
+    // Single best match: pick top (BLOCK when PAN-INDIA)
+if (wantsAllStates) {
+  return false;
+}
+
+const best = allMatches[0];
+if (!best) return false;
 
     const loanAmt = best.exShow || best.onroad || 0;
     const roi = Number(process.env.NEW_CAR_ROI || 8.1); // default ROI
