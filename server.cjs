@@ -1973,17 +1973,42 @@ function findPriceIndexFallback(header, tab) {
     return true;
   }
 
-  // ------------------------------
-  // 3️⃣ FEATURE EXPLANATION MODE (RAG)
-  // ------------------------------
+// ------------------------------
+// 3️⃣ FEATURE EXPLANATION MODE (STRICT, SAFE)
+// Trigger ONLY when user intent is clearly educational
+// ------------------------------
+const hasPricingIntent =
+  /\b(price|on[- ]?road|emi|loan|finance|quote|cost)\b/i.test(t);
+
+const hasSpecIntent =
+  /\b(spec|specs|specification|specifications|features)\b/i.test(t);
+
+const hasModelSignal =
+  (typeof detectBrandFromText === 'function' && detectBrandFromText(t)) ||
+  (typeof detectModelsFromText === 'function' &&
+    (await detectModelsFromText(t)).length > 0);
+
+if (!hasPricingIntent && !hasSpecIntent && !hasModelSignal) {
   for (const ft of FEATURE_TOPICS) {
-    if (t.includes(ft)) {
-      const expl = (typeof SignatureAI_RAG === 'function') ? await SignatureAI_RAG(`Explain "${ft}" in simple car-buyer language (2–3 short paragraphs, India context).`) : `Explanation for ${ft}`;
-      await waSendText(to, `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`);
+    // strict word boundary (prevents "fortuner")
+    const pat = new RegExp(`\\b${ft}\\b`, 'i');
+    if (pat.test(t)) {
+      const expl =
+        (typeof SignatureAI_RAG === 'function')
+          ? await SignatureAI_RAG(
+              `Explain "${ft}" in simple car-buyer language (India context, concise).`
+            )
+          : `Explanation for ${ft}`;
+
+      await waSendText(
+        to,
+        `*${ft.toUpperCase()} — Simple Explanation*\n\n${expl}`
+      );
       setLastService(to, "NEW");
       return true;
     }
   }
+}
 
   // ------------------------------
   // 4️⃣ RECOMMENDATION MODE
