@@ -1978,7 +1978,6 @@ function findPriceIndexFallback(header, tab) {
 const hasPricingIntent =
   /\b(price|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
 
-const hasSpecIntent =
   /\b(spec|specs|specification|specifications)\b/i.test(t);
 
 const hasComparisonIntent =
