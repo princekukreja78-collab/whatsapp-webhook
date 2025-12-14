@@ -923,6 +923,50 @@ function toHeaderIndexMap(headerRow) {
   });
   return map;
 }
+// ---------- PRICE INDEX FALLBACK helper ----------
+function findPriceIndexFallback(header, tab) {
+  if (!Array.isArray(header) || header.length === 0) return -1;
+
+  for (let i = 0; i < header.length; i++) {
+    const h = header[i] || '';
+    if (/(ON[-_ ]?ROAD|ONROAD|ON[-_ ]?ROAD PRICE|ONROAD PRICE|OTR|ONR|PRICE)/i.test(h)) {
+      return i;
+    }
+  }
+
+  let bestIdx = -1;
+  let bestCount = 0;
+  if (!tab || !Array.isArray(tab.data)) return -1;
+
+  for (let i = 0; i < header.length; i++) {
+    let cnt = 0;
+    for (const r of tab.data) {
+      const v = String(r[i] || '').replace(/[,₹\s]/g, '');
+      if (/^\d{4,}$/.test(v)) cnt++;
+    }
+    if (cnt > bestCount) {
+      bestCount = cnt;
+      bestIdx = i;
+    }
+  }
+
+  return bestCount >= 2 ? bestIdx : -1;
+}
+
+// ---------- STATE RESOLUTION helper ----------
+function resolveStateFromRow(row, idxMap) {
+  if (!row || !idxMap) return 'UNKNOWN';
+
+  const candidates = ['STATE', 'REGION', 'LOCATION', 'RTO', 'CITY'];
+  for (const key of candidates) {
+    const idx = idxMap[key];
+    if (typeof idx === 'number' && idx >= 0) {
+      const v = String(row[idx] || '').trim();
+      if (v) return v.toUpperCase();
+    }
+  }
+  return 'UNKNOWN';
+}
 
 // ---------------- normalization & helpers ----------------
 function normForMatch(s) {
@@ -2766,6 +2810,7 @@ if ((wantsSUV || wantsLuxury) && allMatches.length) {
         return true;
       }
     }
+
 // =========================================================
 // PAN-INDIA / ALL-STATES PRICE HANDLER (FINAL)
 // =========================================================
@@ -2790,7 +2835,14 @@ if (wantsAllStates && allMatches.length) {
     return true;
   }
 
+  // sort states by price
   states.sort((a, b) => byState[a].onroad - byState[b].onroad);
+
+  const cheapestState = states[0];
+  const costliestState = states[states.length - 1];
+
+  const minPrice = byState[cheapestState].onroad;
+  const maxPrice = byState[costliestState].onroad;
 
   const mdl =
     String(allMatches[0].row[allMatches[0].idxModel] || '').toUpperCase();
@@ -2798,21 +2850,25 @@ if (wantsAllStates && allMatches.length) {
     String(allMatches[0].row[allMatches[0].idxVariant] || '').toUpperCase();
 
   const out = [];
-  out.push(`*${mdl} ${varr} — Pan-India On-Road Prices*`);
+  out.push(`*${mdl} ${varr} — Pan-India On-Road Pricing*`);
+  out.push('');
+  out.push(`✅ *Best Price:* ${cheapestState} — ₹ ${fmtMoney(minPrice)}`);
+  out.push(`❌ *Highest Price:* ${costliestState} — ₹ ${fmtMoney(maxPrice)}`);
   out.push('');
 
-  states.slice(0, 15).forEach(st => {
+  out.push('*State-wise prices:*');
+  states.slice(0, 12).forEach(st => {
     out.push(`• *${st}* → ₹ ${fmtMoney(byState[st].onroad)}`);
   });
 
   out.push('');
-  out.push(`*Lowest:* ${states[0]} – ₹ ${fmtMoney(byState[states[0]].onroad)}`);
-  out.push(`*Highest:* ${states[states.length - 1]} – ₹ ${fmtMoney(byState[states[states.length - 1]].onroad)}`);
+  out.push('Reply with a *state or city name* for a detailed breakup or *EMI* options.');
 
   await waSendText(to, out.join('\n'));
   setLastService(to, 'NEW');
   return true;
 }
+
 // =========================================================
 // PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / PAN-INDIA)
 // =========================================================
