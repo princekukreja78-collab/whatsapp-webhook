@@ -996,6 +996,35 @@ function calcEmiSimple(p, annualRatePct, months) {
   const emi = Math.round(P * r * pow / (pow - 1));
   return emi;
 }
+function extractPanIndiaPricesFromRow(row, header) {
+  const statePrices = {};
+
+  header.forEach((h, idx) => {
+    if (!h) return;
+
+    const name = String(h).toUpperCase();
+
+    // Match ONLY on-road price columns
+    if (!name.includes('ON ROAD')) return;
+
+    let state = null;
+
+    if (name.includes('DELHI')) state = 'DELHI';
+    else if (name.includes('CHANDIGARH') || /\bCH\b/.test(name)) state = 'CHANDIGARH';
+    else if (name.includes('HARYANA') || name.includes('(HR)')) state = 'HARYANA';
+    else if (name.includes('UTTAR') || name.includes('(U.P') || /\bUP\b/.test(name)) state = 'UTTAR PRADESH';
+    else if (name.includes('HIMACHAL') || name.includes('(HP)')) state = 'HIMACHAL PRADESH';
+
+    if (!state) return;
+
+    const val = Number(String(row[idx] || '').replace(/[,₹\s]/g, ''));
+    if (val > 100000) {
+      statePrices[state] = val;
+    }
+  });
+
+  return statePrices;
+}
 
 // ---------------- pricing loader (NEW CARS) ----------------
 // Auto-detect all SHEET_*_CSV_URL env vars, so new brands work without code change.
@@ -1642,32 +1671,92 @@ function isAdvisory(msgText) {
   if (!t) return false;
 
   const advisoryPhrases = [
-    'which is better',
-    'better than',
-    'which to buy',
-    'which to choose',
-    'compare',
-    'comparison',
-    'pros and cons',
-    'pros & cons',
-    'features',
-    'feature wise',
-    'variant wise',
-    'warranty',
-    'extended warranty',
-    'service cost',
-    'maintenance',
-    'ground clearance',
-    'boot space',
-    'dimensions',
-    'mileage',
-    'average',
-    'kitna deti',
-    'bhp',
-    'torque',
-    'safety rating',
-    'global ncap'
-  ];
+  // ---------- Comparison / Decision ----------
+  'which is better',
+  'better than',
+  'which to buy',
+  'which should i buy',
+  'which to choose',
+  'compare',
+  'comparison',
+  'vs',
+
+  // ---------- Specifications / Technical ----------
+  'spec',
+  'specs',
+  'specification',
+  'specifications',
+  'technical',
+  'engine',
+  'engine specs',
+  'bhp',
+  'power',
+  'torque',
+  'transmission',
+  'automatic',
+  'manual',
+  'gearbox',
+  'mileage',
+  'average',
+  'fuel efficiency',
+  'range',
+  'drivetrain',
+  'awd',
+  '4x4',
+  '4wd',
+
+  // ---------- Features / Comfort ----------
+  'features',
+  'feature wise',
+  'variant wise',
+  'top model',
+  'base model',
+  'sunroof',
+  'panoramic',
+  'adas',
+  'cruise',
+  'ventilated',
+  'seat',
+  'infotainment',
+  'touchscreen',
+  'speaker',
+  'audio',
+  'boot space',
+  'luggage',
+  'space',
+  'legroom',
+  'headroom',
+  'dimensions',
+  'ground clearance',
+
+  // ---------- Safety ----------
+  'safety',
+  'airbags',
+  'abs',
+  'esc',
+  'traction',
+  'global ncap',
+  'bharat ncap',
+  'crash rating',
+  'safety rating',
+
+  // ---------- Ownership ----------
+  'warranty',
+  'extended warranty',
+  'service cost',
+  'maintenance',
+  'running cost',
+  'ownership cost',
+
+  // ---------- Indian Natural Language ----------
+  'kitna deti',
+  'kitna mileage',
+  'service kitna',
+  'maintenance kitna',
+  'safe hai',
+  'achhi hai',
+  'worth it'
+];
 
   for (const p of advisoryPhrases) {
     if (t.includes(p)) return true;
@@ -2820,21 +2909,23 @@ if ((wantsSUV || wantsLuxury) && allMatches.length) {
     }
 
 // =========================================================
-// PAN-INDIA / ALL-STATES PRICE HANDLER (FINAL)
+// PAN-INDIA / ALL-STATES PRICE HANDLER (COLUMN-BASED, FINAL)
 // =========================================================
 if (wantsAllStates && allMatches.length) {
-  const byState = {};
+  const header = Object.values(tables)[0]?.header || [];
+  const aggregate = {};
 
   for (const m of allMatches) {
-    const state = resolveStateFromRow(m.row, m.idxMap);
-    if (!state || state === 'UNKNOWN') continue;
+    const prices = extractPanIndiaPricesFromRow(m.row, header);
 
-    if (!byState[state] || m.onroad < byState[state].onroad) {
-      byState[state] = m;
+    for (const [state, price] of Object.entries(prices)) {
+      if (!aggregate[state] || price < aggregate[state]) {
+        aggregate[state] = price;
+      }
     }
   }
 
-  const states = Object.keys(byState);
+  const states = Object.keys(aggregate);
   if (!states.length) {
     await waSendText(
       to,
@@ -2843,14 +2934,11 @@ if (wantsAllStates && allMatches.length) {
     return true;
   }
 
-  // sort states by price
-  states.sort((a, b) => byState[a].onroad - byState[b].onroad);
+  // sort states by price (LOW → HIGH)
+  states.sort((a, b) => aggregate[a] - aggregate[b]);
 
   const cheapestState = states[0];
   const costliestState = states[states.length - 1];
-
-  const minPrice = byState[cheapestState].onroad;
-  const maxPrice = byState[costliestState].onroad;
 
   const mdl =
     String(allMatches[0].row[allMatches[0].idxModel] || '').toUpperCase();
@@ -2860,13 +2948,13 @@ if (wantsAllStates && allMatches.length) {
   const out = [];
   out.push(`*${mdl} ${varr} — Pan-India On-Road Pricing*`);
   out.push('');
-  out.push(`✅ *Best Price:* ${cheapestState} — ₹ ${fmtMoney(minPrice)}`);
-  out.push(`❌ *Highest Price:* ${costliestState} — ₹ ${fmtMoney(maxPrice)}`);
+  out.push(`✅ *Lowest:* ${cheapestState} — ₹ ${fmtMoney(aggregate[cheapestState])}`);
+  out.push(`❌ *Highest:* ${costliestState} — ₹ ${fmtMoney(aggregate[costliestState])}`);
   out.push('');
-
   out.push('*State-wise prices:*');
-  states.slice(0, 12).forEach(st => {
-    out.push(`• *${st}* → ₹ ${fmtMoney(byState[st].onroad)}`);
+
+  states.forEach(st => {
+    out.push(`• *${st}* → ₹ ${fmtMoney(aggregate[st])}`);
   });
 
   out.push('');
