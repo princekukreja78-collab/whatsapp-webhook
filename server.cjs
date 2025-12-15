@@ -1011,33 +1011,35 @@ function calcEmiSimple(p, annualRatePct, months) {
   return emi;
 }
 function extractPanIndiaPricesFromRow(row, header) {
-  const statePrices = {};
+  const out = {};
+  if (!Array.isArray(row) || !Array.isArray(header)) return out;
 
-  header.forEach((h, idx) => {
-    if (!h) return;
+  for (let i = 0; i < header.length; i++) {
+    const hRaw = String(header[i] || '').toUpperCase();
 
-    const name = String(h).toUpperCase();
-
-    // Match ONLY on-road price columns
-    if (!name.includes('ON ROAD')) return;
+    // STRICT: only ON ROAD PRICE columns
+    if (!hRaw.includes('ON ROAD PRICE')) continue;
 
     let state = null;
 
-    if (name.includes('DELHI')) state = 'DELHI';
-    else if (name.includes('CHANDIGARH') || /\bCH\b/.test(name)) state = 'CHANDIGARH';
-    else if (name.includes('HARYANA') || name.includes('(HR)')) state = 'HARYANA';
-    else if (name.includes('UTTAR') || name.includes('(U.P') || /\bUP\b/.test(name)) state = 'UTTAR PRADESH';
-    else if (name.includes('HIMACHAL') || name.includes('(HP)')) state = 'HIMACHAL PRADESH';
+    if (hRaw.includes('DELHI')) state = 'DELHI';
+    else if (hRaw.includes('HARYANA') || hRaw.includes('(HR)')) state = 'HARYANA';
+    else if (hRaw.includes('UTTAR') || hRaw.includes('(U.P')) state = 'UTTAR PRADESH';
+    else if (hRaw.includes('HIMACHAL') || hRaw.includes('(HP)')) state = 'HIMACHAL PRADESH';
+    else if (hRaw.includes('CHANDIGARH')) state = 'CHANDIGARH';
 
-    if (!state) return;
+    if (!state) continue;
 
-    const val = Number(String(row[idx] || '').replace(/[,₹\s]/g, ''));
-    if (val > 100000) {
-      statePrices[state] = val;
+    const val = Number(String(row[i] || '').replace(/[,₹\s]/g, ''));
+    if (!val || val < 200000) continue;
+
+    // If INDIVIDUAL & CORPORATE both exist, keep the lower one
+    if (!out[state] || val < out[state]) {
+      out[state] = val;
     }
-  });
+  }
 
-  return statePrices;
+  return out;
 }
 
 // ---------------- pricing loader (NEW CARS) ----------------
@@ -2399,7 +2401,7 @@ const wantsAllStates =
     const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
     const isShortModelToken = modelTok && modelTok.length <= 4;
 
-    const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 30);
+    const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 25);
     const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
 
     function _makeLoosePat(sfx) {
@@ -2939,18 +2941,14 @@ if (
 // PAN-INDIA / ALL-STATES PRICE HANDLER (COLUMN-BASED, FINAL)
 // =========================================================
 if (wantsAllStates && allMatches.length) {
+// ---- PAN-INDIA FIX: LOCK TO SINGLE VARIANT ----
+const panIndiaMatch = allMatches[0];
+
   const header = tables[allMatches[0].brand]?.header || [];
-  const aggregate = {};
-
-  for (const m of allMatches) {
-    const prices = extractPanIndiaPricesFromRow(m.row, header);
-
-    for (const [state, price] of Object.entries(prices)) {
-      if (!aggregate[state] || price < aggregate[state]) {
-        aggregate[state] = price;
-      }
-    }
-  }
+  const aggregate = extractPanIndiaPricesFromRow(
+  panIndiaMatch.row,
+  header
+);
 
   const states = Object.keys(aggregate);
   if (!states.length) {
@@ -2964,9 +2962,9 @@ if (wantsAllStates && allMatches.length) {
   states.sort((a, b) => aggregate[a] - aggregate[b]);
 
   const mdl =
-    String(allMatches[0].row[allMatches[0].idxModel] || '').toUpperCase();
-  const varr =
-    String(allMatches[0].row[allMatches[0].idxVariant] || '').toUpperCase();
+  String(panIndiaMatch.row[panIndiaMatch.idxModel] || '').toUpperCase();
+const varr =
+  String(panIndiaMatch.row[panIndiaMatch.idxVariant] || '').toUpperCase();
 
   const out = [];
   out.push(`*${mdl} ${varr} — Pan-India On-Road Pricing*`);
