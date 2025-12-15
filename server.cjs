@@ -1913,42 +1913,20 @@ async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
   const tRaw = String(msgText || "");
   const t = tRaw.toLowerCase().trim();
-
- // ------------------------------------------------------------------
-// INTENT PRIORITY NORMALISER (DO NOT SHORT-CIRCUIT QUOTES)
-// Rules:
-// 1) Specs-only → allow quote engine (it appends specs safely)
-// 2) Price / EMI / Cost → MUST go to quote engine
-// 3) PAN-INDIA / ALL-STATES → MUST go to quote engine
-// ------------------------------------------------------------------
-
-const hasSpecIntent =
-  /\b(spec|specs|specification|specifications|features)\b/i.test(t);
-
-const hasPriceIntent =
-  /\b(price|cost|on[- ]?road|emi|loan|finance|quote)\b/i.test(t);
-
-const wantsAllStates =
-  /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
-
-// If user explicitly asks for price / EMI / state-wise pricing
-// → DO NOT handle in smart intent engine
-// → let tryQuickNewCarQuote handle it
-if (hasPriceIntent || wantsAllStates) {
-  return false;
+// --------------------------------------------------
+// INTENT PRIORITY NORMALISER (CRITICAL)
+// --------------------------------------------------
+if (hasPricingIntent || wantsAllStates) {
+  if (DEBUG) {
+    console.log('INTENT_PRIORITY: PRICE_OR_PAN_INDIA', {
+      hasPricingIntent,
+      wantsAllStates
+    });
+  }
+  // DO NOT return
+  // Let quote engine handle it
 }
-
-// If user asks for specs (with or without model),
-// allow quote engine to run (it appends specs safely)
-if (hasSpecIntent) {
-  return false;
-}
-
-// NOTE:
-// At this point, query is NOT asking for price or specs.
-
-
-// ---------- PRICE INDEX FALLBACK helper ----------
+ // ---------- PRICE INDEX FALLBACK helper ----------
 function findPriceIndexFallback(header, tab) {
   // header: array of header strings (uppercased)
   // tab: table object containing .data (rows)
@@ -2083,13 +2061,59 @@ function resolveStateFromRow(row, idxMap) {
             if (!onroad) continue;
             const modelCell = idxModel>=0 ? String(row[idxModel]||'').toLowerCase() : '';
             const variantCell = idxVariant>=0 ? String(row[idxVariant]||'').toLowerCase() : '';
-            const segText = (modelCell + ' ' + variantCell);
-            let seg = 'ANY';
-            if (/\b(suv|brezza|creta|seltos|sonet|venue|brezza)\b/.test(segText)) seg = 'SUV';
-            if (/\b(sedan|city|verna|civic)\b/.test(segText)) seg = 'SEDAN';
-            if (/\b(hatch|swift|baleno|glanza|alto)\b/.test(segText)) seg = 'HATCH';
-            if ((wantsSUV && seg !== 'SUV') || (wantsSedan && seg !== 'SEDAN') || (wantsHatch && seg !== 'HATCH')) continue;
-            if (onroad <= budget * 1.2) {
+          const text = `${modelCell} ${variantCell}`.toLowerCase();
+
+// Default
+let seg = 'ANY';
+
+// =======================
+// SUV / CROSSOVER
+// =======================
+if (/\b(suv|crossover|xuv|scorpio|thar|jimny|fortuner|legender|gloster|endeavour|creta|seltos|sonet|venue|taigun|kushaq|hector|astor|harrier|safari|compass|meridian|kodiaq|tucson|q2|q3|q5|q7|q8|x1|x3|x5|x7|gla|glc|gle|gls|g class|xc40|xc60|xc90|nx|rx|lx|ux)\b/.test(text)) {
+  seg = 'SUV';
+}
+
+// =======================
+// SEDAN
+// =======================
+else if (/\b(sedan|city|verna|ciaz|slavia|virtus|civic|accord|camry|octavia|superb|a3|a4|a6|a8|3 series|5 series|7 series|c class|e class|s class|es|is|ls|s60|s90)\b/.test(text)) {
+  seg = 'SEDAN';
+}
+
+// =======================
+// HATCHBACK
+// =======================
+else if (/\b(hatch|swift|baleno|glanza|i10|i20|alto|wagonr|celerio|tiago|altroz|polo|a class|1 series)\b/.test(text)) {
+  seg = 'HATCH';
+}
+
+// =======================
+// MPV
+// =======================
+else if (/\b(mpv|innova|hycross|crysta|ertiga|xl6|carens|marazzo|carnival|vellfire)\b/.test(text)) {
+  seg = 'MPV';
+}
+
+// =======================
+// LUXURY BRAND FALLBACK
+// =======================
+else if (/\b(mercedes|bmw|audi|lexus|volvo|porsche|land rover|range rover|jaguar)\b/.test(text)) {
+  seg = 'LUXURY';
+}
+
+// =======================
+// FILTER ONLY IF USER ASKED
+// =======================
+if (
+  (wantsSUV && seg !== 'SUV' && seg !== 'LUXURY') ||
+  (wantsSedan && seg !== 'SEDAN' && seg !== 'LUXURY') ||
+  (wantsHatch && seg !== 'HATCH') ||
+  (wantsMPV && seg !== 'MPV')
+) {
+  continue;
+}
+
+   if (onroad <= budget * 1.2) {
               const titleParts = [];
               if (idxModel>=0 && row[idxModel]) titleParts.push(String(row[idxModel]).trim());
               if (idxVariant>=0 && row[idxVariant]) titleParts.push(String(row[idxVariant]).trim());
@@ -2134,17 +2158,20 @@ function resolveStateFromRow(row, idxMap) {
     setLastService(to, "NEW");
     return true;
   }
-// ------------------------------
-// INTENT GUARDS (used by feature / spec / price flows)
-// ------------------------------
+// ==================================================
+// INTENT GUARDS — SINGLE SOURCE OF TRUTH (FINAL)
+// ==================================================
 const hasPricingIntent =
   /\b(price|prices|pricing|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
+
+const wantsAllStates =
+  /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
 
 const wantsSpecs =
   /\b(spec|specs|specification|specifications|feature|features)\b/i.test(t);
 
 const hasComparisonIntent =
-  /\b(vs|compare|comparison|difference)\b/i.test(t);
+  /\b(vs|compare|comparison|difference|better|which is better)\b/i.test(t);
 
 // ------------------------------
 // 3️⃣ FEATURE EXPLANATION MODE (STRICT, SAFE)
@@ -2152,14 +2179,13 @@ const hasComparisonIntent =
 // ------------------------------
 for (const ft of FEATURE_TOPICS) {
   if (
-  t.includes(ft) &&
-  !hasPricingIntent &&
-  !hasSpecIntent &&
-  !hasComparisonIntent &&
-  !wantsAllStates &&
-  !userBudget
-) {
-
+    t.includes(ft) &&
+    !hasPricingIntent &&
+    !wantsSpecs &&          // ✅ FIXED
+    !hasComparisonIntent &&
+    !wantsAllStates &&
+    !userBudget
+  ) {
     const expl = (typeof SignatureAI_RAG === 'function')
       ? await SignatureAI_RAG(
           `Explain "${ft}" in simple car-buyer language (India context, concise, non-technical).`
@@ -2177,17 +2203,15 @@ for (const ft of FEATURE_TOPICS) {
   // ------------------------------
   // 4️⃣ RECOMMENDATION MODE
   // ------------------------------
-  if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t)) {
-    await waSendText(
-      "*I'll help you pick the right new car.*\n\n" +
-      "Please tell me:\n" +
-      "1️⃣ Your *budget* (e.g., 10 lakh)\n" +
-      "2️⃣ Preferred *body type* (SUV / Sedan / Hatchback)\n" +
-      "3️⃣ Your *city*\n\n" +
-      "I’ll suggest the best 2–3 options with on-road pricing."
-    );
-    return true;
-  }
+if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t)) {
+  await waSendText(
+    "*I'll help you pick the right new car.*\n\n" +
+    "Please tell me:\n" +
+    "• Budget\n• City\n• Usage (daily / highway)\n• Preference (SUV / Sedan / Any)"
+  );
+  setLastService(to, "NEW");
+  return true;
+}
 
   // ------------------------------
   // 6️⃣ FINANCE / EMI MODE
@@ -2256,10 +2280,6 @@ if (tables && Object.keys(tables).length) {
     const tRaw = String(msgText || '');
     const t = tRaw.toLowerCase();
     const tUpper = t.toUpperCase();
-// ---------- PAN-INDIA / ALL-STATES INTENT ----------
-const wantsAllStates =
-  /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
-
 
     // --- unified brand detection (uses global helper) ---
     let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
@@ -2912,7 +2932,7 @@ if ((wantsSUV || wantsLuxury) && allMatches.length) {
 // PAN-INDIA / ALL-STATES PRICE HANDLER (COLUMN-BASED, FINAL)
 // =========================================================
 if (wantsAllStates && allMatches.length) {
-  const header = Object.values(tables)[0]?.header || [];
+  const header = tables[allMatches[0].brand]?.header || [];
   const aggregate = {};
 
   for (const m of allMatches) {
@@ -2934,11 +2954,7 @@ if (wantsAllStates && allMatches.length) {
     return true;
   }
 
-  // sort states by price (LOW → HIGH)
   states.sort((a, b) => aggregate[a] - aggregate[b]);
-
-  const cheapestState = states[0];
-  const costliestState = states[states.length - 1];
 
   const mdl =
     String(allMatches[0].row[allMatches[0].idxModel] || '').toUpperCase();
@@ -2948,8 +2964,8 @@ if (wantsAllStates && allMatches.length) {
   const out = [];
   out.push(`*${mdl} ${varr} — Pan-India On-Road Pricing*`);
   out.push('');
-  out.push(`✅ *Lowest:* ${cheapestState} — ₹ ${fmtMoney(aggregate[cheapestState])}`);
-  out.push(`❌ *Highest:* ${costliestState} — ₹ ${fmtMoney(aggregate[costliestState])}`);
+  out.push(`✅ *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
+  out.push(`❌ *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
   out.push('');
   out.push('*State-wise prices:*');
 
