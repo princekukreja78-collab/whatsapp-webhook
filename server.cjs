@@ -163,12 +163,26 @@ function buildGlobalRegistryFromSheets(tables) {
       if (!row || !row[idxModel]) continue;
 
       const modelRaw  = String(row[idxModel]).trim();
-      const modelNorm = normForMatch(modelRaw);
+const modelNorm = normForMatch(modelRaw);
 
-      if (!modelNorm) continue;
+if (!modelNorm) continue;
 
-      GLOBAL_MODEL_SET.add(modelNorm);
-      GLOBAL_MODEL_BRAND[modelNorm] = BRAND;
+// ---- BASE MODEL (SAFE ALIAS) ----
+// Example: "TAIGUN 1.0 TSI MT" → "taigun"
+const baseModel = modelNorm.split(' ')[0];
+
+GLOBAL_MODEL_SET.add(modelNorm);
+GLOBAL_MODEL_BRAND[modelNorm] = BRAND;
+
+// ---- REGISTER BASE MODEL (NON-AGGRESSIVE) ----
+if (baseModel && baseModel.length >= 3) {
+  GLOBAL_MODEL_SET.add(baseModel);
+  if (!GLOBAL_MODEL_BRAND[baseModel]) {
+    GLOBAL_MODEL_BRAND[baseModel] = BRAND;
+  }
+}
+
+
     }
   }
 
@@ -2154,7 +2168,7 @@ if (
           out.push('');
           if (wantsSUV) out.push('• Segment: *SUV*'); else if (wantsSedan) out.push('• Segment: *Sedan*'); else if (wantsHatch) out.push('• Segment: *Hatchback*'); else out.push('• Segment: *Any*');
           out.push('');
-          dynamicPicks.slice(0,15).forEach(p => out.push(`• *${p.brand} ${p.model || ''}* — On-road ~ ₹${fmtMoney(p.onroad)}`));
+          dynamicPicks.slice(0,25).forEach(p => out.push(`• *${p.brand} ${p.model || ''}* — On-road ~ ₹${fmtMoney(p.onroad)}`));
           out.push('', 'Reply with the model name for exact *on-road price*, *offers* and *EMI*.');
           await waSendText(to, out.join('\n'));
           setLastService(to, 'NEW');
@@ -2385,7 +2399,7 @@ const wantsAllStates =
     const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
     const isShortModelToken = modelTok && modelTok.length <= 4;
 
-    const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 12);
+    const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 30);
     const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
 
     function _makeLoosePat(sfx) {
@@ -2851,6 +2865,16 @@ if (allMatches.length > 0) {
           out.push(`*Available variants — ${strictModel}*`);
           allMatches.forEach((m, i) => {
             const mdl = String(m.row[m.idxModel] || '').trim();
+
+// ---- HARD FILTER: STRICT MODEL ONLY ----
+if (
+  strictModel &&
+  mdl &&
+  !mdl.toUpperCase().startsWith(strictModel)
+) {
+  return; // skip this row only
+}
+
             const varr = String(m.row[m.idxVariant] || '').trim();
             out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
           });
@@ -2967,6 +2991,35 @@ if (wantsAllStates && allMatches.length) {
 // =========================================================
 // PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / PAN-INDIA)
 // =========================================================
+// ---- BASE MODEL QUERY → FORCE VARIANT LIST (e.g. XUV700) ----
+if (
+  coreTokensArr.length === 1 &&          // user typed only base model
+  !exactModelHit &&                      // no exact variant requested
+  allMatches.length > 1 &&               // multiple variants exist
+  !wantsAllStates
+) {
+  const out = [];
+  out.push(`*Available variants — ${coreTokensArr[0].toUpperCase()}*`);
+  allMatches.slice(0, VARIANT_LIST_LIMIT).forEach((m, i) => {
+    const mdl = String(m.row[m.idxModel] || '').trim();
+// ---- HARD FILTER: BASE MODEL ONLY ----
+const baseModelToken = coreTokensArr[0].toUpperCase();
+if (
+  baseModelToken &&
+  mdl &&
+  !mdl.toUpperCase().startsWith(baseModelToken)
+) {
+  return; // skip this row only
+}
+    const varr = String(m.row[m.idxVariant] || '').trim();
+    out.push(`${i + 1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
+  });
+  out.push('');
+  out.push('Reply with the *exact variant* for price, offers & EMI.');
+  await waSendText(to, out.join('\n'));
+  setLastService(to, 'NEW');
+  return true;
+}
 
 // 3️⃣ SINGLE BEST QUOTE (when exactly one strong match)
 if (
