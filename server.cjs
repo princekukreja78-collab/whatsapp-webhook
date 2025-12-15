@@ -2992,7 +2992,11 @@ if (wantsAllStates && allMatches.length) {
 // =========================================================
 
 // 3️⃣ SINGLE BEST QUOTE (when exactly one strong match)
-if (allMatches.length === 1) {
+if (
+  allMatches.length === 1 &&
+  !userBudget &&
+  !wantsAllStates
+) {
   const m = allMatches[0];
 
   const mdl = m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
@@ -3008,11 +3012,6 @@ if (allMatches.length === 1) {
   await waSendText(to, lines.join('\n'));
   setLastService(to, 'NEW');
   return true;
-}
-
-    // Single best match: pick top (BLOCK when PAN-INDIA)
-if (wantsAllStates) {
-  return false;
 }
 
 const best = allMatches[0];
