@@ -2280,6 +2280,12 @@ if (tables && Object.keys(tables).length) {
     const tRaw = String(msgText || '');
     const t = tRaw.toLowerCase();
     const tUpper = t.toUpperCase();
+// ------------------------------
+// PAN-INDIA / ALL-STATES INTENT (LOCAL TO QUOTE ENGINE)
+// ------------------------------
+const wantsAllStates =
+  /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
+
 
     // --- unified brand detection (uses global helper) ---
     let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
