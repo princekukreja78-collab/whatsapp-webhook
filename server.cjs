@@ -2937,54 +2937,72 @@ if (
       }
     }
 
-// =========================================================
-// PAN-INDIA / ALL-STATES PRICE HANDLER (COLUMN-BASED, FINAL)
-// =========================================================
-if (wantsAllStates && allMatches.length) {
-// ---- PAN-INDIA FIX: LOCK TO SINGLE VARIANT ----
-const panIndiaMatch = allMatches[0];
+// ================= PAN-INDIA PRICING (HARD BASE-MODEL LOCK) =================
 
-  const header = tables[allMatches[0].brand]?.header || [];
-  const aggregate = extractPanIndiaPricesFromRow(
+// 1) Lock strictly to the base model user asked for (e.g. fortuner / legender)
+const panBaseToken =
+  coreTokensArr && coreTokensArr.length
+    ? normForMatch(coreTokensArr[0])
+    : null;
+
+let panMatches = allMatches;
+
+if (panBaseToken) {
+  panMatches = allMatches.filter(m => {
+    if (!m || m.idxModel < 0) return false;
+    const mdlNorm = normForMatch(String(m.row[m.idxModel] || ''));
+    return mdlNorm.startsWith(panBaseToken);
+  });
+}
+
+// Safe fallback (never crash / never empty)
+if (!panMatches.length) {
+  panMatches = allMatches;
+}
+
+// 2) Use ONLY the locked match for pan-india extraction
+const panIndiaMatch = panMatches[0];
+
+const header = tables[panIndiaMatch.brand]?.header || [];
+const aggregate = extractPanIndiaPricesFromRow(
   panIndiaMatch.row,
   header
 );
 
-  const states = Object.keys(aggregate);
-  if (!states.length) {
-    await waSendText(
-      to,
-      "State-wise pricing is not available for this model. Please ask for a city-specific quote."
-    );
-    return true;
-  }
+const states = Object.keys(aggregate);
+if (!states.length) {
+  await waSendText(
+    to,
+    "State-wise pricing is not available for this model. Please ask for a city-specific quote."
+  );
+  return true;
+}
 
-  states.sort((a, b) => aggregate[a] - aggregate[b]);
+states.sort((a, b) => aggregate[a] - aggregate[b]);
 
-  const mdl =
+const mdl =
   String(panIndiaMatch.row[panIndiaMatch.idxModel] || '').toUpperCase();
 const varr =
   String(panIndiaMatch.row[panIndiaMatch.idxVariant] || '').toUpperCase();
 
-  const out = [];
-  out.push(`*${mdl} ${varr} — Pan-India On-Road Pricing*`);
-  out.push('');
-  out.push(`✅ *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
-  out.push(`❌ *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
-  out.push('');
-  out.push('*State-wise prices:*');
+const out = [];
+out.push(`*${mdl} ${varr} — Pan-India On-Road Pricing*`);
+out.push('');
+out.push(`✅ *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
+out.push(`❌ *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
+out.push('');
+out.push('*State-wise prices:*');
 
-  states.forEach(st => {
-    out.push(`• *${st}* → ₹ ${fmtMoney(aggregate[st])}`);
-  });
+states.forEach(st => {
+  out.push(`• *${st}* → ₹ ${fmtMoney(aggregate[st])}`);
+});
 
-  out.push('');
-  out.push('Reply with a *state or city name* for a detailed breakup or *EMI* options.');
+out.push('');
+out.push('Reply with a *state or city name* for a detailed breakup or *EMI* options.');
 
-  await waSendText(to, out.join('\n'));
-  setLastService(to, 'NEW');
-  return true;
-}
+await waSendText(to, out.join('\n'));
+setLastService(to, 'NEW');
+return true;
 
 // =========================================================
 // PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / PAN-INDIA)
