@@ -1927,6 +1927,13 @@ const hasComparisonIntent =
 
 const wantsSpecs =
   /\b(spec|specs|specification|specifications|feature|features)\b/i.test(t);
+// --------------------------------------------------
+// SEGMENT INTENT FLAGS (REQUIRED FOR BUDGET ENGINE)
+// --------------------------------------------------
+const wantsSUV   = /\b(suv|crossover)\b/i.test(t);
+const wantsSedan = /\b(sedan)\b/i.test(t);
+const wantsHatch = /\b(hatch|hatchback)\b/i.test(t);
+const wantsMPV   = /\b(mpv|7 seater|7-seater|people mover)\b/i.test(t);
 
 // --------------------------------------------------
 // INTENT PRIORITY NORMALISER (CRITICAL)
@@ -1941,6 +1948,14 @@ if (hasPricingIntent || wantsAllStates) {
   // DO NOT return
   // Let quote engine handle it
 }
+// --------------------------------------------------
+// HARD BLOCK: PAN-INDIA MUST NOT ENTER BUDGET FLOW
+// --------------------------------------------------
+if (wantsAllStates) {
+  if (DEBUG) console.log('PAN-INDIA REQUEST → skipping budget & advisory flows');
+  return false; // hand over to tryQuickNewCarQuote
+}
+
  // ---------- PRICE INDEX FALLBACK helper ----------
 function findPriceIndexFallback(header, tab) {
   // header: array of header strings (uppercased)
@@ -2034,10 +2049,6 @@ function resolveStateFromRow(row, idxMap) {
       if (v >= 300000 && v <= 4000000) budget = v;
     }
   }
-
-  const wantsSUV = /\bsuv\b/.test(t);
-  const wantsSedan = /\bsedan\b/.test(t);
-  const wantsHatch = /\bhatch|hatchback\b/.test(t);
 
   if (budget) {
     const CARS = [
@@ -2773,41 +2784,7 @@ if (allMatches.length > 0) {
 // =========================================================
 // END PRE-STRICT RESPONSE HANDLER
 // =========================================================
-   // ---------- SEGMENT INTENT (SUV / LUXURY / PREMIUM) ----------
-const wantsSUV =
-  /\b(suv|compact suv|mid suv|full size suv)\b/i.test(t);
-
-const wantsLuxury =
-  /\b(luxury|premium|high end|top end)\b/i.test(t);
-
-if ((wantsSUV || wantsLuxury) && allMatches.length) {
-  const before = allMatches.length;
-
-  allMatches = allMatches.filter(m => {
-    const modelRaw =
-      m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
-
-    // SUV heuristics
-    const isSUV =
-      /(SUV|FORTUNER|LEGENDER|GLA|GLE|GLS|XUV|SCORPIO|THAR|CRETA|SELTOS|HARRIER|SAFARI|GLOSTER|XC|Q[357]|X[1357])/.test(modelRaw);
-
-    // Luxury heuristics
-    const isLuxury =
-      /(MERCEDES|BMW|AUDI|VOLVO|LEXUS|PORSCHE|LAND ROVER|JAGUAR)/.test(m.brand) ||
-      /(GLA|GLE|GLS|E CLASS|C CLASS|S CLASS|X[357]|Q[357]|XC[469])/.test(modelRaw);
-
-    if (wantsLuxury) return isLuxury;
-    if (wantsSUV) return isSUV;
-
-    return true;
-  });
-
-  if (typeof DEBUG !== 'undefined' && DEBUG) {
-    console.log(
-      `Segment filter applied: before=${before}, after=${allMatches.length}, SUV=${wantsSUV}, Luxury=${wantsLuxury}`
-    );
-  }
-}
+  
  // after allMatches is populated + sorted
 // BEFORE strictModel filtering
 
