@@ -1914,6 +1914,21 @@ async function trySmartNewCarIntent(msgText, to) {
   const tRaw = String(msgText || "");
   const t = tRaw.toLowerCase().trim();
 // --------------------------------------------------
+// INTENT GUARDS — MUST BE DEFINED FIRST
+// --------------------------------------------------
+const hasPricingIntent =
+  /\b(price|prices|pricing|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
+
+const wantsAllStates =
+  /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
+
+const hasComparisonIntent =
+  /\b(vs|compare|comparison|difference|better|which is better)\b/i.test(t);
+
+const wantsSpecs =
+  /\b(spec|specs|specification|specifications|feature|features)\b/i.test(t);
+
+// --------------------------------------------------
 // INTENT PRIORITY NORMALISER (CRITICAL)
 // --------------------------------------------------
 if (hasPricingIntent || wantsAllStates) {
@@ -2158,21 +2173,6 @@ if (
     setLastService(to, "NEW");
     return true;
   }
-// ==================================================
-// INTENT GUARDS — SINGLE SOURCE OF TRUTH (FINAL)
-// ==================================================
-const hasPricingIntent =
-  /\b(price|prices|pricing|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
-
-const wantsAllStates =
-  /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
-
-const wantsSpecs =
-  /\b(spec|specs|specification|specifications|feature|features)\b/i.test(t);
-
-const hasComparisonIntent =
-  /\b(vs|compare|comparison|difference|better|which is better)\b/i.test(t);
-
 // ------------------------------
 // 3️⃣ FEATURE EXPLANATION MODE (STRICT, SAFE)
 // Trigger ONLY when user intent is clearly educational
