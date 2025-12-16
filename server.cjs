@@ -3099,7 +3099,9 @@ if (
   lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
   if (m.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(m.onroad)}`);
   if (m.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(m.exShow)}`);
+  if (!explicitPanIndiaIntent) {
   lines.push('\nReply *SPEC* for features or *EMI* for finance.');
+}
 
   await waSendText(to, lines.join('\n'));
   setLastService(to, 'NEW');
@@ -3705,7 +3707,7 @@ await waSendText(
   '1️⃣ *Model only*\n' +
   'Example: `Hycross`\n' +
   '→ View all available variants & prices\n\n' +
-  '2️⃣ *Exact variant + city + buyer type*\n' +
+  '2️⃣ *Exact variant + state + buyer type*\n' +
   'Examples:\n' +
   '• `Hycross ZXO Delhi Individual`\n' +
   '• `Hycross ZXO Delhi Company`\n' +
