@@ -2961,6 +2961,10 @@ if (wantsAllStates && !explicitPanIndiaIntent) {
 } else if (!explicitPanIndiaIntent) {
   // extra safety
 } 
+// ================= PAN-INDIA PRICING (HARD BASE-MODEL LOCK) =================
+if (!explicitPanIndiaIntent) {
+  if (DEBUG) console.log('PAN-INDIA SKIPPED: explicit intent not present');
+} else {
 
 // ================= PAN-INDIA PRICING (HARD BASE-MODEL LOCK) =================
 
@@ -3028,7 +3032,7 @@ out.push('Reply with a *state or city name* for a detailed breakup or *EMI* opti
 await waSendText(to, out.join('\n'));
 setLastService(to, 'NEW');
 return true;
-
+}
 const distinct = [];
 const seenTitles = new Set();
 
