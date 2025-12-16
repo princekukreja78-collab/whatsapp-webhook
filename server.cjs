@@ -3032,7 +3032,7 @@ states.forEach(st => {
 });
 
 out.push('');
-out.push('Reply with a *state or city name* for a detailed breakup or *EMI* options.');
+out.push('Reply with a *state or city name* to get the exact on-road price and finance details.');
 
 await waSendText(to, out.join('\n'));
 setLastService(to, 'NEW');
@@ -3698,11 +3698,24 @@ if (value.statuses && !value.messages) {
         case 'SRV_NEW_CAR':
         case 'BTN_NEW_QUOTE':
           setLastService(from, 'NEW');
-          await waSendText(
-            from,
-            'Please share your *city, model, variant/suffix & profile (individual/company)*.'
-          );
-          break;
+await waSendText(
+  from,
+  '🚗 *New Car Pricing & Finance*\n\n' +
+  'Get details in 3 simple ways:\n\n' +
+  '1️⃣ *Model only*\n' +
+  'Example: `Hycross`\n' +
+  '→ View all available variants & prices\n\n' +
+  '2️⃣ *Exact variant + city + buyer type*\n' +
+  'Examples:\n' +
+  '• `Hycross ZXO Delhi Individual`\n' +
+  '• `Hycross ZXO Delhi Company`\n' +
+  '→ On-road price (profile-wise) + EMI options\n\n' +
+  '3️⃣ *Pan-India comparison*\n' +
+  'Example: `Hycross ZXO Pan India`\n' +
+  '→ Lowest & highest prices across states\n\n' +
+  'Type exactly as shown above.'
+);
+  break;
 
         case 'SRV_USED_CAR':
         case 'BTN_USED_MORE':
