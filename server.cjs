@@ -3028,35 +3028,40 @@ await waSendText(to, out.join('\n'));
 setLastService(to, 'NEW');
 return true;
 
-// =========================================================
-// PRE-STRICT RESPONSE HANDLER (SINGLE QUOTE / PAN-INDIA)
-// =========================================================
-// ---- BASE MODEL QUERY → FORCE VARIANT LIST (e.g. XUV700) ----
-if (
-  coreTokensArr.length === 1 &&          // user typed only base model
-  !exactModelHit &&                      // no exact variant requested
-  allMatches.length > 1 &&               // multiple variants exist
-  !wantsAllStates
-) {
-  const out = [];
-  out.push(`*Available variants — ${coreTokensArr[0].toUpperCase()}*`);
-  allMatches.slice(0, VARIANT_LIST_LIMIT).forEach((m, i) => {
-    const mdl = String(m.row[m.idxModel] || '').trim();
-// ---- HARD FILTER: BASE MODEL ONLY ----
+const distinct = [];
+const seenTitles = new Set();
 
-if (
-  baseModelToken &&
-  mdl &&
-  !mdl.toUpperCase().startsWith(baseModelToken)
-) {
-  return; // skip this row only
+for (const m of allMatches) {
+  if (allowedBrandSet && !allowedBrandSet.has(m.brand)) continue;
+  if ((m.score || 0) < Number(process.env.MIN_MATCH_SCORE || 12)) continue;
+
+  const row = m.row;
+  const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
+  const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
+
+  // HARD BASE MODEL FILTER
+  const baseToken = coreTokensArr[0]?.toUpperCase();
+  if (baseToken && !modelVal.startsWith(baseToken)) continue;
+
+  const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
+  if (!title || seenTitles.has(title)) continue;
+
+  seenTitles.add(title);
+  distinct.push({ title, onroad: m.onroad || 0 });
+
+  if (distinct.length >= VARIANT_LIST_LIMIT) break;
 }
-    const varr = String(m.row[m.idxVariant] || '').trim();
-    out.push(`${i + 1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
+
+if (distinct.length > 1) {
+  const lines = [];
+  lines.push(`*Available variants — ${coreTokensArr[0].toUpperCase()}*`);
+  distinct.forEach((d, i) => {
+    lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
   });
-  out.push('');
-  out.push('Reply with the *exact variant* for price, offers & EMI.');
-  await waSendText(to, out.join('\n'));
+  lines.push('');
+  lines.push('Reply with the *exact variant* for price, offers & EMI.');
+
+  await waSendText(to, lines.join('\n'));
   setLastService(to, 'NEW');
   return true;
 }
