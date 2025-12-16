@@ -2415,6 +2415,11 @@ const wantsAllStates =
     // ----------------- PRECOMPUTE: coreTokens, exactModelHit -----------------
     const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
     const coreTokensArr = (userNorm || '').split(' ').filter(tk => tk && !genericWords.has(tk));
+    // ---------------- BASE MODEL TOKEN (GLOBAL, SAFE) ----------------
+const baseModelToken =
+  coreTokensArr && coreTokensArr.length
+    ? coreTokensArr[0].toUpperCase()
+    : null;
 
     let exactModelHit = false;
     try {
@@ -3026,7 +3031,7 @@ if (
   allMatches.slice(0, VARIANT_LIST_LIMIT).forEach((m, i) => {
     const mdl = String(m.row[m.idxModel] || '').trim();
 // ---- HARD FILTER: BASE MODEL ONLY ----
-const baseModelToken = coreTokensArr[0].toUpperCase();
+
 if (
   baseModelToken &&
   mdl &&
