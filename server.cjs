@@ -3078,10 +3078,8 @@ if (
   allMatches.length >= 1 &&
   !userBudget &&
   !wantsAllStates &&
-  exactModelHit
+  (allMatches.length === 1 || exactModelHit)
 ) {
-console.log('DEBUG_FLOW: SINGLE QUOTE FIRING');
-
   const m = allMatches[0];
 
   const mdl = m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
