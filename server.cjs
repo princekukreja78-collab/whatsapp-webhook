@@ -3101,9 +3101,10 @@ if (
   if (m.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(m.onroad)}`);
   if (m.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(m.exShow)}`);
   if (!isPanIndiaFlow) {
-  if (!explicitPanIndiaIntent && best && exactModelHit) {
+  if (!explicitPanIndiaIntent && exactModelHit) {
   lines.push('\nReply *SPEC* for features or *EMI* for finance.');
 }
+
 
 }
 
