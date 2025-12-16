@@ -2898,19 +2898,26 @@ if (
       const distinct = [];
       const seenTitles = new Set();
       for (const m of allMatches) {
-        if (allowedBrandSet && !allowedBrandSet.has(m.brand)) continue;
-        if ((m.score || 0) < Number(process.env.MIN_MATCH_SCORE || 12)) continue;
-        const row = m.row;
-        const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
-        const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
-        const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
-        if (!title) continue;
-        if (seenTitles.has(title)) continue;
-        seenTitles.add(title);
-        distinct.push({ title, onroad: m.onroad || 0, brand: m.brand, score: m.score || 0 });
-        if (distinct.length >= VARIANT_LIST_LIMIT) break;
-      }
+  if (allowedBrandSet && !allowedBrandSet.has(m.brand)) continue;
+  if ((m.score || 0) < Number(process.env.MIN_MATCH_SCORE || 12)) continue;
 
+  const row = m.row;
+  const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
+  const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
+
+  // 🔒 HARD BASE-MODEL LOCK (NO MIXING)
+  if (!modelVal.startsWith(baseModelToken)) continue;
+
+  const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
+  if (!title) continue;
+  if (seenTitles.has(title)) continue;
+
+  seenTitles.add(title);
+  distinct.push({ title, onroad: m.onroad || 0, brand: m.brand, score: m.score || 0 });
+
+  // ❗ DO NOT FILL FROM OTHER MODELS
+  if (distinct.length >= VARIANT_LIST_LIMIT) break;
+}
       if (distinct.length > 1) {
         if (userBudget) {
           const mid = (budgetMin + budgetMax) / 2;
