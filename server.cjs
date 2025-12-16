@@ -2416,6 +2416,10 @@ const wantsAllStates =
     // ----------------- PRECOMPUTE: coreTokens, exactModelHit -----------------
     const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
     const coreTokensArr = (userNorm || '').split(' ').filter(tk => tk && !genericWords.has(tk));
+// Explicit variant intent: model + variant token present
+const userHasExplicitVariant =
+  Array.isArray(coreTokensArr) && coreTokensArr.length >= 2;
+
     // ---------------- BASE MODEL TOKEN (GLOBAL, SAFE) ----------------
 const baseModelToken =
   coreTokensArr && coreTokensArr.length
@@ -3058,7 +3062,7 @@ for (const m of allMatches) {
   if (distinct.length >= VARIANT_LIST_LIMIT) break;
 }
 
-if (distinct.length > 1) {
+if (distinct.length > 1 && !userHasExplicitVariant) {
   const lines = [];
   lines.push(`*Available variants — ${coreTokensArr[0].toUpperCase()}*`);
   distinct.forEach((d, i) => {
