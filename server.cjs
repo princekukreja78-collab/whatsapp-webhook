@@ -3068,7 +3068,7 @@ if (distinct.length > 1) {
 
 // 3️⃣ SINGLE BEST QUOTE (when exactly one strong match)
 if (
-  allMatches.length === 1 &&
+  allMatches.length >= 1 &&
   !userBudget &&
   !wantsAllStates
 ) {
