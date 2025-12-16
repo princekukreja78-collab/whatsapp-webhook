@@ -3066,11 +3066,12 @@ if (distinct.length > 1) {
   return true;
 }
 
-// 3️⃣ SINGLE BEST QUOTE (when exactly one strong match)
+// 3️⃣ SINGLE BEST QUOTE (PRIORITY)
 if (
   allMatches.length >= 1 &&
   !userBudget &&
-  !wantsAllStates
+  !wantsAllStates &&
+  exactModelHit
 ) {
   const m = allMatches[0];
 
