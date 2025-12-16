@@ -2261,6 +2261,7 @@ if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t))
 // ---------------- tryQuickNewCarQuote (FULL REWRITE) ----------------
 async function tryQuickNewCarQuote(msgText, to) {
   try {
+console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
     if (!msgText || !msgText.trim()) return false;
 
     // If user included a year (e.g. "2024"), treat as USED
@@ -3065,6 +3066,12 @@ if (distinct.length > 1) {
   setLastService(to, 'NEW');
   return true;
 }
+console.log('DEBUG_FLOW: BEFORE SINGLE QUOTE', {
+  allMatches: allMatches.length,
+  exactModelHit,
+  userBudget,
+  wantsAllStates
+});
 
 // 3️⃣ SINGLE BEST QUOTE (PRIORITY)
 if (
@@ -3073,6 +3080,8 @@ if (
   !wantsAllStates &&
   exactModelHit
 ) {
+console.log('DEBUG_FLOW: SINGLE QUOTE FIRING');
+
   const m = allMatches[0];
 
   const mdl = m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
