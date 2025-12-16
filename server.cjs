@@ -3082,6 +3082,11 @@ console.log('DEBUG_FLOW: BEFORE SINGLE QUOTE', {
   userBudget,
   wantsAllStates
 });
+const isSingleQuote =
+  !explicitPanIndiaIntent &&
+  !wantsAllStates &&
+  !userBudget &&
+  allMatches.length >= 1;
 
 // 3️⃣ SINGLE BEST QUOTE (PRIORITY)
 if (
@@ -3131,32 +3136,35 @@ if (!best) return false;
     if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
     if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
     if (best.onroad) lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
-    if (loanAmt) {
-      lines.push(`*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${roi}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`);
-// ---------------- BULLET EMI OPTION (25%) ----------------
-try {
-  const bulletPct = 0.25; // 25% bullet payment
-  const bulletSim = simulateBulletEmi(
-    loanAmt,
-    roi,
-    60,
-    bulletPct
+   if (isSingleQuote && loanAmt) {
+  lines.push(
+    `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${roi}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
   );
 
-  if (bulletSim && bulletSim.monthly_emi) {
-    lines.push(
-      `*Bullet EMI (25%):* EMI ≈ ₹ ${fmtMoney(bulletSim.monthly_emi)} / month ` +
-      `(Bullet ₹ ${fmtMoney(bulletSim.bullet_amount)} at end)`
+  // ---------------- BULLET EMI OPTION (25%) ----------------
+  try {
+    const bulletPct = 0.25; // 25% bullet payment
+    const bulletSim = simulateBulletEmi(
+      loanAmt,
+      roi,
+      60,
+      bulletPct
     );
-  }
-} catch (e) {
-  // Silent fail — never block quote
-}
 
+    if (bulletSim && bulletSim.monthly_emi) {
+      lines.push(
+        `*Bullet EMI (25%):* EMI ≈ ₹ ${fmtMoney(bulletSim.monthly_emi)} / month ` +
+        `(Bullet ₹ ${fmtMoney(bulletSim.bullet_amount)} at end)`
+      );
     }
-   lines.push('');
-lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
-lines.push('*Terms & Conditions Apply ✅*');
+  } catch (e) {
+    // Silent fail — never block quote
+  }
+
+  lines.push('');
+  lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
+  lines.push('*Terms & Conditions Apply ✅*');
+}
 
    // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
 try {
