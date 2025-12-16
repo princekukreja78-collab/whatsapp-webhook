@@ -2959,6 +2959,7 @@ if (
 // --------------------------------------------------
 const explicitPanIndiaIntent =
   /\b(pan\s*india|all\s*india|all\s*states|state\s*wise|compare\s*states|across\s*states)\b/i.test(t);
+const isPanIndiaFlow = explicitPanIndiaIntent === true;
 
 // If user did NOT explicitly ask for comparison → skip Pan-India
 if (wantsAllStates && !explicitPanIndiaIntent) {
@@ -3099,9 +3100,10 @@ if (
   lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
   if (m.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(m.onroad)}`);
   if (m.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(m.exShow)}`);
-  if (!explicitPanIndiaIntent) {
+  if (!isPanIndiaFlow) {
   lines.push('\nReply *SPEC* for features or *EMI* for finance.');
 }
+
 
   await waSendText(to, lines.join('\n'));
   setLastService(to, 'NEW');
@@ -3703,11 +3705,11 @@ if (value.statuses && !value.messages) {
 await waSendText(
   from,
   '🚗 *New Car Pricing & Finance*\n\n' +
-  'Get details in 3 simple ways:\n\n' +
+  'Get details in 4 simple ways:\n\n' +
   '1️⃣ *Model only*\n' +
   'Example: `Hycross`\n' +
   '→ View all available variants & prices\n\n' +
-  '2️⃣ *Exact variant + state + buyer type*\n' +
+  '2️⃣ *Exact variant + state/city + buyer type*\n' +
   'Examples:\n' +
   '• `Hycross ZXO Delhi Individual`\n' +
   '• `Hycross ZXO Delhi Company`\n' +
@@ -3715,6 +3717,11 @@ await waSendText(
   '3️⃣ *Pan-India comparison*\n' +
   'Example: `Hycross ZXO Pan India`\n' +
   '→ Lowest & highest prices across states\n\n' +
+  '4️⃣ *Budget-based search*\n' +
+  'Examples:\n' +
+  '• `SUV under 20 lakh`\n' +
+  '• `Car under 15 lakh`\n' +
+  '→ Best options available in your budget\n\n' +
   'Type exactly as shown above.'
 );
   break;
