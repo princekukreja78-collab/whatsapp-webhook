@@ -3125,8 +3125,30 @@ if (!best) return false;
     if (best.onroad) lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
     if (loanAmt) {
       lines.push(`*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${roi}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`);
+// ---------------- BULLET EMI OPTION (25%) ----------------
+try {
+  const bulletPct = 0.25; // 25% bullet payment
+  const bulletSim = simulateBulletEmi(
+    loanAmt,
+    roi,
+    60,
+    bulletPct
+  );
+
+  if (bulletSim && bulletSim.monthly_emi) {
+    lines.push(
+      `*Bullet EMI (25%):* EMI ≈ ₹ ${fmtMoney(bulletSim.monthly_emi)} / month ` +
+      `(Bullet ₹ ${fmtMoney(bulletSim.bullet_amount)} at end)`
+    );
+  }
+} catch (e) {
+  // Silent fail — never block quote
+}
+
     }
-    lines.push('\n*Terms & Conditions Apply ✅*');
+   lines.push('');
+lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
+lines.push('*Terms & Conditions Apply ✅*');
 
    // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
 try {
@@ -3975,10 +3997,23 @@ if (value.statuses && !value.messages) {
     }
 
     // default fallback
-    await waSendText(
-      from,
-      'Tell me your *city + make/model + variant/suffix + profile (individual/company)*. e.g., *Delhi Hycross ZXO individual* or *HR BMW X1 sDrive18i company*.'
-    );
+await waSendText(
+  from,
+  '🚗 *New Car Pricing & Finance*\n\n' +
+  'Get details in 3 simple ways:\n\n' +
+  '1️⃣ *Model only*\n' +
+  'Example: `Hycross`\n' +
+  '→ View all available variants & prices\n\n' +
+  '2️⃣ *Exact variant + city + buyer type*\n' +
+  'Examples:\n' +
+  '• `Hycross ZXO Delhi Individual`\n' +
+  '• `Hycross ZXO Delhi Company`\n' +
+  '→ On-road price (profile-wise) + EMI options\n\n' +
+  '3️⃣ *Pan-India comparison*\n' +
+  'Example: `Hycross ZXO Pan India`\n' +
+  '→ Lowest & highest prices across states\n\n' +
+  'Type exactly as shown above.'
+);
     return res.sendStatus(200);
   } catch (err) {
     console.error('Webhook error:', err && err.stack ? err.stack : err);
