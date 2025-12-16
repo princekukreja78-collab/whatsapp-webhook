@@ -3101,7 +3101,10 @@ if (
   if (m.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(m.onroad)}`);
   if (m.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(m.exShow)}`);
   if (!isPanIndiaFlow) {
+  if (!explicitPanIndiaIntent && best && exactModelHit) {
   lines.push('\nReply *SPEC* for features or *EMI* for finance.');
+}
+
 }
 
 
@@ -4018,25 +4021,14 @@ await waSendText(
       console.warn('CRM reply failed', e && e.message ? e.message : e);
     }
 
-    // default fallback
-await waSendText(
-  from,
-  '🚗 *New Car Pricing & Finance*\n\n' +
-  'Get details in 3 simple ways:\n\n' +
-  '1️⃣ *Model only*\n' +
-  'Example: `Hycross`\n' +
-  '→ View all available variants & prices\n\n' +
-  '2️⃣ *Exact variant + city + buyer type*\n' +
-  'Examples:\n' +
-  '• `Hycross ZXO Delhi Individual`\n' +
-  '• `Hycross ZXO Delhi Company`\n' +
-  '→ On-road price (profile-wise) + EMI options\n\n' +
-  '3️⃣ *Pan-India comparison*\n' +
-  'Example: `Hycross ZXO Pan India`\n' +
-  '→ Lowest & highest prices across states\n\n' +
-  'Type exactly as shown above.'
-);
-    return res.sendStatus(200);
+   // NOTE: Deprecated duplicate fallback — handled earlier in flow
+// This block is intentionally disabled to avoid duplicate replies
+// await waSendText(
+//   from,
+//   '🚗 *New Car Pricing & Finance*'
+// );
+// return res.sendStatus(200);
+
   } catch (err) {
     console.error('Webhook error:', err && err.stack ? err.stack : err);
     try {
