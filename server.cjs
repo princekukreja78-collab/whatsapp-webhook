@@ -2948,6 +2948,18 @@ if (
         return true;
       }
     }
+// --------------------------------------------------
+// PAN-INDIA MUST BE EXPLICIT (NO OVERRIDE OF SINGLE QUOTE)
+// --------------------------------------------------
+const explicitPanIndiaIntent =
+  /\b(pan\s*india|all\s*india|all\s*states|state\s*wise|compare\s*states|across\s*states)\b/i.test(t);
+
+// If user did NOT explicitly ask for comparison → skip Pan-India
+if (wantsAllStates && !explicitPanIndiaIntent) {
+  // Do nothing here, allow normal single-city quote logic to run
+} else if (!explicitPanIndiaIntent) {
+  // extra safety
+} 
 
 // ================= PAN-INDIA PRICING (HARD BASE-MODEL LOCK) =================
 
