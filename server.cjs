@@ -3087,7 +3087,7 @@ if (
   allMatches.length >= 1 &&
   !userBudget &&
   !wantsAllStates &&
-  (allMatches.length === 1 || exactModelHit || userSuffix)
+  (allMatches.length === 1 || userHasExplicitVariant)
 ) {
   const m = allMatches[0];
 
