@@ -2924,8 +2924,9 @@ if (
   // ❗ DO NOT FILL FROM OTHER MODELS
   if (distinct.length >= VARIANT_LIST_LIMIT) break;
 }
-      if (distinct.length > 1 && !userSuffix) {
-        if (userBudget) {
+      if (distinct.length > 1) {
+   
+       if (userBudget) {
           const mid = (budgetMin + budgetMax) / 2;
           distinct.sort((a,b) => (b.score - a.score) || (Math.abs(a.onroad - mid) - Math.abs(b.onroad - mid)));
         } else {
