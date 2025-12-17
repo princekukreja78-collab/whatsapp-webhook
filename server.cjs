@@ -3116,30 +3116,57 @@ if (
     lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
 
   // ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
-  if (isSingleQuote && loanAmt) {
-    lines.push(
-      `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${roi}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
-    );
+if (isSingleQuote && loanAmt) {
+  lines.push('*🔹 Loan & EMI Options*');
+  lines.push('');
 
-    // -------- Bullet EMI (25%) --------
-    try {
-      const bulletPct = 0.25;
-      const bulletSim = simulateBulletEmi(loanAmt, roi, 60, bulletPct);
+  // OPTION 1 — NORMAL EMI (100% EX-SHOWROOM)
+  lines.push('*OPTION 1 – NORMAL EMI*');
+  lines.push(
+    `Loan Amount: 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)}`
+  );
+  lines.push(
+    `Tenure: 60 months @ ${roi}% p.a.`
+  );
+  lines.push(
+    `Approx EMI: ₹ *${fmtMoney(emi60)}*`
+  );
 
-      if (bulletSim && bulletSim.monthly_emi) {
-        lines.push(
-          `*Bullet EMI (25%):* EMI ≈ ₹ ${fmtMoney(bulletSim.monthly_emi)} / month ` +
-          `(Bullet ₹ ${fmtMoney(bulletSim.bullet_amount)} at end)`
-        );
-      }
-    } catch (e) {}
+  // OPTION 2 — BULLET EMI (25%)
+  try {
+    const bulletPct = 0.25;
+    const bulletSim = simulateBulletEmi(loanAmt, roi, 60, bulletPct);
 
-    lines.push('');
-    lines.push('_EMI figures are indicative. Final approval subject to bank terms._');
-    lines.push('*Terms & Conditions Apply ✅*');
+    const bulletEmi =
+      bulletSim?.monthly_emi ||
+      bulletSim?.monthlyEmi ||
+      bulletSim?.emi ||
+      null;
+
+    const bulletAmt =
+      bulletSim?.bullet_amount ||
+      bulletSim?.bulletAmount ||
+      Math.round(loanAmt * bulletPct);
+
+    if (bulletEmi) {
+      lines.push('');
+      lines.push('*OPTION 2 – BULLET EMI (25%)*');
+      lines.push(
+        `Monthly EMI: ₹ *${fmtMoney(bulletEmi)}*`
+      );
+      lines.push(
+        `Bullet Payment at end: ₹ ${fmtMoney(bulletAmt)}`
+      );
+    }
+  } catch (e) {
+    // Silent fail — never block quote
   }
 
-  // ---------- CTA ----------
+  lines.push('');
+  lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
+  lines.push('*Terms & Conditions Apply ✅*');
+}
+ // ---------- CTA ----------
   if (isSingleQuote) {
     lines.push('\nReply *SPEC* for features or *EMI* for finance.');
   }
