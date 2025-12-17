@@ -3084,7 +3084,6 @@ console.log('DEBUG_FLOW: BEFORE SINGLE QUOTE', {
 });
 const isSingleQuote =
   !explicitPanIndiaIntent &&
-  !wantsAllStates &&
   !userBudget &&
   allMatches.length >= 1;
 
@@ -3095,77 +3094,60 @@ if (
   !wantsAllStates &&
   (allMatches.length === 1 || userHasExplicitVariant)
 ) {
-  const m = allMatches[0];
+  const best = allMatches[0];
+  if (!best) return false;
 
-  const mdl = m.idxModel >= 0 ? String(m.row[m.idxModel] || '').toUpperCase() : '';
-  const varr = m.idxVariant >= 0 ? String(m.row[m.idxVariant] || '').toUpperCase() : '';
+  const loanAmt = best.exShow || best.onroad || 0;
+  const roi = Number(process.env.NEW_CAR_ROI || 8.1); // default ROI
+  const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
+
+  const mdl =
+    best.idxModel >= 0 ? String(best.row[best.idxModel] || '').toUpperCase() : '';
+  const varr =
+    best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
+  const fuelStr = best.fuel ? String(best.fuel).toUpperCase() : '';
 
   const lines = [];
-  lines.push(`*${m.brand}* ${mdl} ${varr}`);
+  lines.push(`*${best.brand}* ${mdl} ${varr}`);
   lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
-  if (m.onroad) lines.push(`*On-Road:* ₹ ${fmtMoney(m.onroad)}`);
-  if (m.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(m.exShow)}`);
-  if (!isPanIndiaFlow) {
-  if (!explicitPanIndiaIntent && exactModelHit) {
-  lines.push('\nReply *SPEC* for features or *EMI* for finance.');
-}
+  if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
+  if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
+  if (best.onroad)
+    lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
 
+  // ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
+  if (isSingleQuote && loanAmt) {
+    lines.push(
+      `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${roi}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
+    );
 
-}
+    // -------- Bullet EMI (25%) --------
+    try {
+      const bulletPct = 0.25;
+      const bulletSim = simulateBulletEmi(loanAmt, roi, 60, bulletPct);
 
+      if (bulletSim && bulletSim.monthly_emi) {
+        lines.push(
+          `*Bullet EMI (25%):* EMI ≈ ₹ ${fmtMoney(bulletSim.monthly_emi)} / month ` +
+          `(Bullet ₹ ${fmtMoney(bulletSim.bullet_amount)} at end)`
+        );
+      }
+    } catch (e) {}
+
+    lines.push('');
+    lines.push('_EMI figures are indicative. Final approval subject to bank terms._');
+    lines.push('*Terms & Conditions Apply ✅*');
+  }
+
+  // ---------- CTA ----------
+  if (isSingleQuote) {
+    lines.push('\nReply *SPEC* for features or *EMI* for finance.');
+  }
 
   await waSendText(to, lines.join('\n'));
   setLastService(to, 'NEW');
   return true;
 }
-
-const best = allMatches[0];
-if (!best) return false;
-
-    const loanAmt = best.exShow || best.onroad || 0;
-    const roi = Number(process.env.NEW_CAR_ROI || 8.1); // default ROI
-    const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
-
-    const modelName  = best.idxModel   >= 0 ? String(best.row[best.idxModel]   || '').toUpperCase() : '';
-    const variantStr = best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
-    const fuelStr    = best.fuel ? String(best.fuel).toUpperCase() : '';
-
-    const lines = [];
-    lines.push(`*${best.brand}* ${modelName} ${variantStr}`);
-    lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
-    if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
-    if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
-    if (best.onroad) lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
-   if (isSingleQuote && loanAmt) {
-  lines.push(
-    `*Loan:* 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)} @ *${roi}%* (60m) → *EMI ≈ ₹ ${fmtMoney(emi60)}*`
-  );
-
-  // ---------------- BULLET EMI OPTION (25%) ----------------
-  try {
-    const bulletPct = 0.25; // 25% bullet payment
-    const bulletSim = simulateBulletEmi(
-      loanAmt,
-      roi,
-      60,
-      bulletPct
-    );
-
-    if (bulletSim && bulletSim.monthly_emi) {
-      lines.push(
-        `*Bullet EMI (25%):* EMI ≈ ₹ ${fmtMoney(bulletSim.monthly_emi)} / month ` +
-        `(Bullet ₹ ${fmtMoney(bulletSim.bullet_amount)} at end)`
-      );
-    }
-  } catch (e) {
-    // Silent fail — never block quote
-  }
-
-  lines.push('');
-  lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
-  lines.push('*Terms & Conditions Apply ✅*');
-}
-
    // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
 try {
   const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
@@ -3738,14 +3720,32 @@ await waSendText(
 );
   break;
 
-        case 'SRV_USED_CAR':
-        case 'BTN_USED_MORE':
-          setLastService(from, 'USED');
-          await waSendText(
-            from,
-            'Share *make, model, year* (optional colour/budget) and I’ll suggest options.'
-          );
-          break;
+     case 'SRV_USED_CAR':
+case 'BTN_USED_MORE':
+  setLastService(from, 'USED');
+  await waSendText(
+    from,
+    '🚘 *Used Car Search*\n\n' +
+    'Find the right pre-owned car in 4 simple ways:\n\n' +
+    '1️⃣ *Model-based search*\n' +
+    'Example: `Creta`\n' +
+    '→ View available used Creta options\n\n' +
+    '2️⃣ *Model + year + city*\n' +
+    'Examples:\n' +
+    '• `Creta 2021 Delhi`\n' +
+    '• `City 2019 Mumbai`\n' +
+    '→ Price, condition & availability\n\n' +
+    '3️⃣ *Budget-based search*\n' +
+    'Examples:\n' +
+    '• `SUV under 8 lakh`\n' +
+    '• `Car under 5 lakh`\n' +
+    '→ Best options in your budget\n\n' +
+    '4️⃣ *Specific requirement*\n' +
+    'Example: `Diesel automatic SUV Delhi`\n' +
+    '→ Closest matching cars available\n\n' +
+    'Type exactly as shown above.'
+  );
+  break;
 
         case 'SRV_SELL_CAR':
           setLastService(from, 'SELL');
