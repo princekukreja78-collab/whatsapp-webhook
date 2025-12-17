@@ -91,6 +91,62 @@ function logOnceRag(msg) {
   }
   console.log(msg);
 }
+// ==================================================
+// PRICING SHEET CACHE (GLOBAL, IN-MEMORY)
+// ==================================================
+const SHEET_CACHE = new Map(); 
+// key   → sheet URL
+// value → { data, loadedAt }
+
+const SHEET_CACHE_TTL = 30 * 60 * 1000; // 30 minutes (safe default)
+
+function isSheetExpired(entry) {
+  if (!entry || !entry.loadedAt) return true;
+  return (Date.now() - entry.loadedAt) > SHEET_CACHE_TTL;
+}
+
+async function getPricingSheetCached(sheetUrl, brandKey = null) {
+  if (!sheetUrl) return null;
+
+  const cached = SHEET_CACHE.get(sheetUrl);
+  if (cached && cached.data && !isSheetExpired(cached)) {
+    return cached.data;
+  }
+
+  // First load or refresh
+  const table = await loadPricingFromUrl(sheetUrl, brandKey);
+  if (table) {
+    SHEET_CACHE.set(sheetUrl, {
+      data: table,
+      loadedAt: Date.now()
+    });
+  }
+
+  return table;
+}
+
+async function loadAllBrandSheetsCached() {
+  const tables = {};
+
+  for (const [envKey, envVal] of Object.entries(process.env)) {
+    if (!envKey.endsWith('_SHEET_URL')) continue;
+    if (!envVal) continue;
+
+    const brand = envKey.replace('_SHEET_URL', '').toUpperCase();
+
+    try {
+      const table = await getPricingSheetCached(envVal, brand);
+      if (table) {
+        tables[brand] = table;
+      }
+    } catch (e) {
+      console.warn(`Pricing sheet load failed for ${brand}:`, e?.message || e);
+    }
+  }
+
+  return tables;
+}
+
 /* ===== SUFFIX MATCH PATCH (ZXO / VXO / GXO with loose matching) ===== */
 
 // canonical list – longest-first will be applied below
