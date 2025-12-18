@@ -2344,6 +2344,15 @@ async function tryQuickNewCarQuote(msgText, to) {
 console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
     if (!msgText || !msgText.trim()) return false;
 
+    // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
+    const lastSvc = (getLastService(to) || '').toLowerCase();
+    if (lastSvc.includes('loan')) {
+      if (typeof DEBUG !== 'undefined' && DEBUG) {
+        console.log('LOAN CONTEXT ACTIVE → skipping new-car quote engine:', msgText);
+      }
+      return false;
+    }
+
     // If user included a year (e.g. "2024"), treat as USED
     const yearMatch = (String(msgText).match(/\b(19|20)\d{2}\b/) || [])[0];
     if (yearMatch) {
