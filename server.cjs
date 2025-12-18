@@ -2311,21 +2311,25 @@ if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t))
 }
 
   // ------------------------------
-  // 6️⃣ FINANCE / EMI MODE
-  // ------------------------------
-  if (/emi|finance|loan|0 down|zero down/.test(t)) {
-    await waSendText(
-      "To calculate your *EMI*, please tell me:\n" +
-      "• Car model (e.g., *Fortuner ZX*, *Creta SX*, *City VX*)\n" +
-      "• City\n" +
-      "• Individual or Corporate profile\n\n" +
-      "I’ll share the approx 60-month EMI and typical down payment."
-    );
-    return true;
-  }
+// 6️⃣ FINANCE / EMI MODE (TEXT ONLY FALLBACK)
+// ------------------------------
+if (
+  /emi|finance|loan|0 down|zero down/.test(t) &&
+  !hasPricingIntent &&
+  !wantsAllStates
+) {
+  await waSendText(
+    to,
+    'To calculate your *EMI*, please tell me:\n' +
+    '• Car model (e.g., *Fortuner ZX*, *Creta SX*, *City VX*)\n' +
+    '• City\n' +
+    '• Individual or Corporate profile\n\n' +
+    'I’ll share the approx 60-month EMI and typical down payment.'
+  );
+  return true;
+}
 
-  // If no smart intent detected → let main flow handle it
-  return false;
+return false;
 }
 
 // ---------------- tryQuickNewCarQuote (FULL REWRITE) ----------------
