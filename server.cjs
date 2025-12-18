@@ -3838,26 +3838,25 @@ case 'BTN_USED_MORE':
           );
           break;
 
-        case 'SRV_LOAN':
-          setLastService(from, 'LOAN');
-          await waSendText(from, 'Loan assistance options below 👇');
-          await waSendRaw({
-            messaging_product: 'whatsapp',
-            to: from,
-            type: 'interactive',
-            interactive: {
-              type: 'button',
-              body: { text: 'Choose a loan option:' },
-              action: {
-                buttons: [
-                  { type: 'reply', reply: { id: 'BTN_LOAN_EMI',         title: 'EMI Calculator' } },
-                  { type: 'reply', reply: { id: 'BTN_LOAN_DOCS',        title: 'Loan Documents' } },
-                  { type: 'reply', reply: { id: 'BTN_LOAN_ELIGIBILITY', title: 'Loan Eligibility' } }
-                ]
-              }
-            }
-          });
-          break;
+       case 'SRV_LOAN':
+  setLastService(from, 'LOAN');
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: 'Choose loan type:' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI Calc' } }
+        ]
+      }
+    }
+  });
+  break;
 
         case 'BTN_LOAN_EMI':
           await waSendText(
@@ -3880,13 +3879,86 @@ case 'BTN_USED_MORE':
           );
           break;
 
-        case 'BTN_NEW_LOAN':
-          await waSendText(
-            from,
-            `For loan assistance, share *city + car model + budget*. New car ROI from *${NEW_CAR_ROI}%*, Used car *${USED_CAR_ROI_VISIBLE}%*.`
-          );
-          break;
-
+       case 'BTN_LOAN_NEW':
+  setLastService(from, 'LOAN_NEW');
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: 'New Car Loan @ 8.1% ROI\nChoose EMI type:' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_NEW_EMI_NORMAL', title: 'Normal EMI' } },
+          { type: 'reply', reply: { id: 'BTN_NEW_EMI_BULLET', title: 'Bullet EMI' } }
+        ]
+      }
+    }
+  });
+  break;
+case 'BTN_NEW_EMI_NORMAL':
+  await waSendText(
+    from,
+    'New Car *Normal EMI* @ 8.1%\n\n' +
+    'Reply like:\n' +
+    '`emi 1500000 60`\n\n' +
+    'Format:\n`emi <loan amount> <months>`'
+  );
+  break;
+case 'BTN_NEW_EMI_BULLET':
+  await waSendText(
+    from,
+    'New Car *Bullet EMI* @ 8.1%\n\n' +
+    'Reply like:\n' +
+    '`bullet 1500000 36`\n\n' +
+    'Interest paid monthly, principal at end.'
+  );
+  break;
+case 'BTN_LOAN_USED':
+  setLastService(from, 'LOAN_USED');
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: 'Used Car Loan @ 10% ROI\nChoose EMI type:' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_USED_EMI_NORMAL', title: 'Normal EMI' } },
+          { type: 'reply', reply: { id: 'BTN_USED_EMI_BULLET', title: 'Bullet EMI' } }
+        ]
+      }
+    }
+  });
+  break;
+case 'BTN_USED_EMI_NORMAL':
+  await waSendText(
+    from,
+    'Used Car *Normal EMI* @ 10%\n\n' +
+    'Reply like:\n' +
+    '`emi 600000 48`\n\n' +
+    'Format:\n`emi <loan amount> <months>`'
+  );
+  break;
+case 'BTN_USED_EMI_BULLET':
+  await waSendText(
+    from,
+    'Used Car *Bullet EMI* @ 10%\n\n' +
+    'Reply like:\n' +
+    '`bullet 600000 24`'
+  );
+  break;
+case 'BTN_LOAN_CUSTOM':
+  await waSendText(
+    from,
+    'Manual EMI calculation:\n\n' +
+    '`emi <amount> <rate%> <months>`\n' +
+    'Example:\n`emi 1500000 9.2 60`\n\n' +
+    'Bullet EMI:\n`bullet <amount> <rate%> <months>`'
+  );
+  break;
         case 'BTN_CONTACT_SALES':
           await waSendText(
             from,
