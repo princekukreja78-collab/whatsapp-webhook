@@ -3838,7 +3838,10 @@ case 'BTN_USED_MORE':
           );
           break;
 
-  // ================= LOAN ROOT =================
+  case 'SRV_LOAN':
+  console.log('HIT: SRV_LOAN');
+  setLastService(from, 'LOAN');
+
 case 'SRV_LOAN':
   setLastService(from, 'LOAN');
   await waSendRaw({
