@@ -377,6 +377,20 @@ const crmIngestHandler = require('./routes/crm_ingest.cjs');
 const autoIngest = require('./routes/auto_ingest.cjs');
 
 
+// ================= GLOBAL LOAN KEYWORDS =================
+const LOAN_KEYWORDS = [
+  // English
+  'loan', 'emi', 'finance', 'financing', 'interest',
+
+  // Hinglish / Hindi
+  'loan chahiye', 'loan lena', 'loan lena hai',
+  'emi bata', 'emi batao', 'emi kitni', 'emi kitna',
+  'finance chahiye', 'car loan',
+
+  // Common variants
+  'installment', 'instalment'
+];
+
 // ---- Delivery status tracking (CRM + console) ----
 const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
 
@@ -1623,7 +1637,7 @@ async function buildUsedCarQuoteFreeText({ query }) {
   const loanAmt = Math.round(expected * (LTV_PCT / 100));
   const tenure  = 60;
 
-  const emiNormal = calcEmiSimple(loanAmt, USED_CAR_ROI_VISIBLE, tenure);
+  const emiNormal = calcEmiSimple(loanAmt, USED_CAR_ROI_INTERNAL, tenure);
 const bulletSim = simulateBulletPlan({
   amount: loanAmt,                 // ✔ loan amount
   rate:  USED_CAR_ROI_INTERNAL,    // ✔ your internal ROI (10%)
@@ -3612,6 +3626,48 @@ if (value.statuses && !value.messages) {
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
     }
+// ================= GLOBAL LOAN INTENT INTERCEPTOR =================
+
+// Check last service to avoid hijacking active loan flows
+const lastSvc = getLastService(from);
+const inLoanFlow = ['LOAN', 'LOAN_NEW', 'LOAN_USED'].includes(lastSvc);
+
+// Avoid intercepting numeric EMI inputs
+const looksLikeEmiInput =
+  /\d/.test(msgText || '') &&
+  /(year|years|yr|yrs|month|months|lakh|lac|₹|rs)/i.test(msgText || '');
+
+if (!selectedId && msgText && !inLoanFlow && !looksLikeEmiInput) {
+  const normText = msgText.toLowerCase();
+
+  const isLoanIntent = LOAN_KEYWORDS.some(k => normText.includes(k));
+
+  if (isLoanIntent) {
+    console.log('GLOBAL LOAN INTENT HIT:', msgText);
+
+    setLastService(from, 'LOAN');
+
+    await waSendRaw({
+      messaging_product: 'whatsapp',
+      to: from,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: 'Loan & EMI options:' },
+        action: {
+          buttons: [
+            { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
+            { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
+            { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI' } }
+          ]
+        }
+      }
+    });
+
+    return res.sendStatus(200); // 🔒 stop further processing
+  }
+}
+
 // ================= PRIORITY INTERACTIVE HANDLING =================
 if (selectedId === 'SRV_LOAN') {
   console.log('PRIORITY HIT: SRV_LOAN');
