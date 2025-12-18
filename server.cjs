@@ -3612,6 +3612,31 @@ if (value.statuses && !value.messages) {
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
     }
+// ================= PRIORITY INTERACTIVE HANDLING =================
+if (selectedId === 'SRV_LOAN') {
+  console.log('PRIORITY HIT: SRV_LOAN');
+
+  setLastService(from, 'LOAN');
+
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: 'Choose loan option:' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI' } }
+        ]
+      }
+    }
+  });
+
+  return res.sendStatus(200); // 🔒 stop before intent engine
+}
     // ------------------------------------------------------------------
     // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
     // ------------------------------------------------------------------
