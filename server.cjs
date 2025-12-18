@@ -2310,21 +2310,27 @@ if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t))
   return true;
 }
 
-  // ------------------------------
-// 6️⃣ FINANCE / EMI MODE (TEXT ONLY FALLBACK)
+  const lastSvc = (getLastService(to) || '').toLowerCase();
+
+// ------------------------------
+// 6️⃣ FINANCE / EMI MODE (CONTEXT-AWARE)
 // ------------------------------
 if (
   /emi|finance|loan|0 down|zero down/.test(t) &&
   !hasPricingIntent &&
-  !wantsAllStates
+  !wantsAllStates &&
+  lastSvc.includes('loan')   // 🔒 KEY LINE
 ) {
   await waSendText(
     to,
-    'To calculate your *EMI*, please tell me:\n' +
-    '• Car model (e.g., *Fortuner ZX*, *Creta SX*, *City VX*)\n' +
-    '• City\n' +
-    '• Individual or Corporate profile\n\n' +
-    'I’ll share the approx 60-month EMI and typical down payment.'
+    'To calculate your *EMI*, please share:\n' +
+    '• Loan amount\n' +
+    '• Tenure (up to 7 years)\n\n' +
+    'Examples:\n' +
+    '• `10 lakh 5 years`\n' +
+    '• `₹12,00,000 60`\n' +
+    '• `1200000 5`\n\n' +
+    '_Interest rate will be applied automatically._'
   );
   return true;
 }
