@@ -3838,7 +3838,8 @@ case 'BTN_USED_MORE':
           );
           break;
 
-       case 'SRV_LOAN':
+  // ================= LOAN ROOT =================
+case 'SRV_LOAN':
   setLastService(from, 'LOAN');
   await waSendRaw({
     messaging_product: 'whatsapp',
@@ -3846,110 +3847,120 @@ case 'BTN_USED_MORE':
     type: 'interactive',
     interactive: {
       type: 'button',
-      body: { text: 'Choose loan type:' },
+      body: { text: 'Choose loan option:' },
       action: {
         buttons: [
           { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
           { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI Calc' } }
+          { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI' } }
         ]
       }
     }
   });
   break;
 
-        case 'BTN_LOAN_EMI':
-          await waSendText(
-            from,
-            'For EMI calculation, reply like:\n`emi 1500000 9.5 60`\n\nFormat: `emi <loan amount> <rate% optional> <months>`'
-          );
-          break;
-
-        case 'BTN_LOAN_DOCS':
-          await waSendText(
-            from,
-            'Basic loan documents:\n• PAN, Aadhaar\n• 3–6 months bank statement\n• Salary slips / ITRs\n• Address proof\n\nShare your *city + profile (salaried/self-employed)* for a precise list.'
-          );
-          break;
-
-        case 'BTN_LOAN_ELIGIBILITY':
-          await waSendText(
-            from,
-            'For eligibility, please share:\n• City\n• Salaried / Self-employed\n• Monthly income\n• Existing EMIs (if any)\n\nExample: `Delhi salaried 1.2L income 15k existing EMI`'
-          );
-          break;
-
-       case 'BTN_LOAN_NEW':
-  setLastService(from, 'LOAN_NEW');
+// ================= NEW CAR LOAN (LOCK @ 8.1%) =================
+case 'BTN_LOAN_NEW':
+  setLastService(from, 'LOAN_NEW'); // 🔒 lock
   await waSendRaw({
     messaging_product: 'whatsapp',
     to: from,
     type: 'interactive',
     interactive: {
       type: 'button',
-      body: { text: 'New Car Loan @ 8.1% ROI\nChoose EMI type:' },
+      body: { text: 'New Car Loan @ 8.1%\nChoose option:' },
       action: {
         buttons: [
           { type: 'reply', reply: { id: 'BTN_NEW_EMI_NORMAL', title: 'Normal EMI' } },
-          { type: 'reply', reply: { id: 'BTN_NEW_EMI_BULLET', title: 'Bullet EMI' } }
+          { type: 'reply', reply: { id: 'BTN_NEW_EMI_BULLET', title: 'Bullet EMI' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: 'Loan Documents' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_ELIGIBILITY', title: 'Eligibility' } }
         ]
       }
     }
   });
   break;
+
 case 'BTN_NEW_EMI_NORMAL':
   await waSendText(
     from,
     'New Car *Normal EMI* @ 8.1%\n\n' +
-    'Reply like:\n' +
-    '`emi 1500000 60`\n\n' +
-    'Format:\n`emi <loan amount> <months>`'
+    'Reply:\n`emi 1500000 60`\n\n' +
+    '_Format: emi <amount> <months>_'
   );
   break;
+
 case 'BTN_NEW_EMI_BULLET':
   await waSendText(
     from,
     'New Car *Bullet EMI* @ 8.1%\n\n' +
-    'Reply like:\n' +
-    '`bullet 1500000 36`\n\n' +
-    'Interest paid monthly, principal at end.'
+    'Reply:\n`bullet 1500000 36`\n\n' +
+    '_Interest monthly, principal at end_'
   );
   break;
+
+// ================= USED CAR LOAN (LOCK @ 10%) =================
 case 'BTN_LOAN_USED':
-  setLastService(from, 'LOAN_USED');
+  setLastService(from, 'LOAN_USED'); // 🔒 lock
   await waSendRaw({
     messaging_product: 'whatsapp',
     to: from,
     type: 'interactive',
     interactive: {
       type: 'button',
-      body: { text: 'Used Car Loan @ 10% ROI\nChoose EMI type:' },
+      body: { text: 'Used Car Loan @ 10%\nChoose option:' },
       action: {
         buttons: [
           { type: 'reply', reply: { id: 'BTN_USED_EMI_NORMAL', title: 'Normal EMI' } },
-          { type: 'reply', reply: { id: 'BTN_USED_EMI_BULLET', title: 'Bullet EMI' } }
+          { type: 'reply', reply: { id: 'BTN_USED_EMI_BULLET', title: 'Bullet EMI' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: 'Loan Documents' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_ELIGIBILITY', title: 'Eligibility' } }
         ]
       }
     }
   });
   break;
+
 case 'BTN_USED_EMI_NORMAL':
   await waSendText(
     from,
     'Used Car *Normal EMI* @ 10%\n\n' +
-    'Reply like:\n' +
-    '`emi 600000 48`\n\n' +
-    'Format:\n`emi <loan amount> <months>`'
+    'Reply:\n`emi 600000 48`\n\n' +
+    '_Format: emi <amount> <months>_'
   );
   break;
+
 case 'BTN_USED_EMI_BULLET':
   await waSendText(
     from,
     'Used Car *Bullet EMI* @ 10%\n\n' +
-    'Reply like:\n' +
-    '`bullet 600000 24`'
+    'Reply:\n`bullet 600000 24`'
   );
   break;
+
+// ================= COMMON LOAN HELP =================
+case 'BTN_LOAN_DOCS':
+  await waSendText(
+    from,
+    'Basic loan documents:\n' +
+    '• PAN, Aadhaar\n' +
+    '• 3–6 months bank statement\n' +
+    '• Salary slips / ITRs\n' +
+    '• Address proof\n\n' +
+    'Share *city + profile (salaried/self-employed)* for exact list.'
+  );
+  break;
+
+case 'BTN_LOAN_ELIGIBILITY':
+  await waSendText(
+    from,
+    'For eligibility, share:\n' +
+    '• City\n• Salaried / Self-employed\n• Monthly income\n• Existing EMIs\n\n' +
+    'Example:\n`Delhi salaried 1.2L income 15k EMI`'
+  );
+  break;
+
+// ================= MANUAL EMI =================
 case 'BTN_LOAN_CUSTOM':
   await waSendText(
     from,
@@ -3959,12 +3970,6 @@ case 'BTN_LOAN_CUSTOM':
     'Bullet EMI:\n`bullet <amount> <rate%> <months>`'
   );
   break;
-        case 'BTN_CONTACT_SALES':
-          await waSendText(
-            from,
-            'Our sales team will contact you shortly. Share your preferred time and contact details.'
-          );
-          break;
 
         case 'BTN_BOOK_TEST':
           await waSendText(
