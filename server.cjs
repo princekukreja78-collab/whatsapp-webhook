@@ -3837,7 +3837,6 @@ case 'BTN_USED_MORE':
             'Please share *car make/model, year, km, city* and a few photos. We’ll get you the best quote.'
           );
           break;
-
   
 case 'SRV_LOAN':
   console.log('HIT: SRV_LOAN');
@@ -3858,7 +3857,7 @@ case 'SRV_LOAN':
       }
     }
   });
-  break;
+  return res.sendStatus(200); // ⬅ THIS LINE IS THE FIX
 
 // ================= NEW CAR LOAN (LOCK @ 8.1%) =================
 case 'BTN_LOAN_NEW':
