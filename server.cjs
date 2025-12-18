@@ -3838,11 +3838,9 @@ case 'BTN_USED_MORE':
           );
           break;
 
-  case 'SRV_LOAN':
-  console.log('HIT: SRV_LOAN');
-  setLastService(from, 'LOAN');
-
+  
 case 'SRV_LOAN':
+  console.log('HIT: SRV_LOAN');
   setLastService(from, 'LOAN');
   await waSendRaw({
     messaging_product: 'whatsapp',
@@ -3876,8 +3874,7 @@ case 'BTN_LOAN_NEW':
         buttons: [
           { type: 'reply', reply: { id: 'BTN_NEW_EMI_NORMAL', title: 'Normal EMI' } },
           { type: 'reply', reply: { id: 'BTN_NEW_EMI_BULLET', title: 'Bullet EMI' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: 'Loan Documents' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_ELIGIBILITY', title: 'Eligibility' } }
+          { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: 'Loan Documents' } }, 
         ]
       }
     }
