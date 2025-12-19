@@ -3852,51 +3852,105 @@ if (selectedId === 'BTN_LOAN_CUSTOM') {
 // ================= END LOAN TYPE HANDLING =================
 
 // ================= LOAN EMI FREE-TEXT HANDLER (SAFE) =================
+const svc = (lastSvc || '').toUpperCase();
+
+// ================= MANUAL EMI (NORMAL / BULLET) =================
 if (
-  (lastSvc || '').toUpperCase().startsWith('LOAN') &&
+  (svc === 'LOAN_MANUAL_NORMAL' || svc === 'LOAN_MANUAL_BULLET') &&
+  msgText &&
+  /\d/.test(msgText)
+) {
+  let amt = null;
+  let months = null;
+  let roi = null;
+
+  // amount
+  const lakhMatch = msgText.match(/(\d+(?:\.\d+)?)\s*(lakh|lac)/i);
+  if (lakhMatch) amt = Number(lakhMatch[1]) * 100000;
+  else {
+    const numMatch = msgText.replace(/[,₹]/g, '').match(/\b\d{5,}\b/);
+    if (numMatch) amt = Number(numMatch[0]);
+  }
+
+  // tenure
+  const yearMatch = msgText.match(/(\d+)\s*(year|yr)/i);
+  const monthMatch = msgText.match(/(\d+)\s*(month)/i);
+  if (yearMatch) months = Number(yearMatch[1]) * 12;
+  else if (monthMatch) months = Number(monthMatch[1]);
+
+  // ROI (mandatory)
+  const roiMatch = msgText.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (roiMatch) roi = Number(roiMatch[1]);
+
+  if (!amt || !months || !roi) {
+    await waSendText(
+      from,
+      'Please share *Loan Amount + Tenure + ROI*.\nExample:\n`10 lakh 5 years 9%`'
+    );
+    setLastService(from, lastSvc);
+    return res.sendStatus(200);
+  }
+
+  let emi = 0;
+  let title = '';
+
+  if (svc === 'LOAN_MANUAL_BULLET') {
+    emi = calcBulletEmi(amt, roi, months);
+    title = '🎯 Bullet EMI';
+  } else {
+    emi = calcEmiSimple(amt, roi, months);
+    title = '📘 Normal EMI';
+  }
+
+  await waSendText(
+    from,
+    `${title}\n\n` +
+    `Loan Amount: ₹ *${fmtMoney(amt)}*\n` +
+    `Tenure: *${months} months*\n` +
+    `ROI: *${roi}%*\n\n` +
+    `👉 EMI: ₹ *${fmtMoney(emi)}*`
+  );
+
+  setLastService(from, lastSvc);
+  return res.sendStatus(200);
+}
+// ================= END MANUAL EMI =================
+// ================= AUTO LOAN EMI (NEW / USED) =================
+if (
+  (svc === 'LOAN_NEW' || svc === 'LOAN_USED') &&
   msgText &&
   /\d/.test(msgText)
 ) {
   let amt = null;
   let months = null;
 
-  // ---- amount ----
+  // amount
   const lakhMatch = msgText.match(/(\d+(?:\.\d+)?)\s*(lakh|lac)/i);
-  if (lakhMatch) {
-    amt = Number(lakhMatch[1]) * 100000;
-  } else {
+  if (lakhMatch) amt = Number(lakhMatch[1]) * 100000;
+  else {
     const numMatch = msgText.replace(/[,₹]/g, '').match(/\b\d{5,}\b/);
     if (numMatch) amt = Number(numMatch[0]);
   }
 
-  // ---- tenure ----
+  // tenure
   const yearMatch = msgText.match(/(\d+)\s*(year|yr)/i);
   const monthMatch = msgText.match(/(\d+)\s*(month)/i);
-
   if (yearMatch) months = Number(yearMatch[1]) * 12;
   else if (monthMatch) months = Number(monthMatch[1]);
-  else {
-    const raw = msgText.match(/\b(\d{1,2})\b/);
-    if (raw) months = Number(raw[1]) <= 7
-      ? Number(raw[1]) * 12
-      : Number(raw[1]);
-  }
 
   if (!amt || !months) {
     await waSendText(
       from,
       'Please share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
     );
-    // keep user inside loan flow
     setLastService(from, lastSvc);
     return res.sendStatus(200);
   }
 
-  months = Math.min(months, 84);
-
-  const rate = (lastSvc || '').toUpperCase().includes('USED')
-    ? USED_CAR_ROI_INTERNAL
-    : NEW_CAR_ROI;
+  const rate =
+    svc === 'LOAN_USED'
+      ? USED_CAR_ROI_INTERNAL
+      : NEW_CAR_ROI;
 
   const emi = calcEmiSimple(amt, rate, months);
 
@@ -3906,14 +3960,14 @@ if (
     `Loan Amount: ₹ *${fmtMoney(amt)}*\n` +
     `Tenure: *${months} months*\n` +
     `ROI: *${rate}%*\n\n` +
-    `👉 Approx EMI: ₹ *${fmtMoney(emi)}*`
+    `👉 EMI: ₹ *${fmtMoney(emi)}*`
   );
 
-  // ✅ CRITICAL: allow repeated EMI calculations
   setLastService(from, lastSvc);
-
   return res.sendStatus(200);
 }
+// ================= END AUTO EMI =================
+
 // ================= END LOAN EMI HANDLER =================
 
     // ------------------------------------------------------------------
