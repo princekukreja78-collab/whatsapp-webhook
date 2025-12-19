@@ -2377,6 +2377,7 @@ async function tryQuickNewCarQuote(msgText, to) {
   try {
 console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
     if (!msgText || !msgText.trim()) return false;
+const lastSvc = (getLastService(to) || '').toLowerCase();
 
     // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
    
