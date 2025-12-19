@@ -3747,6 +3747,40 @@ if (selectedId === 'SRV_LOAN') {
 
   return res.sendStatus(200); // 🔒 stop before intent engine
 }
+// ================= LOAN TYPE BUTTON HANDLING =================
+if (selectedId === 'BTN_LOAN_NEW') {
+  setLastService(from, 'LOAN_NEW');
+
+  await waSendText(
+    from,
+    '🆕 *New Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
+  );
+
+  return res.sendStatus(200);
+}
+
+if (selectedId === 'BTN_LOAN_USED') {
+  setLastService(from, 'LOAN_USED');
+
+  await waSendText(
+    from,
+    '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`'
+  );
+
+  return res.sendStatus(200);
+}
+
+if (selectedId === 'BTN_LOAN_CUSTOM') {
+  setLastService(from, 'LOAN');
+
+  await waSendText(
+    from,
+    '📊 *Manual EMI*\n\nPlease share *loan amount + tenure*.\nExample:\n`7 lakh 60 months`'
+  );
+
+  return res.sendStatus(200);
+}
+// ================= END LOAN TYPE HANDLING =================
 
 // ================= LOAN EMI FREE-TEXT HANDLER (SAFE) =================
 if (
@@ -3774,7 +3808,9 @@ if (
   else if (monthMatch) months = Number(monthMatch[1]);
   else {
     const raw = msgText.match(/\b(\d{1,2})\b/);
-    if (raw) months = Number(raw[1]) <= 7 ? Number(raw[1]) * 12 : Number(raw[1]);
+    if (raw) months = Number(raw[1]) <= 7
+      ? Number(raw[1]) * 12
+      : Number(raw[1]);
   }
 
   if (!amt || !months) {
@@ -3782,6 +3818,8 @@ if (
       from,
       'Please share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
     );
+    // keep user inside loan flow
+    setLastService(from, lastSvc);
     return res.sendStatus(200);
   }
 
@@ -3801,6 +3839,9 @@ if (
     `ROI: *${rate}%*\n\n` +
     `👉 Approx EMI: ₹ *${fmtMoney(emi)}*`
   );
+
+  // ✅ CRITICAL: allow repeated EMI calculations
+  setLastService(from, lastSvc);
 
   return res.sendStatus(200);
 }
