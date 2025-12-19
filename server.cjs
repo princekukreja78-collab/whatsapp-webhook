@@ -3771,6 +3771,75 @@ if (selectedId === 'BTN_LOAN_USED') {
 }
 
 if (selectedId === 'BTN_LOAN_CUSTOM') {
+  setLastService(from, 'LOAN_MANUAL');
+
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: '📊 Choose EMI type:' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_EMI_NORMAL', title: 'Normal EMI' } },
+          { type: 'reply', reply: { id: 'BTN_EMI_BULLET', title: 'Bullet EMI' } }
+        ]
+      }
+    }
+  });
+
+  return res.sendStatus(200);
+}
+// ================= END LOAN TYPE HANDLING =================
+// ================= MANUAL EMI MODE HANDLING =================
+if (selectedId === 'BTN_EMI_NORMAL') {
+  setLastService(from, 'LOAN_MANUAL_NORMAL');
+
+  await waSendText(
+    from,
+    '📘 *Normal EMI*\n\nPlease share:\n*Loan Amount + Tenure + ROI*\n\nExample:\n`10 lakh 5 years 9%`'
+  );
+
+  return res.sendStatus(200);
+}
+
+if (selectedId === 'BTN_EMI_BULLET') {
+  setLastService(from, 'LOAN_MANUAL_BULLET');
+
+  await waSendText(
+    from,
+    '🎯 *Bullet EMI*\n\nPlease share:\n*Loan Amount + Tenure + ROI*\n\nExample:\n`10 lakh 3 years 10%`'
+  );
+
+  return res.sendStatus(200);
+}
+// ================= END MANUAL EMI MODE HANDLING =================
+
+// ================= LOAN TYPE BUTTON HANDLING =================
+if (selectedId === 'BTN_LOAN_NEW') {
+  setLastService(from, 'LOAN_NEW');
+
+  await waSendText(
+    from,
+    '🆕 *New Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
+  );
+
+  return res.sendStatus(200);
+}
+
+if (selectedId === 'BTN_LOAN_USED') {
+  setLastService(from, 'LOAN_USED');
+
+  await waSendText(
+    from,
+    '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`'
+  );
+
+  return res.sendStatus(200);
+}
+
+if (selectedId === 'BTN_LOAN_CUSTOM') {
   setLastService(from, 'LOAN');
 
   await waSendText(
