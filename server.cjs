@@ -3747,6 +3747,65 @@ if (selectedId === 'SRV_LOAN') {
 
   return res.sendStatus(200); // 🔒 stop before intent engine
 }
+
+// ================= LOAN EMI FREE-TEXT HANDLER (SAFE) =================
+if (
+  (lastSvc || '').toUpperCase().startsWith('LOAN') &&
+  msgText &&
+  /\d/.test(msgText)
+) {
+  let amt = null;
+  let months = null;
+
+  // ---- amount ----
+  const lakhMatch = msgText.match(/(\d+(?:\.\d+)?)\s*(lakh|lac)/i);
+  if (lakhMatch) {
+    amt = Number(lakhMatch[1]) * 100000;
+  } else {
+    const numMatch = msgText.replace(/[,₹]/g, '').match(/\b\d{5,}\b/);
+    if (numMatch) amt = Number(numMatch[0]);
+  }
+
+  // ---- tenure ----
+  const yearMatch = msgText.match(/(\d+)\s*(year|yr)/i);
+  const monthMatch = msgText.match(/(\d+)\s*(month)/i);
+
+  if (yearMatch) months = Number(yearMatch[1]) * 12;
+  else if (monthMatch) months = Number(monthMatch[1]);
+  else {
+    const raw = msgText.match(/\b(\d{1,2})\b/);
+    if (raw) months = Number(raw[1]) <= 7 ? Number(raw[1]) * 12 : Number(raw[1]);
+  }
+
+  if (!amt || !months) {
+    await waSendText(
+      from,
+      'Please share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
+    );
+    return res.sendStatus(200);
+  }
+
+  months = Math.min(months, 84);
+
+  const rate = (lastSvc || '').toUpperCase().includes('USED')
+    ? USED_CAR_ROI_INTERNAL
+    : NEW_CAR_ROI;
+
+  const emi = calcEmiSimple(amt, rate, months);
+
+  await waSendText(
+    from,
+    `💰 *Loan EMI*\n\n` +
+    `Loan Amount: ₹ *${fmtMoney(amt)}*\n` +
+    `Tenure: *${months} months*\n` +
+    `ROI: *${rate}%*\n\n` +
+    `👉 Approx EMI: ₹ *${fmtMoney(emi)}*`
+  );
+
+  return res.sendStatus(200);
+}
+// ================= END LOAN EMI HANDLER =================
+
     // ------------------------------------------------------------------
     // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
     // ------------------------------------------------------------------
