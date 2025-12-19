@@ -4019,6 +4019,31 @@ if (
 // ================= END AUTO EMI =================
 
 // ================= END LOAN EMI HANDLER =================
+// ================= USED CAR FLOW GUARD =================
+const svcCtx = (getLastService(from) || '').toUpperCase();
+
+if (svcCtx.includes('USED')) {
+  if (DEBUG) {
+    console.log('USED FLOW ACTIVE → skipping SMART NEW CAR INTENT', {
+      from,
+      svcCtx,
+      msgText
+    });
+  }
+
+  // If user typed a budget while in used-car flow, respond correctly
+  if (/\b\d/.test(msgText || '')) {
+    await waSendText(
+      from,
+      'You are browsing *Used Cars*.\n\nPlease share your *preferred model, year, or body type* along with your budget.\n\nExamples:\n`Used SUV under 12 lakh`\n`Audi A6 2018 under 30 lakh`'
+    );
+    return res.sendStatus(200);
+  }
+
+  // Otherwise, silently stop here
+  return res.sendStatus(200);
+}
+// ================= END USED CAR FLOW GUARD =================
 
     // ------------------------------------------------------------------
     // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
