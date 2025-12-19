@@ -4024,30 +4024,17 @@ const svcCtx = (getLastService(from) || '').toUpperCase();
 
 if (svcCtx.includes('USED')) {
   if (DEBUG) {
-    console.log('USED FLOW → routing to used-car budget/search logic', {
+    console.log('USED FLOW → allow used-car logic, block new-car intent', {
       from,
       msgText
     });
   }
 
-  // Let USED CAR logic handle budget / search
-  // DO NOT enter new-car smart intent
-  const handled = await tryUsedCarBudgetAndSearch(msgText, from);
-
-  if (handled) {
-    return res.sendStatus(200);
-  }
-
-  // Fallback if nothing matched
-  await waSendText(
-    from,
-    'Please share your *used car budget* and preference.\n\nExamples:\n`Used SUV under 10 lakh`\n`Audi A6 2018 under 30 lakh`'
-  );
-
-  return res.sendStatus(200);
+  // 🔒 Block STEP-2 (new-car smart intent) only
+  // ✅ Allow existing used-car handlers below to run
 }
 // ================= END USED CAR FLOW GUARD =================
-    // ------------------------------------------------------------------
+   // ------------------------------------------------------------------
     // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
     // ------------------------------------------------------------------
     try {
