@@ -3851,6 +3851,7 @@ if (selectedId === 'BTN_LOAN_CUSTOM') {
 }
 // ================= END LOAN TYPE HANDLING =================
 
+
 // ================= LOAN EMI FREE-TEXT HANDLER (SAFE) =================
 const svc = (lastSvc || '').toUpperCase();
 
@@ -3864,21 +3865,22 @@ if (
   let months = null;
   let roi = null;
 
-  // amount
+  // ---- amount ----
   const lakhMatch = msgText.match(/(\d+(?:\.\d+)?)\s*(lakh|lac)/i);
-  if (lakhMatch) amt = Number(lakhMatch[1]) * 100000;
-  else {
+  if (lakhMatch) {
+    amt = Number(lakhMatch[1]) * 100000;
+  } else {
     const numMatch = msgText.replace(/[,₹]/g, '').match(/\b\d{5,}\b/);
     if (numMatch) amt = Number(numMatch[0]);
   }
 
-  // tenure
+  // ---- tenure ----
   const yearMatch = msgText.match(/(\d+)\s*(year|yr)/i);
   const monthMatch = msgText.match(/(\d+)\s*(month)/i);
   if (yearMatch) months = Number(yearMatch[1]) * 12;
   else if (monthMatch) months = Number(monthMatch[1]);
 
-  // ROI (mandatory)
+  // ---- ROI (mandatory) ----
   const roiMatch = msgText.match(/(\d+(?:\.\d+)?)\s*%/);
   if (roiMatch) roi = Number(roiMatch[1]);
 
@@ -3891,20 +3893,62 @@ if (
     return res.sendStatus(200);
   }
 
-  let emi = 0;
-  let title = '';
+  months = Math.min(months, 84);
 
+  // ---------- MANUAL BULLET EMI (REUSE USED-CAR LOGIC) ----------
   if (svc === 'LOAN_MANUAL_BULLET') {
-    emi = calcBulletEmi(amt, roi, months);
-    title = '🎯 Bullet EMI';
-  } else {
-    emi = calcEmiSimple(amt, roi, months);
-    title = '📘 Normal EMI';
+    const bulletPct = 0.25;
+
+    const bulletSim = simulateBulletEmi(amt, roi, months, bulletPct);
+
+    const bulletEmi =
+      bulletSim?.monthly_emi ||
+      bulletSim?.monthlyEmi ||
+      bulletSim?.emi ||
+      null;
+
+    const bulletAmt =
+      bulletSim?.bullet_amount ||
+      bulletSim?.bulletAmount ||
+      Math.round(amt * bulletPct);
+
+    if (!bulletEmi) {
+      await waSendText(
+        from,
+        'Unable to calculate Bullet EMI. Please try again.'
+      );
+      setLastService(from, lastSvc);
+      return res.sendStatus(200);
+    }
+
+    const perBullet = Math.round(bulletAmt / 5);
+    const bulletSchedule = [12, 24, 36, 48, 60]
+      .map(m => `₹ ${fmtMoney(perBullet)} at month ${m}`)
+      .join('\n');
+
+    await waSendText(
+      from,
+      `🎯 *Bullet EMI (25%)*\n\n` +
+      `Loan Amount: ₹ *${fmtMoney(amt)}*\n` +
+      `Tenure: *${months} months*\n` +
+      `ROI: *${roi}%*\n\n` +
+      `Monthly EMI (approx): ₹ *${fmtMoney(bulletEmi)}*\n` +
+      `Bullet total (25% of loan): ₹ *${fmtMoney(bulletAmt)}*\n\n` +
+      `Bullets:\n${bulletSchedule}\n\n` +
+      `✅ Loan approval possible in ~30 minutes (T&Cs apply)\n\n` +
+      `Terms & Conditions Apply ✅`
+    );
+
+    setLastService(from, lastSvc);
+    return res.sendStatus(200);
   }
+
+  // ---------- MANUAL NORMAL EMI ----------
+  const emi = calcEmiSimple(amt, roi, months);
 
   await waSendText(
     from,
-    `${title}\n\n` +
+    `📘 *Normal EMI*\n\n` +
     `Loan Amount: ₹ *${fmtMoney(amt)}*\n` +
     `Tenure: *${months} months*\n` +
     `ROI: *${roi}%*\n\n` +
