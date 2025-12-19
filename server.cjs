@@ -3906,8 +3906,17 @@ if (svc === 'LOAN_MANUAL_BULLET') {
     bulletPct
   });
 
-  const bulletEmi = bulletSim?.monthlyEmi;
-  const bulletAmt = bulletSim?.bulletAmount;
+  const bulletEmi =
+  bulletSim?.monthly_emi ||
+  bulletSim?.monthlyEmi ||
+  bulletSim?.emi ||
+  null;
+
+const bulletAmt =
+  bulletSim?.bullet_amount ||
+  bulletSim?.bulletAmount ||
+  Math.round(amt * bulletPct);
+
 
   if (!bulletEmi || !bulletAmt) {
     await waSendText(
