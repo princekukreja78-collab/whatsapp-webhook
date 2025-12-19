@@ -4034,6 +4034,31 @@ if (svcCtx.includes('USED')) {
   // ✅ Allow existing used-car handlers below to run
 }
 // ================= END USED CAR FLOW GUARD =================
+// ================= USED CAR BUDGET GUARD =================
+// Detect budget-style queries
+const looksLikeBudget =
+  /\b(under|below|upto|within|budget)\b/i.test(msgText || '') ||
+  /\b\d+\s*(lakh|lakhs|lac|lacs)\b/i.test(msgText || '');
+
+if (svcCtx.includes('USED') && looksLikeBudget) {
+  if (DEBUG) {
+    console.log('USED BUDGET → blocking new-car smart intent', {
+      from,
+      msgText
+    });
+  }
+
+  // If your earlier used-car budget block handled it, it would have replied already.
+  // So we only give a fallback here.
+  await waSendText(
+    from,
+    'You are browsing *Used Cars*.\n\nPlease share your *preferred model / year / body type* with your budget.\n\nExamples:\n`Used SUV under 10 lakh`\n`Audi A6 2018 under 30 lakh`'
+  );
+
+  return res.sendStatus(200); // 🔒 DO NOT enter STEP-2
+}
+// ================= END USED CAR BUDGET GUARD =================
+
    // ------------------------------------------------------------------
     // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
     // ------------------------------------------------------------------
