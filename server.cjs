@@ -2006,11 +2006,40 @@ async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
   const tRaw = String(msgText || "");
   const t = tRaw.toLowerCase().trim();
+
+// ================= LOAN CONTEXT HARD GUARD =================
+// If user is already in LOAN flow, NEVER enter pricing/budget logic
+const lastSvc = (getLastService(to) || '').toLowerCase();
+
+if (
+  lastSvc.includes('loan') &&
+  /emi|loan|finance|lakh|lac|₹|\d{5,}/i.test(t)
+) {
+  if (DEBUG) console.log('LOAN CONTEXT LOCK → bypass pricing/budget', { t, lastSvc });
+
+  await waSendText(
+    to,
+    '💰 *EMI Calculation*\n\n' +
+    'Please share:\n' +
+    '• *Loan amount*\n' +
+    '• *Tenure* (up to 7 years)\n\n' +
+    'Examples:\n' +
+    '• `10 lakh 5 years`\n' +
+    '• `₹12,00,000 60`\n' +
+    '• `1200000 5`\n\n' +
+    '_Interest rate will be applied automatically._'
+  );
+
+  return true; // ⛔ STOP everything else
+}
+// ============================================================
+
 // --------------------------------------------------
 // INTENT GUARDS — MUST BE DEFINED FIRST
 // --------------------------------------------------
 const hasPricingIntent =
-  /\b(price|prices|pricing|on[- ]?road|emi|loan|finance|quote|cost|deal|offer)\b/i.test(t);
+  !lastSvc.includes('loan') && // 🔒 KEY FIX
+  /\b(price|prices|pricing|on[- ]?road|quote|cost|deal|offer)\b/i.test(t);
 
 const wantsAllStates =
   /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
@@ -2317,8 +2346,6 @@ if (/which car should i buy|recommend.*car|suggest.*car|help me choose/.test(t))
   return true;
 }
 
-  const lastSvc = (getLastService(to) || '').toLowerCase();
-
 // ------------------------------
 // 6️⃣ FINANCE / EMI MODE (CONTEXT-AWARE)
 // ------------------------------
@@ -2352,7 +2379,7 @@ console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
     if (!msgText || !msgText.trim()) return false;
 
     // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
-    const lastSvc = (getLastService(to) || '').toLowerCase();
+   
     if (lastSvc.includes('loan')) {
       if (typeof DEBUG !== 'undefined' && DEBUG) {
         console.log('LOAN CONTEXT ACTIVE → skipping new-car quote engine:', msgText);
