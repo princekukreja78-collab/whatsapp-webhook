@@ -3895,53 +3895,50 @@ if (
 
   months = Math.min(months, 84);
 
-  // ---------- MANUAL BULLET EMI (REUSE USED-CAR LOGIC) ----------
-  if (svc === 'LOAN_MANUAL_BULLET') {
-    const bulletPct = 0.25;
+  // ---------- MANUAL BULLET EMI ----------
+if (svc === 'LOAN_MANUAL_BULLET') {
+  const bulletPct = 0.25;
 
-    const bulletSim = simulateBulletEmi(amt, roi, months, bulletPct);
+  const bulletSim = simulateBulletPlan({
+    amount: amt,
+    rate: roi,
+    months,
+    bulletPct
+  });
 
-    const bulletEmi =
-      bulletSim?.monthly_emi ||
-      bulletSim?.monthlyEmi ||
-      bulletSim?.emi ||
-      null;
+  const bulletEmi = bulletSim?.monthlyEmi;
+  const bulletAmt = bulletSim?.bulletAmount;
 
-    const bulletAmt =
-      bulletSim?.bullet_amount ||
-      bulletSim?.bulletAmount ||
-      Math.round(amt * bulletPct);
-
-    if (!bulletEmi) {
-      await waSendText(
-        from,
-        'Unable to calculate Bullet EMI. Please try again.'
-      );
-      setLastService(from, lastSvc);
-      return res.sendStatus(200);
-    }
-
-    const perBullet = Math.round(bulletAmt / 5);
-    const bulletSchedule = [12, 24, 36, 48, 60]
-      .map(m => `₹ ${fmtMoney(perBullet)} at month ${m}`)
-      .join('\n');
-
+  if (!bulletEmi || !bulletAmt) {
     await waSendText(
       from,
-      `🎯 *Bullet EMI (25%)*\n\n` +
-      `Loan Amount: ₹ *${fmtMoney(amt)}*\n` +
-      `Tenure: *${months} months*\n` +
-      `ROI: *${roi}%*\n\n` +
-      `Monthly EMI (approx): ₹ *${fmtMoney(bulletEmi)}*\n` +
-      `Bullet total (25% of loan): ₹ *${fmtMoney(bulletAmt)}*\n\n` +
-      `Bullets:\n${bulletSchedule}\n\n` +
-      `✅ Loan approval possible in ~30 minutes (T&Cs apply)\n\n` +
-      `Terms & Conditions Apply ✅`
+      'Unable to calculate Bullet EMI. Please try again.'
     );
-
     setLastService(from, lastSvc);
     return res.sendStatus(200);
   }
+
+  const perBullet = Math.round(bulletAmt / 5);
+  const bulletSchedule = [12, 24, 36, 48, 60]
+    .map(m => `₹ ${fmtMoney(perBullet)} at month ${m}`)
+    .join('\n');
+
+  await waSendText(
+    from,
+    `🎯 *Bullet EMI (25%)*\n\n` +
+    `Loan Amount: ₹ *${fmtMoney(amt)}*\n` +
+    `Tenure: *${months} months*\n` +
+    `ROI: *${roi}%*\n\n` +
+    `Monthly EMI (approx): ₹ *${fmtMoney(bulletEmi)}*\n` +
+    `Bullet total (25% of loan): ₹ *${fmtMoney(bulletAmt)}*\n\n` +
+    `Bullets:\n${bulletSchedule}\n\n` +
+    `✅ Loan approval possible in ~30 minutes (T&Cs apply)\n\n` +
+    `Terms & Conditions Apply ✅`
+  );
+
+  setLastService(from, lastSvc);
+  return res.sendStatus(200);
+}
 
   // ---------- MANUAL NORMAL EMI ----------
   const emi = calcEmiSimple(amt, roi, months);
