@@ -669,6 +669,13 @@ function getLastService(from) {
     return null;
   }
 }
+// ------------------------------
+// Loan context helper (GLOBAL)
+// ------------------------------
+function isLoanContext(from) {
+  const svc = (getLastService(from) || '').toLowerCase();
+  return svc.includes('loan');
+}
 
 // ---------------- Quote limits ----------------
 function loadQuoteLimits() {
