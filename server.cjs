@@ -218,17 +218,68 @@ function buildGlobalRegistryFromSheets(tables) {
     for (const row of tab.data) {
       if (!row || !row[idxModel]) continue;
 
-      const modelRaw  = String(row[idxModel]).trim();
-const modelNorm = normForMatch(modelRaw);
+     const modelRaw  = String(row[idxModel]).trim();
+let modelNorm = normForMatch(modelRaw);
+
+// Apply canonical alias if present
+if (MODEL_ALIAS_MAP[modelNorm]) {
+  modelNorm = MODEL_ALIAS_MAP[modelNorm];
+}
 
 if (!modelNorm) continue;
 
-// ---- BASE MODEL (SAFE ALIAS) ----
-// Example: "TAIGUN 1.0 TSI MT" → "taigun"
-const baseModel = modelNorm.split(' ')[0];
+// ============================================================================
+// MODEL ALIASES (SINGLE SOURCE OF TRUTH)
+// ============================================================================
+
+// Keys and values MUST be normalized using normForMatch
+const MODEL_ALIASES_RAW = {
+  'thar roxx':   ['tharroxx', 'thar roxx', 'roxx'],
+  'scorpio n':   ['scorpio n', 'scorpion'],
+  'scorpio classic': ['scorpio classic', 'classic scorpio'],
+  'xuv 700':     ['xuv700', 'xuv 700'],
+  'xuv 400':     ['xuv400', 'xuv 400', 'xuv 400 ev'],
+  'be 6':        ['be6', 'be 6e', 'be 6 ev'],
+  'bmw x7':      ['bmw x7', 'x7'],
+  'wagon r':     ['wagonr', 'wagon r'],
+  's presso':    ['spresso', 's presso'],
+  'clavis ev':   ['clavis ev', 'clavis electric']
+};
+
+// Normalized alias map → aliasNorm → canonicalModelNorm
+const MODEL_ALIAS_MAP = {};
+for (const [canon, aliases] of Object.entries(MODEL_ALIASES_RAW)) {
+  const canonNorm = normForMatch(canon);
+  MODEL_ALIAS_MAP[canonNorm] = canonNorm;
+
+  for (const a of aliases) {
+    MODEL_ALIAS_MAP[normForMatch(a)] = canonNorm;
+  }
+}
+
+// ---- BASE MODEL (CONTROLLED & SAFE) ----
+const parts = modelNorm.split(' ');
+let baseModel = null;
+
+// Allow single-token models (e.g. Thar, Fortuner)
+if (parts.length === 1) {
+  baseModel = parts[0];
+}
+
+// Allow numeric two-token models (XUV 700, XUV 400, BMW X7, BE 6)
+if (parts.length === 2 && /^\d+$/.test(parts[1])) {
+  baseModel = parts.join(' ');
+}
 
 GLOBAL_MODEL_SET.add(modelNorm);
 GLOBAL_MODEL_BRAND[modelNorm] = BRAND;
+
+if (baseModel && baseModel.length >= 3) {
+  GLOBAL_MODEL_SET.add(baseModel);
+  if (!GLOBAL_MODEL_BRAND[baseModel]) {
+    GLOBAL_MODEL_BRAND[baseModel] = BRAND;
+  }
+}
 
 // ---- REGISTER BASE MODEL (NON-AGGRESSIVE) ----
 if (baseModel && baseModel.length >= 3) {
@@ -2509,37 +2560,57 @@ const wantsAllStates =
     }
 
     // Preprocess input to remove city/profile tokens and normalize
-    let raw = t
-      .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/g, ' ')
-      .replace(/\b(individual|company|corporate|firm|personal)\b/g, ' ')
-      .replace(/\b(automatic transmission|automatic|auto)\b/g, ' at ')
-      .replace(/[^\w\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+let raw = t
+  .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/g, ' ')
+  .replace(/\b(individual|company|corporate|firm|personal)\b/g, ' ')
+  .replace(/\b(automatic transmission|automatic|auto)\b/g, ' at ')
+  .replace(/[^\w\s]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 
-    if (!raw) return false;
+if (!raw) return false;
 
-    let modelGuess = raw.split(' ').slice(0, 4).join(' ');
-    const userNorm = normForMatch(raw);
-    const tokens = userNorm.split(' ').filter(Boolean);
+// 1️⃣ Normalize user input
+let userNorm = normForMatch(raw);
 
-    const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
-    const isShortModelToken = modelTok && modelTok.length <= 4;
+// 2️⃣ Apply MODEL ALIASES (canonicalize ONCE)
+let canonicalUserNorm = userNorm;
+for (const [alias, canon] of Object.entries(MODEL_ALIAS_MAP)) {
+  if (canonicalUserNorm.includes(alias)) {
+    canonicalUserNorm = canonicalUserNorm.replace(alias, canon);
+  }
+}
 
-    const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 25);
-    const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
+// 3️⃣ Tokens derived ONLY from canonicalUserNorm
+const tokens = canonicalUserNorm.split(' ').filter(Boolean);
 
-    function _makeLoosePat(sfx) {
-      const parts = (sfx || '').toString().toLowerCase().split('');
-      const escaped = parts.map(ch => ch.replace(/[^a-z0-9]/g, '\\$&'));
-      return new RegExp('\\b' + escaped.join('[\\s\\W_]*') + '\\b', 'i');
-    }
+// 4️⃣ Model guess (used only for loose heuristics, not matching)
+let modelGuess = canonicalUserNorm.split(' ').slice(0, 4).join(' ');
 
-    const cityToken = city.split(' ')[0].toUpperCase();
+const modelTok = (modelGuess.split(' ')[0] || '').toLowerCase();
+const isShortModelToken = modelTok && modelTok.length <= 4;
 
-    // ----------------- PRECOMPUTE: coreTokens, exactModelHit -----------------
-    const genericWords = new Set(['car','cars','used','pre','preowned','pre-owned','second','secondhand','second-hand']);
-    const coreTokensArr = (userNorm || '').split(' ').filter(tk => tk && !genericWords.has(tk));
+const VARIANT_LIST_LIMIT = Number(process.env.VARIANT_LIST_LIMIT || 25);
+const SPECIAL_WORDS = ['LEADER', 'LEGENDER', 'GRS'];
+
+function _makeLoosePat(sfx) {
+  const parts = (sfx || '').toString().toLowerCase().split('');
+  const escaped = parts.map(ch => ch.replace(/[^a-z0-9]/g, '\\$&'));
+  return new RegExp('\\b' + escaped.join('[\\s\\W_]*') + '\\b', 'i');
+}
+
+const cityToken = city.split(' ')[0].toUpperCase();
+
+// ----------------- PRECOMPUTE: coreTokens -----------------
+const genericWords = new Set([
+  'car','cars','used','pre','preowned','pre-owned',
+  'second','secondhand','second-hand'
+]);
+
+const coreTokensArr = canonicalUserNorm
+  .split(' ')
+  .filter(tk => tk && !genericWords.has(tk));
+
 // Explicit variant intent: model + variant token present
 const userHasExplicitVariant =
   Array.isArray(coreTokensArr) && coreTokensArr.length >= 2;
@@ -3210,6 +3281,40 @@ const isSingleQuote =
   !explicitPanIndiaIntent &&
   !userBudget &&
   allMatches.length >= 1;
+// 2️⃣ VARIANT LIST (WHEN USER DID NOT SPECIFY VARIANT)
+if (
+  allMatches.length >= 2 &&
+  !userHasExplicitVariant &&
+  !userBudget &&
+  !wantsAllStates
+) {
+  const seen = new Set();
+  const variants = [];
+
+  for (const m of allMatches) {
+    const v = String(m.row[m.idxVariant] || '').trim();
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    variants.push(m);
+  }
+
+  if (variants.length >= 2) {
+    const out = [];
+    out.push(`*Available Variants — ${resolvedModel || 'Model'}*`);
+
+    variants.forEach((m, i) => {
+      const mdl = String(m.row[m.idxModel] || '').trim();
+      const varr = String(m.row[m.idxVariant] || '').trim();
+      out.push(`${i + 1}) *${mdl} ${varr}*`);
+    });
+
+    out.push('');
+    out.push('Reply with the *variant name* to get on-road price.');
+
+    await waSendText(to, out.join('\n'));
+    return true; // ⛔ STOP — do NOT fall into single-quote
+  }
+}
 
 // 3️⃣ SINGLE BEST QUOTE (PRIORITY)
 if (
@@ -3648,7 +3753,21 @@ if (value.statuses && !value.messages) {
 
     const msg     = value?.messages?.[0];
     const contact = value?.contacts?.[0];	
+// ------------------------------------------------------------------
+// MESSAGE DE-DUPLICATION LOCK (CRITICAL)
+// ------------------------------------------------------------------
+if (!global.__WA_MSG_LOCK__) global.__WA_MSG_LOCK__ = new Set();
 
+const dedupKey =
+  msg?.id ||
+  `${msg?.from || 'unknown'}_${msg?.timestamp || Date.now()}`;
+
+if (global.__WA_MSG_LOCK__.has(dedupKey)) {
+  if (DEBUG) console.log('Duplicate WA message ignored:', dedupKey);
+  return res.sendStatus(200);
+}
+
+global.__WA_MSG_LOCK__.add(dedupKey);
     const from = msg.from;
     const type = msg.type;
     const name = (contact?.profile?.name || 'Unknown').toString().toUpperCase();
