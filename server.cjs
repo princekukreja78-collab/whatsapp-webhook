@@ -2839,7 +2839,12 @@ if ((coreTokensArr && coreTokensArr.length === 1) || isShortModelToken) {
   ABS_MIN_SCORE = Math.min(8, ABS_MIN_SCORE); // allow down to 8 for short queries
 }
 
-if (score <= 0 || score < ABS_MIN_SCORE) continue;
+const variantRescue =
+  variantNorm &&
+  coreTokensArr.some(tk => variantNorm.includes(tk));
+
+if ((score <= 0 || score < ABS_MIN_SCORE) && !variantRescue) continue;
+
 // ---------- end ADAPTIVE MIN SCORE ----------
 
         // pick price column (globalPriceIdx) else fallback to first numeric
@@ -3049,7 +3054,13 @@ if (allMatches.length > 0) {
   const mdlNorm = String(normForMatch(mdlRaw)).toUpperCase();
 
   // Exact model match
-  if (mdlNorm === strictModel) return true;
+  if (
+  mdlNorm === strictModel ||
+  (m.idxVariant >= 0 &&
+   normForMatch(m.row[m.idxVariant]).toUpperCase().includes(strictModel))
+) {
+  return true;
+}
 
   // Allow sub-variants ONLY if strictModel itself contains that keyword
   // e.g. "FORTUNER LEGENDER" should not match "FORTUNER"
@@ -3246,9 +3257,16 @@ for (const m of allMatches) {
   const modelVal = m.idxModel >= 0 ? String(row[m.idxModel] || '').toUpperCase() : '';
   const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
 
-  // HARD BASE MODEL FILTER
-  const baseToken = coreTokensArr[0]?.toUpperCase();
-  if (baseToken && !modelVal.startsWith(baseToken)) continue;
+  // HARD BASE MODEL FILTER — SAFE (allow variant rescue)
+const baseToken = coreTokensArr[0]?.toUpperCase();
+
+if (
+  baseToken &&
+  !modelVal.startsWith(baseToken) &&
+  !(variantVal && variantVal.startsWith(baseToken))
+) {
+  continue;
+}
 
   const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
   if (!title || seenTitles.has(title)) continue;
