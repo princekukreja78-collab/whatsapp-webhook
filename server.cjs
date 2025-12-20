@@ -2209,6 +2209,14 @@ function resolveStateFromRow(row, idxMap) {
       return true;
     }
   }
+// 🔒 GUARD: Skip NEW-car budget when USED-car intent is active
+if (
+  lastSvc &&
+  typeof lastSvc === 'string' &&
+  lastSvc.includes('used')
+) {
+  // do nothing — let USED-car flow handle it
+} else {
 
   // ------------------------------
   // 2️⃣ BUDGET INTENT (SUV / Sedan / Hatch)
@@ -2358,6 +2366,7 @@ if (
     setLastService(to, "NEW");
     return true;
   }
+  } // 🔒 END of NEW-car budget guard
 // ------------------------------
 // 3️⃣ FEATURE EXPLANATION MODE (STRICT, SAFE)
 // Trigger ONLY when user intent is clearly educational
