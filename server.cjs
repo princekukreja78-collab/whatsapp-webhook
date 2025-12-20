@@ -228,35 +228,6 @@ if (MODEL_ALIAS_MAP[modelNorm]) {
 
 if (!modelNorm) continue;
 
-// ============================================================================
-// MODEL ALIASES (SINGLE SOURCE OF TRUTH)
-// ============================================================================
-
-// Keys and values MUST be normalized using normForMatch
-const MODEL_ALIASES_RAW = {
-  'thar roxx':   ['tharroxx', 'thar roxx', 'roxx'],
-  'scorpio n':   ['scorpio n', 'scorpion'],
-  'scorpio classic': ['scorpio classic', 'classic scorpio'],
-  'xuv 700':     ['xuv700', 'xuv 700'],
-  'xuv 400':     ['xuv400', 'xuv 400', 'xuv 400 ev'],
-  'be 6':        ['be6', 'be 6e', 'be 6 ev'],
-  'bmw x7':      ['bmw x7', 'x7'],
-  'wagon r':     ['wagonr', 'wagon r'],
-  's presso':    ['spresso', 's presso'],
-  'clavis ev':   ['clavis ev', 'clavis electric']
-};
-
-// Normalized alias map → aliasNorm → canonicalModelNorm
-const MODEL_ALIAS_MAP = {};
-for (const [canon, aliases] of Object.entries(MODEL_ALIASES_RAW)) {
-  const canonNorm = normForMatch(canon);
-  MODEL_ALIAS_MAP[canonNorm] = canonNorm;
-
-  for (const a of aliases) {
-    MODEL_ALIAS_MAP[normForMatch(a)] = canonNorm;
-  }
-}
-
 // ---- BASE MODEL (CONTROLLED & SAFE) ----
 const parts = modelNorm.split(' ');
 let baseModel = null;
@@ -266,7 +237,7 @@ if (parts.length === 1) {
   baseModel = parts[0];
 }
 
-// Allow numeric two-token models (XUV 700, XUV 400, BMW X7, BE 6)
+// Allow numeric two-token models (XUV 700, XUV 400, BMW X7, BMW X5, BE 6)
 if (parts.length === 2 && /^\d+$/.test(parts[1])) {
   baseModel = parts.join(' ');
 }
@@ -1122,6 +1093,36 @@ function normForMatch(s) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// ============================================================================
+// MODEL ALIASES (SINGLE SOURCE OF TRUTH)
+// MUST BE DEFINED BEFORE ANY USAGE
+// ============================================================================
+
+const MODEL_ALIASES_RAW = {
+  'thar roxx':   ['tharroxx', 'thar roxx', 'roxx'],
+  'scorpio n':   ['scorpio n', 'scorpion'],
+  'scorpio classic': ['scorpio classic', 'classic scorpio'],
+  'xuv 700':     ['xuv700', 'xuv 700'],
+  'xuv 400':     ['xuv400', 'xuv 400', 'xuv 400 ev'],
+  'be 6':        ['be6', 'be 6e', 'be 6 ev'],
+  'bmw x5':      ['bmw x5', 'x5'],
+  'bmw x7':      ['bmw x7', 'x7'],
+  'wagon r':     ['wagonr', 'wagon r'],
+  's presso':    ['spresso', 's presso'],
+  'clavis ev':   ['clavis ev', 'clavis electric']
+};
+
+// aliasNorm → canonicalNorm
+const MODEL_ALIAS_MAP = {};
+for (const [canon, aliases] of Object.entries(MODEL_ALIASES_RAW)) {
+  const canonNorm = normForMatch(canon);
+  MODEL_ALIAS_MAP[canonNorm] = canonNorm;
+
+  for (const a of aliases) {
+    MODEL_ALIAS_MAP[normForMatch(a)] = canonNorm;
+  }
 }
 
 function fmtMoney(n) {
