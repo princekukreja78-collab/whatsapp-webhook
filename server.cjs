@@ -2101,6 +2101,10 @@ const hasComparisonIntent =
 
 const wantsSpecs =
   /\b(spec|specs|specification|specifications|feature|features)\b/i.test(t);
+
+const wantsModelList =
+  /\b(models?|variants?|available cars?|car list|show models|what cars|portfolio|lineup)\b/i.test(t);
+
 // --------------------------------------------------
 // SEGMENT INTENT FLAGS (REQUIRED FOR BUDGET ENGINE)
 // --------------------------------------------------
@@ -2909,11 +2913,59 @@ if ((score <= 0 || score < ABS_MIN_SCORE) && !variantRescue) continue;
       }
     }
 
-    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
+   // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
 if (!allMatches.length) {
-  if (typeof DEBUG !== 'undefined' && DEBUG) {
-    console.log("No matches after filtering. userBudget=", userBudget);
+
+  // 🔁 MODEL LIST FALLBACK (LAST RESORT)
+  if (
+    wantsModelList &&
+    !hasPricingIntent &&
+    !hasComparisonIntent &&
+    !wantsSpecs
+  ) {
+    try {
+      const modelSet = new Set();
+
+      for (const [brand, tab] of Object.entries(tables || {})) {
+        if (!tab || !tab.data || !tab.header) continue;
+
+        if (allowedBrandSet && !allowedBrandSet.has(brand)) continue;
+
+        const header = tab.header.map(h => String(h || '').toUpperCase());
+        const idxModel = header.findIndex(h => h.includes('MODEL'));
+
+        if (idxModel < 0) continue;
+
+        for (const row of tab.data) {
+          if (row[idxModel]) {
+            modelSet.add(String(row[idxModel]).trim());
+          }
+        }
+      }
+
+      if (modelSet.size) {
+        const models = Array.from(modelSet).sort().slice(0, 30);
+        const out = [];
+
+        out.push(
+          allowedBrandSet
+            ? `*Available Models*`
+            : `*Available Car Models*`
+        );
+        out.push('');
+        models.forEach(m => out.push(`• ${m}`));
+        out.push('');
+        out.push('Reply with the *model name* to see variants, prices & offers.');
+
+        await waSendText(to, out.join('\n'));
+        return true;
+      }
+    } catch (e) {
+      if (DEBUG) console.warn('Model list fallback failed:', e?.message);
+    }
   }
+
+  // ❌ fallback only if model list not requested
   await waSendText(
     to,
     "I couldn’t find an exact match for that query.\n" +
@@ -3308,7 +3360,7 @@ console.log('DEBUG_FLOW: BEFORE SINGLE QUOTE', {
 const isSingleQuote =
   !explicitPanIndiaIntent &&
   !userBudget &&
-  allMatches.length >= 1;
+  allMatches.length === 1;
 // 2️⃣ VARIANT LIST (WHEN USER DID NOT SPECIFY VARIANT)
 if (
   allMatches.length >= 2 &&
