@@ -3583,20 +3583,17 @@ if (isSingleQuote && loanAmt > 0) {
   lines.push(`Tenure: 60 months @ ${roi}% p.a.`);
   lines.push(`Approx EMI: ₹ *${fmtMoney(emi60)}*`);
 
-  // OPTION 2 — BULLET EMI (25%)
+ // OPTION 2 — BULLET EMI (25%)  ✅ BANK-APPROVED LOGIC
 try {
   const bulletPct = 0.25;
 
+  // 🔁 EXACT SAME ENGINE AS MANUAL BULLET EMI
   const bulletSim = simulateBulletPlan({
     amount: loanAmt,
     rate: roi,
     months: 60,
     bulletPct
   });
-
-  if (DEBUG) {
-    console.log('DEBUG_BULLET_NEW_CAR:', bulletSim);
-  }
 
   const bulletEmi =
     bulletSim?.monthly_emi ||
@@ -3609,16 +3606,34 @@ try {
     bulletSim?.bulletAmount ||
     Math.round(loanAmt * bulletPct);
 
-  if (bulletEmi && bulletAmt) {
+  if (!bulletEmi || !bulletAmt) {
+    if (DEBUG) console.warn('NEW CAR BULLET EMI FAILED');
+  } else {
+    const perBullet = Math.round(bulletAmt / 5);
+    const bulletSchedule = [12, 24, 36, 48, 60]
+      .map(m => `₹ ${fmtMoney(perBullet)} at month ${m}`)
+      .join('\n');
+
+    if (DEBUG) {
+      console.log('DEBUG_BULLET_NEW_CAR_BANK_ALIGNED:', {
+        loanAmt,
+        roi,
+        bulletEmi,
+        bulletAmt
+      });
+    }
+
     lines.push('');
     lines.push('*OPTION 2 – BULLET EMI (25%)*');
-    lines.push(`Monthly EMI: ₹ *${fmtMoney(bulletEmi)}*`);
-    lines.push(`Bullet Payment at end: ₹ ${fmtMoney(bulletAmt)}`);
+    lines.push(`Monthly EMI (approx): ₹ *${fmtMoney(bulletEmi)}*`);
+    lines.push(`Bullet total (25% of loan): ₹ *${fmtMoney(bulletAmt)}*`);
+    lines.push('');
+    lines.push('*Bullets:*');
+    lines.push(bulletSchedule);
   }
 } catch (e) {
-  if (DEBUG) console.warn('BULLET EMI NEW CAR ERROR:', e?.message);
+  if (DEBUG) console.warn('NEW CAR BULLET EMI ERROR:', e?.message);
 }
-
   lines.push('');
   lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
   lines.push('*Terms & Conditions Apply ✅*');
