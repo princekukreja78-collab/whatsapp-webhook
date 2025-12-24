@@ -2916,54 +2916,54 @@ if ((score <= 0 || score < ABS_MIN_SCORE) && !variantRescue) continue;
    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
 if (!allMatches.length) {
 
-  // 🔁 MODEL LIST FALLBACK (LAST RESORT)
-  if (
-    wantsModelList &&
-    !hasPricingIntent &&
-    !hasComparisonIntent &&
-    !wantsSpecs
-  ) {
-    try {
-      const modelSet = new Set();
+// ================================
+// MODEL LIST FALLBACK (FINAL & SAFE)
+// ================================
+if (
+  wantsModelList &&
+  !hasPricingIntent &&
+  !hasComparisonIntent &&
+  !wantsSpecs
+) {
+  try {
+    const modelSet = new Set();
 
-      for (const [brand, tab] of Object.entries(tables || {})) {
-        if (!tab || !tab.data || !tab.header) continue;
+    for (const [brand, tab] of Object.entries(tables || {})) {
+      if (!tab || !tab.data || !tab.header) continue;
+      if (allowedBrandSet && !allowedBrandSet.has(brand)) continue;
 
-        if (allowedBrandSet && !allowedBrandSet.has(brand)) continue;
+      const header = tab.header.map(h => String(h || '').toUpperCase());
+      const idxModel = header.findIndex(h => h.includes('MODEL'));
+      if (idxModel < 0) continue;
 
-        const header = tab.header.map(h => String(h || '').toUpperCase());
-        const idxModel = header.findIndex(h => h.includes('MODEL'));
-
-        if (idxModel < 0) continue;
-
-        for (const row of tab.data) {
-          if (row[idxModel]) {
-            modelSet.add(String(row[idxModel]).trim());
-          }
+      for (const row of tab.data) {
+        if (row[idxModel]) {
+          modelSet.add(String(row[idxModel]).trim());
         }
       }
-
-      if (modelSet.size) {
-        const models = Array.from(modelSet).sort().slice(0, 30);
-        const out = [];
-
-        out.push(
-          allowedBrandSet
-            ? `*Available Models*`
-            : `*Available Car Models*`
-        );
-        out.push('');
-        models.forEach(m => out.push(`• ${m}`));
-        out.push('');
-        out.push('Reply with the *model name* to see variants, prices & offers.');
-
-        await waSendText(to, out.join('\n'));
-        return true;
-      }
-    } catch (e) {
-      if (DEBUG) console.warn('Model list fallback failed:', e?.message);
     }
+
+    if (modelSet.size) {
+      const models = Array.from(modelSet).sort().slice(0, 30);
+      const out = [];
+
+      out.push(
+        allowedBrandSet
+          ? '*Available Models*'
+          : '*Available Car Models*'
+      );
+      out.push('');
+      models.forEach(m => out.push(`• ${m}`));
+      out.push('');
+      out.push('Reply with the *model name* to see variants, prices & offers.');
+
+      await waSendText(to, out.join('\n'));
+      return true;
+    }
+  } catch (e) {
+    if (DEBUG) console.warn('Model list fallback failed:', e?.message);
   }
+}
 
   // ❌ fallback only if model list not requested
   await waSendText(
@@ -3424,22 +3424,16 @@ if (
   if (best.onroad)
     lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
 
-  // ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
+ // ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
 if (isSingleQuote && loanAmt) {
   lines.push('*🔹 Loan & EMI Options*');
   lines.push('');
 
-  // OPTION 1 — NORMAL EMI (100% EX-SHOWROOM)
+  // OPTION 1 — NORMAL EMI
   lines.push('*OPTION 1 – NORMAL EMI*');
-  lines.push(
-    `Loan Amount: 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)}`
-  );
-  lines.push(
-    `Tenure: 60 months @ ${roi}% p.a.`
-  );
-  lines.push(
-    `Approx EMI: ₹ *${fmtMoney(emi60)}*`
-  );
+  lines.push(`Loan Amount: 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)}`);
+  lines.push(`Tenure: 60 months @ ${roi}% p.a.`);
+  lines.push(`Approx EMI: ₹ *${fmtMoney(emi60)}*`);
 
   // OPTION 2 — BULLET EMI (25%)
   try {
@@ -3457,15 +3451,11 @@ if (isSingleQuote && loanAmt) {
       bulletSim?.bulletAmount ||
       Math.round(loanAmt * bulletPct);
 
-    if (bulletEmi) {
+    if (loanAmt && emi60 > 0 && bulletEmi && bulletAmt) {
       lines.push('');
       lines.push('*OPTION 2 – BULLET EMI (25%)*');
-      lines.push(
-        `Monthly EMI: ₹ *${fmtMoney(bulletEmi)}*`
-      );
-      lines.push(
-        `Bullet Payment at end: ₹ ${fmtMoney(bulletAmt)}`
-      );
+      lines.push(`Monthly EMI: ₹ *${fmtMoney(bulletEmi)}*`);
+      lines.push(`Bullet Payment at end: ₹ ${fmtMoney(bulletAmt)}`);
     }
   } catch (e) {
     // Silent fail — never block quote
@@ -3475,6 +3465,7 @@ if (isSingleQuote && loanAmt) {
   lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
   lines.push('*Terms & Conditions Apply ✅*');
 }
+
  // ---------- CTA ----------
   if (isSingleQuote) {
     lines.push('\nReply *SPEC* for features or *EMI* for finance.');
