@@ -2146,6 +2146,63 @@ if (wantsAllStates) {
   if (DEBUG) console.log('PAN-INDIA REQUEST → skipping budget & advisory flows');
   return false; // hand over to tryQuickNewCarQuote
 }
+// ======================================================
+// HARD OVERRIDE: EXPLICIT MODEL LIST REQUEST
+// (MUST RUN BEFORE ANY MATCHING / SCORING)
+// ======================================================
+if (
+  wantsModelList &&
+  !hasPricingIntent &&
+  !hasComparisonIntent &&
+  !wantsSpecs
+) {
+  if (DEBUG) console.log('MODEL_LIST_OVERRIDE_TRIGGERED');
+
+  try {
+    const tables = await loadPricingFromSheets();
+    const modelSet = new Set();
+
+    for (const [brand, tab] of Object.entries(tables || {})) {
+      if (!tab || !tab.data || !tab.header) continue;
+
+      // Respect brand filter if detected (e.g. "toyota models")
+      if (brandGuess && brand !== String(brandGuess).toUpperCase()) continue;
+
+      const header = tab.header.map(h => String(h || '').toUpperCase());
+      const idxModel = header.findIndex(h => h.includes('MODEL'));
+      if (idxModel < 0) continue;
+
+      for (const row of tab.data) {
+        if (row[idxModel]) {
+          modelSet.add(String(row[idxModel]).trim());
+        }
+      }
+    }
+
+    if (modelSet.size) {
+      const models = Array.from(modelSet).sort();
+      const out = [];
+
+      const brandLabel = brandGuess
+        ? String(brandGuess).toUpperCase()
+        : 'Available';
+
+      out.push(`*${brandLabel} Models*`);
+      out.push('');
+
+      models.forEach(m => out.push(`• ${m}`));
+
+      out.push('');
+      out.push('Reply with the *model name* to see variants, prices & offers.');
+
+      await waSendText(to, out.join('\n'));
+      setLastService(to, 'NEW');
+      return true; // ⛔ ABSOLUTE STOP — NO MATCHING AFTER THIS
+    }
+  } catch (e) {
+    console.warn('MODEL_LIST_OVERRIDE_FAILED:', e?.message || e);
+  }
+}
 
  // ---------- PRICE INDEX FALLBACK helper ----------
 function findPriceIndexFallback(header, tab) {
