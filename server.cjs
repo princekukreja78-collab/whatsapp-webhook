@@ -3556,7 +3556,20 @@ if (
     lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
 
  // ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
-if (isSingleQuote && loanAmt) {
+if (isSingleQuote && loanAmt > 0) {
+
+  // 🔍 DEBUG — must be INSIDE the EMI gate
+  if (DEBUG) {
+    console.log('DEBUG_EMI_RENDER:', {
+      isSingleQuote,
+      loanAmt,
+      exShow: best.exShow,
+      onroad: best.onroad,
+      emi60,
+      roi
+    });
+  }
+
   lines.push('*🔹 Loan & EMI Options*');
   lines.push('');
 
@@ -3582,20 +3595,27 @@ if (isSingleQuote && loanAmt) {
       bulletSim?.bulletAmount ||
       Math.round(loanAmt * bulletPct);
 
-    if (loanAmt && emi60 > 0 && bulletEmi && bulletAmt) {
+    if (bulletEmi && bulletAmt) {
       lines.push('');
       lines.push('*OPTION 2 – BULLET EMI (25%)*');
       lines.push(`Monthly EMI: ₹ *${fmtMoney(bulletEmi)}*`);
       lines.push(`Bullet Payment at end: ₹ ${fmtMoney(bulletAmt)}`);
+    } else if (DEBUG) {
+      console.log('DEBUG_EMI_BULLET_SKIPPED:', {
+        bulletEmi,
+        bulletAmt,
+        bulletSim
+      });
     }
   } catch (e) {
-    // Silent fail — never block quote
+    if (DEBUG) console.warn('DEBUG_EMI_BULLET_ERROR:', e?.message);
   }
 
   lines.push('');
   lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
   lines.push('*Terms & Conditions Apply ✅*');
 }
+
 
  // ---------- CTA ----------
   if (isSingleQuote) {
