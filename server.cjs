@@ -3535,8 +3535,8 @@ if (
   if (!best) return false;
 
   const loanAmt =
-  Number(best.exShow) ||
-  Number(best.onroad) ||
+  Number(String(best.exShow || '').replace(/[,₹\s]/g, '')) ||
+  Number(String(best.onroad || '').replace(/[,₹\s]/g, '')) ||
   0;
   const roi = Number(process.env.NEW_CAR_ROI || 8.1); // default ROI
   const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
