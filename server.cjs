@@ -3483,12 +3483,16 @@ console.log('DEBUG_FLOW: BEFORE SINGLE QUOTE', {
   allMatches: allMatches.length,
   exactModelHit,
   userBudget,
-  wantsAllStates
+  wantsAllStates,
+  explicitPanIndiaIntent
 });
+
 const isSingleQuote =
-  !explicitPanIndiaIntent &&
-  !userBudget &&
-  allMatches.length === 1;
+  !explicitPanIndiaIntent &&   // PAN-India explicitly asked → no EMI
+  !wantsAllStates &&           // safety: state-wise request → no EMI
+  !userBudget &&               // budget flow → no EMI
+  allMatches.length >= 1;      // 👈 KEY FIX (was === 1)
+
 // 2️⃣ VARIANT LIST (WHEN USER DID NOT SPECIFY VARIANT)
 if (
   allMatches.length >= 2 &&
@@ -3555,10 +3559,10 @@ if (
   if (best.onroad)
     lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
 
- // ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
+// ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
 if (isSingleQuote && loanAmt > 0) {
 
-  // 🔍 DEBUG — must be INSIDE the EMI gate
+  // 🔍 DEBUG — confirms EMI gate is entered
   if (DEBUG) {
     console.log('DEBUG_EMI_RENDER:', {
       isSingleQuote,
