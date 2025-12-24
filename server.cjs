@@ -2105,6 +2105,19 @@ const wantsSpecs =
 const wantsModelList =
   /\b(models?|variants?|available cars?|car list|show models|what cars|portfolio|lineup)\b/i.test(t);
 
+// ---------------- DEBUG: INTENT SNAPSHOT ----------------
+if (DEBUG) {
+  console.log('DEBUG_INTENT_SNAPSHOT:', {
+    text: t,
+    wantsModelList,
+    hasPricingIntent,
+    hasComparisonIntent,
+    wantsSpecs,
+    wantsAllStates,
+    lastSvc
+  });
+}
+
 // --------------------------------------------------
 // SEGMENT INTENT FLAGS (REQUIRED FOR BUDGET ENGINE)
 // --------------------------------------------------
@@ -3406,7 +3419,10 @@ if (
   const best = allMatches[0];
   if (!best) return false;
 
-  const loanAmt = best.exShow || best.onroad || 0;
+  const loanAmt =
+  Number(best.exShow) ||
+  Number(best.onroad) ||
+  0;
   const roi = Number(process.env.NEW_CAR_ROI || 8.1); // default ROI
   const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
 
