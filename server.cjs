@@ -2117,6 +2117,64 @@ if (DEBUG) {
     lastSvc
   });
 }
+// ======================================================
+// HARD EXIT: MODEL LIST REQUEST (STOP BEFORE QUOTE ENGINE)
+// ======================================================
+if (
+  wantsModelList &&
+  !hasPricingIntent &&
+  !hasComparisonIntent &&
+  !wantsSpecs &&
+  !wantsAllStates
+) {
+  if (DEBUG) console.log('HARD_EXIT_MODEL_LIST');
+
+  try {
+    const tables = await loadPricingFromSheets();
+    const modelSet = new Set();
+
+    // simple brand detection from text (do NOT rely on brandGuess)
+    const tUpper = t.toUpperCase();
+
+    for (const [brand, tab] of Object.entries(tables || {})) {
+      if (!tab || !tab.data || !tab.header) continue;
+
+      // If user typed "toyota models", enforce brand here
+      if (tUpper.includes(brand)) {
+        // allowed
+      } else if (/\bmodels?\b/.test(tUpper)) {
+        continue; // skip other brands
+      }
+
+      const header = tab.header.map(h => String(h || '').toUpperCase());
+      const idxModel = header.findIndex(h => h.includes('MODEL'));
+      if (idxModel < 0) continue;
+
+      for (const row of tab.data) {
+        if (row[idxModel]) {
+          modelSet.add(String(row[idxModel]).trim());
+        }
+      }
+    }
+
+    if (modelSet.size) {
+      const models = Array.from(modelSet).sort();
+      const out = [];
+
+      out.push('*Available Models*');
+      out.push('');
+      models.forEach(m => out.push(`• ${m}`));
+      out.push('');
+      out.push('Reply with the *model name* to see variants, prices & offers.');
+
+      await waSendText(to, out.join('\n'));
+      setLastService(to, 'NEW');
+      return true; // ⛔ THIS IS THE KEY
+    }
+  } catch (e) {
+    console.warn('MODEL_LIST_HARD_EXIT_FAILED:', e?.message || e);
+  }
+}
 
 // --------------------------------------------------
 // SEGMENT INTENT FLAGS (REQUIRED FOR BUDGET ENGINE)
