@@ -2782,6 +2782,19 @@ const coreTokensArr = canonicalUserNorm
 const userHasExplicitVariant =
   Array.isArray(coreTokensArr) && coreTokensArr.length >= 2;
 
+// -------- NORMALIZE XUV700 TOKEN (SAFE) --------
+if (
+  coreTokensArr.length === 1 &&
+  /^xuv\s*700$/i.test(coreTokensArr[0])
+) {
+  coreTokensArr.splice(0, 1, 'xuv', '700');
+
+  if (DEBUG) {
+    console.log('Normalized XUV700 token → [xuv, 700]');
+  }
+}
+
+
     // ---------------- BASE MODEL TOKEN (GLOBAL, SAFE) ----------------
 const baseModelToken =
   coreTokensArr && coreTokensArr.length
@@ -2966,6 +2979,28 @@ if (typeof DEBUG !== 'undefined' && DEBUG) {
             if (userSuffix.length > 1) score -= 8;
           }
         }
+// -------- BMW X-SERIES HARD BRAND LOCK (SAFE) --------
+if (
+  !allowedBrandSet &&
+  /\b(bmw)?\s*x\s*[1-9]\b/i.test(t)
+) {
+  allowedBrandSet = new Set(['BMW']);
+
+  if (DEBUG) {
+    console.log('BMW X-series hard lock applied');
+  }
+}
+// -------- MAHINDRA XUV HARD BRAND LOCK --------
+if (
+  !allowedBrandSet &&
+  /\bxuv\s*700\b/i.test(t)
+) {
+  allowedBrandSet = new Set(['MAHINDRA']);
+
+  if (DEBUG) {
+    console.log('Mahindra XUV700 hard lock applied');
+  }
+}
 
        // ---------- NORMALIZE SPECIAL_WORDS comparison + defensive suffix penalty ----------
 const outerVariantNorm = String(normForMatch(String(variantCell || ''))).toLowerCase();
