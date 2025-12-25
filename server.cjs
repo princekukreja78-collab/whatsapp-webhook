@@ -396,8 +396,6 @@ const express = require('express');
 const app = express();
 const FormData = require('form-data');
 const crmIngestHandler = require('./routes/crm_ingest.cjs');
-const autoIngest = require('./routes/auto_ingest.cjs');
-
 
 // ================= GLOBAL LOAN KEYWORDS =================
 const LOAN_KEYWORDS = [
@@ -568,9 +566,7 @@ app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
 
 const fetch = (global.fetch) ? global.fetch : require('node-fetch');
 
-module.exports = async function autoIngest(enriched = {}) {
-  // Prefer CRM_URL from env (Render: ngrok URL; Local: optional override)
-  // Fallback: local server at 127.0.0.1:PORT (default 10000)
+async function autoIngest(enriched = {}) {
   const portEnv = process.env.PORT || 10000;
   const baseEnv = (process.env.CRM_URL || '').trim();
   const baseUrl = (baseEnv || `http://127.0.0.1:${portEnv}`).replace(/\/+$/, '');
@@ -603,7 +599,7 @@ module.exports = async function autoIngest(enriched = {}) {
       e && e.message ? e.message : e
     );
   }
-};
+}
 
 // ---------------- ENV ----------------
 const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
@@ -3925,6 +3921,19 @@ app.post('/webhook', async (req, res) => {
           lastMessage: lastMsgForAuto,
           meta: { source: "webhook-auto" }
         });
+
+await pushLeadToGoogleSheet({
+  id: senderForAuto,
+  name: senderNameForAuto,
+  phone: senderForAuto,
+  status: 'auto-ingested',
+  timestamp: new Date().toISOString(),
+  car_enquired: lastMsgForAuto,
+  budget: '',
+  last_ai_reply: '',
+  ai_quote: '',
+  lead_type: 'whatsapp_query'
+});
 
         // ---- 4. ADMIN TEXT ALERT (existing behaviour) ----
         try {
