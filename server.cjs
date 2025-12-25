@@ -396,6 +396,35 @@ const express = require('express');
 const app = express();
 const FormData = require('form-data');
 const crmIngestHandler = require('./routes/crm_ingest.cjs');
+// ================= GOOGLE SHEET PUSH (LEAD SYNC) =================
+async function pushLeadToGoogleSheet(lead) {
+  const url = process.env.GOOGLE_SHEET_WEBHOOK_URL;
+  if (!url) {
+    console.warn('GSHEET: GOOGLE_SHEET_WEBHOOK_URL not set');
+    return;
+  }
+
+  try {
+    console.log('GSHEET: pushing lead', lead.phone);
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(lead)
+    });
+
+    const text = await resp.text();
+
+    if (!resp.ok) {
+      console.error('GSHEET: failed', resp.status, text);
+    } else {
+      console.log('GSHEET: success', text);
+    }
+  } catch (e) {
+    console.error('GSHEET: exception', e?.message || e);
+  }
+}
+// ================================================================
 
 // ================= GLOBAL LOAN KEYWORDS =================
 const LOAN_KEYWORDS = [
