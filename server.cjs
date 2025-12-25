@@ -2980,6 +2980,8 @@ if (typeof DEBUG !== 'undefined' && DEBUG) {
           }
         }
 // -------- BMW X-SERIES HARD BRAND LOCK (SAFE) --------
+console.log('DEBUG_LOCK: BMW block HIT, t=', t);
+
 if (
   !allowedBrandSet &&
   /\b(bmw)?\s*x\s*[1-9]\b/i.test(t)
@@ -2991,6 +2993,8 @@ if (
   }
 }
 // -------- MAHINDRA XUV HARD BRAND LOCK --------
+console.log('DEBUG_LOCK: XUV700 block HIT, t=', t);
+
 if (
   !allowedBrandSet &&
   /\bxuv\s*700\b/i.test(t)
