@@ -2789,6 +2789,7 @@ const baseModelToken =
     : null;
 
     let exactModelHit = false;
+    let resolvedModel = null; 
     try {
       if (typeof MODEL_ALIASES !== 'undefined') {
         const allModelSyns = new Set();
