@@ -1278,12 +1278,29 @@ function pickFuelIndex(idxMap) {
 }
 
 // audience = 'individual' | 'corporate', cityToken e.g. 'DELHI'
-function pickOnRoadPriceIndex(idxMap, cityToken, audience) {
+function pickOnRoadPriceIndex(idxMap, cityToken, audience, stateMatch) {
   const keys = Object.keys(idxMap || {});
   const cityLower = String(cityToken || '').toLowerCase();
   const aud = String(audience || '').toLowerCase();
 
   let best = null;
+
+  // ---- STEP-3: STATE-AWARE PRIORITY (BEFORE SCORING) ----
+  if (stateMatch) {
+    const stateUpper = String(stateMatch).toUpperCase();
+
+    for (const k of keys) {
+      const ku = k.toUpperCase();
+
+      // Strong match: ON ROAD + STATE NAME
+      if (
+        ku.includes('ON ROAD') &&
+        ku.includes(stateUpper)
+      ) {
+        return idxMap[k];
+      }
+    }
+  }
 
   function scoreKey(k) {
     const kl = k.toLowerCase();
@@ -2414,7 +2431,11 @@ if (
           if (!tab || !tab.data) continue;
           const header = Array.isArray(tab.header) ? tab.header.map(h => String(h || '').toUpperCase()) : [];
           const idxMap = tab.idxMap || toHeaderIndexMap(header);
-          const priceIdx = pickOnRoadPriceIndex(idxMap, (budget && 'DELHI') || '', 'individual') || -1;
+const priceIdx = pickOnRoadPriceIndex(
+  idxMap,
+  cityToken || '',
+  'individual'
+) || -1;
           const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
           const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
 
