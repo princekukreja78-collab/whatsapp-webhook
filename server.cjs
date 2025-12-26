@@ -2276,7 +2276,7 @@ const wantsMPV   = /\b(mpv|7 seater|7-seater|people mover)\b/i.test(t);
 // INTENT PRIORITY NORMALISER (CRITICAL)
 // --------------------------------------------------
 const hasVariantLock =
-  /\b(4x4|4\/2|4x2|at|mt|automatic)\b/i.test(userNorm);
+  /\b(4x4|4\/2|4x2|automatic|auto|at|mt)\b/i.test(t);
 
 if (hasPricingIntent || hasVariantLock || wantsAllStates) {
   if (DEBUG) {
