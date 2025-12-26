@@ -2122,6 +2122,15 @@ async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
   const tRaw = String(msgText || "");
   let t = tRaw.toLowerCase().trim();
+// --------------------------------------------------
+// SAFE BUDGET INITIALISATION (MUST EXIST FOR ALL PATHS)
+// --------------------------------------------------
+let userBudget = null;
+try {
+  userBudget = parseBudgetFromText(t);
+} catch (e) {
+  userBudget = null;
+}
 
 // -------- DRIVETRAIN NORMALIZATION (SAFE & ADDITIVE) --------
 t = t.replace(/\b4\s*x\s*2\b/g, '4/2');
