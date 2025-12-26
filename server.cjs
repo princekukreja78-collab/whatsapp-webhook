@@ -2121,7 +2121,14 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
 async function trySmartNewCarIntent(msgText, to) {
   if (!msgText) return false;
   const tRaw = String(msgText || "");
-  const t = tRaw.toLowerCase().trim();
+  let t = tRaw.toLowerCase().trim();
+
+// -------- DRIVETRAIN NORMALIZATION (SAFE & ADDITIVE) --------
+t = t.replace(/\b4\s*x\s*2\b/g, '4/2');
+t = t.replace(/\b4\s*\*\s*2\b/g, '4/2');
+
+t = t.replace(/\b4\s*\/\s*4\b/g, '4x4');
+t = t.replace(/\b4\s*\*\s*4\b/g, '4x4');
 
 // ================= LOAN CONTEXT HARD GUARD =================
 // If user is already in LOAN flow, NEVER enter pricing/budget logic
