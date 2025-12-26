@@ -2664,21 +2664,39 @@ const wantsAllStates =
     // --- unified brand detection (uses global helper) ---
     let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
 
-    // city detection (default to delhi)
-    let cityMatch =
-      (t.match(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/) || [])[1] ||
-      null;
-    if (cityMatch) {
-      if (cityMatch === 'dilli') cityMatch = 'delhi';
-      if (cityMatch === 'hr') cityMatch = 'haryana';
-      if (cityMatch === 'chd') cityMatch = 'chandigarh';
-      if (cityMatch === 'up') cityMatch = 'uttar pradesh';
-      if (cityMatch === 'hp') cityMatch = 'himachal pradesh';
-      if (cityMatch === 'bombay') cityMatch = 'mumbai';
-    } else {
-      cityMatch = 'delhi';
-    }
-    const city = cityMatch;
+  // ---------------- CITY DETECTION (REAL CITIES ONLY) ----------------
+let cityMatch =
+  (t.match(/\b(delhi|dilli|gurgaon|gurugram|noida|faridabad|chandigarh|ch|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune|shimla)\b/i) || [])[1] ||
+  null;
+
+if (cityMatch) {
+  cityMatch = cityMatch.toLowerCase();
+  if (cityMatch === 'dilli') cityMatch = 'delhi';
+  if (cityMatch === 'bombay') cityMatch = 'mumbai';
+  if (cityMatch === 'gurugram') cityMatch = 'gurgaon';
+  if (cityMatch === 'bengaluru') cityMatch = 'bangalore';
+  if (cityMatch === 'ch') cityMatch = 'chandigarh'; // ✅ ADDED
+}
+
+// ---------------- STATE DETECTION (SEPARATE) ----------------
+let stateMatch =
+  (t.match(/\b(himachal pradesh|hp|haryana|hr|uttar pradesh|up|maharashtra|mh)\b/i) || [])[1] ||
+  null;
+
+if (stateMatch) {
+  stateMatch = stateMatch.toLowerCase();
+  if (stateMatch === 'hp') stateMatch = 'himachal pradesh';
+  if (stateMatch === 'hr') stateMatch = 'haryana';
+  if (stateMatch === 'up') stateMatch = 'uttar pradesh';
+  if (stateMatch === 'mh') stateMatch = 'maharashtra';
+}
+
+// ---------------- DEFAULT CITY (LAST RESORT ONLY) ----------------
+if (!cityMatch) {
+  cityMatch = 'delhi';
+}
+
+const city = cityMatch;
 
     const profile = (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
     const audience = /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
