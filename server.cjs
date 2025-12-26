@@ -2188,6 +2188,8 @@ const wantsModelList =
 const explicitStatePricingIntent =
   /\b(price in|on[- ]?road in|cost in|rate in)\b/i.test(t);
 
+const hasVariantLock =
+  /\b(4x4|4\/2|4x2|automatic|auto|at|mt)\b/i.test(t);
 
 // ---------------- DEBUG: INTENT SNAPSHOT ----------------
 if (DEBUG) {
@@ -2284,8 +2286,6 @@ const wantsMPV   = /\b(mpv|7 seater|7-seater|people mover)\b/i.test(t);
 // --------------------------------------------------
 // INTENT PRIORITY NORMALISER (CRITICAL)
 // --------------------------------------------------
-const hasVariantLock =
-  /\b(4x4|4\/2|4x2|automatic|auto|at|mt)\b/i.test(t);
 
 if (hasPricingIntent || hasVariantLock || wantsAllStates) {
   if (DEBUG) {
@@ -2617,14 +2617,15 @@ if (
 // ------------------------------
 for (const ft of FEATURE_TOPICS) {
   if (
-    t.includes(ft) &&
-    !hasPricingIntent &&
-    !wantsSpecs &&          // ✅ FIXED
-    !hasComparisonIntent &&
-    !wantsAllStates &&
-    !userBudget
-  ) {
-    const expl = (typeof SignatureAI_RAG === 'function')
+  t.includes(ft) &&
+  !hasPricingIntent &&
+  !hasVariantLock &&        // 🔒 CRITICAL FIX
+  !wantsSpecs &&
+  !hasComparisonIntent &&
+  !wantsAllStates &&
+  !userBudget
+) {
+   const expl = (typeof SignatureAI_RAG === 'function')
       ? await SignatureAI_RAG(
           `Explain "${ft}" in simple car-buyer language (India context, concise, non-technical).`
         )
