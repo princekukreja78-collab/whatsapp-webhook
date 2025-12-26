@@ -2824,7 +2824,16 @@ let raw = t
   .replace(/\b(delhi|dilli|haryana|hr|chandigarh|chd|uttar pradesh|up|himachal|hp|mumbai|bombay|bangalore|bengaluru|chennai|kolkata|pune)\b/g, ' ')
   .replace(/\b(individual|company|corporate|firm|personal)\b/g, ' ')
   .replace(/\b(automatic transmission|automatic|auto)\b/g, ' at ')
-  .replace(/[^\w\s]/g, ' ')
+
+// ---- DRIVETRAIN NORMALIZATION (CRITICAL) ----
+.replace(/\b4\s*\/\s*4\b/g, ' 4x4 ')
+.replace(/\b4\s*x\s*4\b/g, ' 4x4 ')
+.replace(/\b4\s*[*]\s*4\b/g, ' 4x4 ')
+.replace(/\b4\s*x\s*2\b/g, ' 4/2 ')
+.replace(/\b4\s*[*]\s*2\b/g, ' 4/2 ')
+
+.replace(/[^\w\s]/g, ' ')
+
   .replace(/\s+/g, ' ')
   .trim();
 
