@@ -1285,22 +1285,25 @@ function pickOnRoadPriceIndex(idxMap, cityToken, audience, stateMatch) {
 
   let best = null;
 
-  // ---- STEP-3: STATE-AWARE PRIORITY (BEFORE SCORING) ----
-  if (stateMatch) {
-    const stateUpper = String(stateMatch).toUpperCase();
+  // ---- STEP-3: STATE-AWARE PRIORITY (NORMALIZED MATCH) ----
+if (stateMatch) {
+  const normState = String(stateMatch)
+    .toLowerCase()
+    .replace(/[^a-z]/g, ''); // remove spaces, brackets, dots
 
-    for (const k of keys) {
-      const ku = k.toUpperCase();
+  for (const k of keys) {
+    const normKey = String(k)
+      .toLowerCase()
+      .replace(/[^a-z]/g, '');
 
-      // Strong match: ON ROAD + STATE NAME
-      if (
-        ku.includes('ON ROAD') &&
-        ku.includes(stateUpper)
-      ) {
-        return idxMap[k];
-      }
+    if (
+      normKey.includes('onroadprice') &&
+      normKey.includes(normState)
+    ) {
+      return idxMap[k];
     }
   }
+}
 
   function scoreKey(k) {
     const kl = k.toLowerCase();
