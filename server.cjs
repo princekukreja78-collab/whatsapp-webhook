@@ -2446,13 +2446,20 @@ const priceIdx = pickOnRoadPriceIndex(
           for (const row of tab.data) {
             let onroad = 0;
             if (priceIdx >= 0) onroad = Number(String(row[priceIdx] || '').replace(/[,₹\s]/g, '')) || 0;
-            if (!onroad) {
-              for (let i=0;i<row.length;i++) {
-                const v = String(row[i] || '').replace(/[,₹\s]/g,'');
-                if (v && /^\d+$/.test(v)) { const n = Number(v); if (n >= 200000) { onroad = n; break; } }
-              }
-            }
-            if (!onroad) continue;
+           // Fallback scan ONLY if no on-road column exists
+if (!onroad && priceIdx < 0) {
+  for (let i = 0; i < row.length; i++) {
+    const v = String(row[i] || '').replace(/[,₹\s]/g,'');
+    if (v && /^\d+$/.test(v)) {
+      const n = Number(v);
+      if (n >= 200000) {
+        onroad = n;
+        break;
+      }
+    }
+  }
+}
+ if (!onroad) continue;
             const modelCell = idxModel>=0 ? String(row[idxModel]||'').toLowerCase() : '';
             const variantCell = idxVariant>=0 ? String(row[idxVariant]||'').toLowerCase() : '';
           const text = `${modelCell} ${variantCell}`.toLowerCase();
@@ -2922,7 +2929,7 @@ if (brandGuess) {
      // --- determine globalPriceIdx (pickOnRoadPriceIndex OR header heuristics OR numeric fallback) ---
 let globalPriceIdx = wantsAllStates
   ? findPriceIndexFallback(header, tab)
-  : pickOnRoadPriceIndex(idxMap, cityToken, audience);
+: pickOnRoadPriceIndex(idxMap, cityToken, audience, stateMatch);
 
 // robust guard (in case pickOnRoadPriceIndex returns undefined)
 if (typeof globalPriceIdx === 'undefined' || globalPriceIdx < 0) {
@@ -3255,7 +3262,7 @@ if (allMatches.length > 0) {
 
         const header2 = (Array.isArray(tab.header) ? tab.header : []).map(h => String(h || '').toUpperCase());
         const idxMap2 = tab.idxMap || toHeaderIndexMap(header2);
-        let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience);
+let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience, stateMatch);
         if (priceIdx2 < 0) {
           for (let i=0;i<header2.length;i++) {
             if (/(ON[-_ ]?ROAD|ONROAD|PRICE|ONROAD PRICE)/i.test(header2[i])) { priceIdx2 = i; break; }
