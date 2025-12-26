@@ -3276,6 +3276,32 @@ if (wants4x2 && !wants4x4) {
    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
 if (!allMatches.length) {
 
+// ================= FINAL VARIANT GUARANTEE =================
+if (hasVariantLock) {
+  const filtered = allMatches.filter(m => {
+    const text = (
+      String(m.row[m.idxVariant] || '') + ' ' +
+      String(m.row[m.idxSuffix]  || '') + ' ' +
+      String(m.row[m.idxModel]   || '')
+    ).toLowerCase();
+
+    if (/\b4x4\b/.test(t)) {
+      return /\b(4x4|4wd|awd)\b/.test(text);
+    }
+
+    if (/\bautomatic|auto|at\b/.test(t)) {
+      return /\b(at|automatic|cvt|dct|tc)\b/.test(text);
+    }
+
+    return true;
+  });
+
+  // 🔴 If we found strict matches, NEVER fall back
+  if (filtered.length) {
+    allMatches = filtered;
+  }
+}
+
 // ================================
 // MODEL LIST FALLBACK (FINAL & SAFE)
 // ================================
