@@ -2437,9 +2437,10 @@ if (
 const priceIdx = pickOnRoadPriceIndex(
   idxMap,
   cityToken || '',
-  'individual'
+  'individual',
+  stateMatch || ''
 ) || -1;
-          const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+         const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
           const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
 
           for (const row of tab.data) {
