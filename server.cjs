@@ -3208,6 +3208,37 @@ if (resolvedModel) {
     return mdl.includes(rm);
   });
 }
+// ================= HARD DRIVETRAIN LOCK (SAFE & FINAL) =================
+const wants4x4 = /\b(4x4|4wd|awd)\b/i.test(userNorm);
+const wants4x2 = /\b(4\/2|4x2)\b/i.test(userNorm);
+
+if (wants4x4 && !wants4x2) {
+  allMatches = allMatches.filter(m => {
+    const v = normForMatch(
+      (m.row[m.idxVariant] || '') + ' ' +
+      (m.row[m.idxSuffix]  || '')
+    );
+    return /\b(4x4|4wd|awd)\b/i.test(v);
+  });
+
+  if (DEBUG) {
+    console.log('HARD_DRIVETRAIN_LOCK_APPLIED: 4x4 → remaining', allMatches.length);
+  }
+}
+
+if (wants4x2 && !wants4x4) {
+  allMatches = allMatches.filter(m => {
+    const v = normForMatch(
+      (m.row[m.idxVariant] || '') + ' ' +
+      (m.row[m.idxSuffix]  || '')
+    );
+    return !/\b(4x4|4wd|awd)\b/i.test(v);
+  });
+
+  if (DEBUG) {
+    console.log('HARD_DRIVETRAIN_LOCK_APPLIED: 4x2 → remaining', allMatches.length);
+  }
+}
 
    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
 if (!allMatches.length) {
