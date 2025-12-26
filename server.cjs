@@ -237,8 +237,12 @@ if (parts.length === 1) {
   baseModel = parts[0];
 }
 
-// Allow numeric two-token models (XUV 700, XUV 400, BMW X7, BMW X5, BE 6)
-if (parts.length === 2 && /^\d+$/.test(parts[1])) {
+// Allow numeric two-token models ONLY for known compact families
+if (
+  parts.length === 2 &&
+  /^\d+$/.test(parts[1]) &&
+  /^(xuv|be|x)$/i.test(parts[0])
+) {
   baseModel = parts.join(' ');
 }
 
@@ -269,6 +273,12 @@ if (baseModel && baseModel.length >= 3) {
       `[GLOBAL REGISTRY] Brands=${GLOBAL_BRAND_SET.size}, Models=${GLOBAL_MODEL_SET.size}`
     );
   }
+}
+function normalizeCompactModel(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/-/g, '');
 }
 
 // -------- Detect brand from text (NO hardcoding) --------
@@ -3033,33 +3043,35 @@ if (typeof DEBUG !== 'undefined' && DEBUG) {
             if (userSuffix.length > 1) score -= 8;
           }
         }
-// -------- BMW X-SERIES HARD BRAND LOCK (SAFE) --------
-console.log('DEBUG_LOCK: BMW block HIT, t=', t);
-
+// -------- BMW X-SERIES HARD BRAND + MODEL LOCK --------
 if (
   !allowedBrandSet &&
-  /\b(bmw)?\s*x\s*[1-9]\b/i.test(t)
+  /\b(bmw)?\s*x\s*([1-9])\b/i.test(t)
 ) {
   allowedBrandSet = new Set(['BMW']);
 
+  const m = t.match(/\bx\s*([1-9])\b/i);
+  if (m) {
+    resolvedModel = 'x' + m[1]; // x5, x7, etc
+  }
+
   if (DEBUG) {
-    console.log('BMW X-series hard lock applied');
+    console.log('BMW X-series hard lock applied:', resolvedModel);
   }
 }
-// -------- MAHINDRA XUV HARD BRAND LOCK --------
-console.log('DEBUG_LOCK: XUV700 block HIT, t=', t);
 
+// -------- MAHINDRA XUV700 HARD BRAND + MODEL LOCK --------
 if (
   !allowedBrandSet &&
   /\bxuv\s*700\b/i.test(t)
 ) {
   allowedBrandSet = new Set(['MAHINDRA']);
+  resolvedModel = 'xuv700';
 
   if (DEBUG) {
     console.log('Mahindra XUV700 hard lock applied');
   }
 }
-
        // ---------- NORMALIZE SPECIAL_WORDS comparison + defensive suffix penalty ----------
 const outerVariantNorm = String(normForMatch(String(variantCell || ''))).toLowerCase();
 const variantNormUpper = outerVariantNorm.toUpperCase();
@@ -3159,6 +3171,14 @@ if ((score <= 0 || score < ABS_MIN_SCORE) && !variantRescue) continue;
         });
       }
     }
+// 🔒 FINAL HARD MODEL LOCK (compact models only)
+if (resolvedModel) {
+  const rm = normalizeCompactModel(resolvedModel);
+  allMatches = allMatches.filter(m => {
+    const mdl = normalizeCompactModel(m.row[m.idxModel] || '');
+    return mdl.includes(rm);
+  });
+}
 
    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
 if (!allMatches.length) {
