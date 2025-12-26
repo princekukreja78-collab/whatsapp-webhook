@@ -2275,14 +2275,17 @@ const wantsMPV   = /\b(mpv|7 seater|7-seater|people mover)\b/i.test(t);
 // --------------------------------------------------
 // INTENT PRIORITY NORMALISER (CRITICAL)
 // --------------------------------------------------
-if (hasPricingIntent || wantsAllStates) {
+const hasVariantLock =
+  /\b(4x4|4\/2|4x2|at|mt|automatic)\b/i.test(userNorm);
+
+if (hasPricingIntent || hasVariantLock || wantsAllStates) {
   if (DEBUG) {
-    console.log('INTENT_PRIORITY: PRICE_OR_PAN_INDIA', {
+    console.log('INTENT_PRIORITY: PRICE_OR_VARIANT_OR_PAN_INDIA', {
       hasPricingIntent,
+      hasVariantLock,
       wantsAllStates
     });
   }
-  // DO NOT return
   // Let quote engine handle it
 }
 // --------------------------------------------------
