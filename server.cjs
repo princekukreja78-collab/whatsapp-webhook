@@ -2186,12 +2186,17 @@ if (DEBUG) {
   });
 }
 // --------------------------------------------------
-// SAFE CITY TOKEN — REQUIRED FOR BUDGET + PRICING
+// SAFE LOCATION BOOTSTRAP — REQUIRED FOR BUDGET FLOW
 // --------------------------------------------------
-const cityToken =
+const safeCity =
   (typeof city === 'string' && city.trim())
-    ? city.split(' ')[0].toUpperCase()
-    : 'DELHI';
+    ? city.trim()
+    : 'Delhi';
+
+const cityToken = safeCity.split(' ')[0].toUpperCase();
+
+// PAN-INDIA safe default (budget flow does not depend on exact state)
+const stateMatch = 'DELHI';
 
 // ======================================================
 // HARD EXIT: MODEL LIST REQUEST (STOP BEFORE QUOTE ENGINE)
