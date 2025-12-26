@@ -236,6 +236,15 @@ let baseModel = null;
 if (parts.length === 1) {
   baseModel = parts[0];
 }
+// Allow two-word alphabetic base models for luxury brands (E CLASS, C CLASS, S CLASS)
+if (
+  parts.length === 2 &&
+  /^[a-z]+$/.test(parts[0]) &&
+  /^[a-z]+$/.test(parts[1]) &&
+  BRAND === 'MERCEDES'
+) {
+  baseModel = parts.join(' ');
+}
 
 // Allow numeric two-token models ONLY for known compact families
 if (
@@ -3590,7 +3599,7 @@ const baseToken = coreTokensArr[0]?.toUpperCase();
 
 if (
   baseToken &&
-  !modelVal.startsWith(baseToken) &&
+  !modelVal.includes(baseToken) &&
   !(variantVal && variantVal.startsWith(baseToken))
 ) {
   continue;
