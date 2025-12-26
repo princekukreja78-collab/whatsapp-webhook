@@ -2838,9 +2838,20 @@ let raw = t
   .trim();
 
 if (!raw) return false;
+// ----------------- EXTRACT INTENT TOKENS (BEFORE normForMatch) -----------------
+const rawWants4x4 = /\b4\s*x\s*4\b/i.test(raw) || /\b4\s*[/*]\s*4\b/i.test(raw);
+const rawWants4x2 = /\b4\s*x\s*2\b/i.test(raw) || /\b4\s*[/*]\s*2\b/i.test(raw);
+const rawWantsAT  = /\bat\b/i.test(raw);
+const rawWantsMT  = /\bmt\b/i.test(raw);
+
 
 // 1️⃣ Normalize user input
 let userNorm = normForMatch(raw);
+// 🔒 Re-inject lost intent tokens (CRITICAL)
+if (rawWants4x4) userNorm += ' 4x4';
+if (rawWants4x2) userNorm += ' 4/2';
+if (rawWantsAT)  userNorm += ' at';
+if (rawWantsMT)  userNorm += ' mt';
 
 // 2️⃣ Apply MODEL ALIASES (canonicalize ONCE)
 let canonicalUserNorm = userNorm;
