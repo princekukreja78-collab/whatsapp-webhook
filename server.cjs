@@ -3279,11 +3279,11 @@ if (!allMatches.length) {
 // ================= FINAL VARIANT GUARANTEE =================
 if (hasVariantLock) {
   const filtered = allMatches.filter(m => {
-    const text = (
-      String(m.row[m.idxVariant] || '') + ' ' +
-      String(m.row[m.idxSuffix]  || '') + ' ' +
-      String(m.row[m.idxModel]   || '')
-    ).toLowerCase();
+    const text = normForMatch(
+  (m.row[m.idxVariant] || '') + ' ' +
+  (m.row[m.idxSuffix]  || '') + ' ' +
+  (m.row[m.idxModel]   || '')
+);
 
     if (/\b4x4\b/.test(t)) {
       return /\b(4x4|4wd|awd)\b/.test(text);
