@@ -2185,6 +2185,14 @@ if (DEBUG) {
     lastSvc
   });
 }
+// --------------------------------------------------
+// SAFE CITY TOKEN — REQUIRED FOR BUDGET + PRICING
+// --------------------------------------------------
+const cityToken =
+  (typeof city === 'string' && city.trim())
+    ? city.split(' ')[0].toUpperCase()
+    : 'DELHI';
+
 // ======================================================
 // HARD EXIT: MODEL LIST REQUEST (STOP BEFORE QUOTE ENGINE)
 // ======================================================
