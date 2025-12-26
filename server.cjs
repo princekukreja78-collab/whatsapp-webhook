@@ -2130,6 +2130,10 @@ const wantsSpecs =
 const wantsModelList =
   /\b(models?|variants?|available cars?|car list|show models|what cars|portfolio|lineup)\b/i.test(t);
 
+const explicitStatePricingIntent =
+  /\b(price in|on[- ]?road in|cost in|rate in)\b/i.test(t);
+
+
 // ---------------- DEBUG: INTENT SNAPSHOT ----------------
 if (DEBUG) {
   console.log('DEBUG_INTENT_SNAPSHOT:', {
