@@ -4689,42 +4689,50 @@ if (
 // ================= END LOAN EMI HANDLER =================
 
    // ------------------------------------------------------------------
-    // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
-    // ------------------------------------------------------------------
-    try {
-      const smartText = (typeof msgText === 'string' && msgText.trim())
-        ? msgText.trim()
-        : '';
+  // STEP-2: SMART NEW CAR INTENT ENGINE (handles budget, compare, etc.)
+// ------------------------------------------------------------------
+try {
+  const smartText = (typeof msgText === 'string' && msgText.trim())
+    ? msgText.trim()
+    : '';
 
-      const smartFrom = from || null;
+  const smartFrom = from || null;
 
-      if (smartText && smartFrom) {
-  // 🔒 BYPASS smart intent for explicit variant queries
-  const variantExplicit =
-    /\b(4x4|4wd|awd|automatic|auto|at)\b/i.test(smartText);
+  if (smartText && smartFrom) {
 
-  if (!variantExplicit) {
-    const handled = await trySmartNewCarIntent(smartText, smartFrom);
-    if (handled) {
-      if (DEBUG) {
-        console.log("SMART NEW CAR INTENT handled.", {
-          from: smartFrom,
-          text: smartText
-        });
+    // 🔒 BYPASS smart intent for explicit variant queries
+    const variantExplicit =
+      /\b(4x4|4wd|awd|automatic|auto|at)\b/i.test(smartText);
+
+    const hasPricingIntent =
+      /\b(price|prices|pricing|on[- ]?road|quote|cost|deal|offer)\b/i.test(smartText);
+
+    const explicitStatePricingIntent =
+      /\b(price in|on[- ]?road in|cost in|rate in)\b/i.test(smartText);
+
+    if (!variantExplicit || hasPricingIntent || explicitStatePricingIntent) {
+      const handled = await trySmartNewCarIntent(smartText, smartFrom);
+      if (handled) {
+        if (DEBUG) {
+          console.log("SMART NEW CAR INTENT handled.", {
+            from: smartFrom,
+            text: smartText
+          });
+        }
+        return res.sendStatus(200);
       }
-      // We already replied from trySmartNewCarIntent
-      return res.sendStatus(200);
+    } else if (DEBUG) {
+      console.log("SMART NEW CAR INTENT bypassed for variant-explicit query", {
+        from: smartFrom,
+        text: smartText
+      });
     }
-  } else if (DEBUG) {
-    console.log("SMART NEW CAR INTENT bypassed for variant-explicit query", {
-      from: smartFrom,
-      text: smartText
-    });
-  }
-}
+
+  } // ✅ CLOSES: if (smartText && smartFrom)
+
 } catch (e) {
-      console.warn("Smart intent engine failed:", e?.message || e);
-    }
+  console.warn("Smart intent engine failed:", e?.message || e);
+}
 
     // ---- Admin alert for real incoming messages ----
     try {
