@@ -2119,6 +2119,7 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
 /* eslint-disable no-unused-vars */
 
 async function trySmartNewCarIntent(msgText, to) {
+console.log("EXEC_PATH: tryQuickNewCarQuote HIT", msgText);
   if (!msgText) return false;
   const tRaw = String(msgText || "");
   let t = tRaw.toLowerCase().trim();
