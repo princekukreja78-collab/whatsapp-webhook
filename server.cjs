@@ -3640,12 +3640,13 @@ if (
 // ---- STORE VARIANT LIST FOR SERIAL SELECTION ----
 if (!global.lastVariantList) global.lastVariantList = new Map();
 
-global.lastVariantList.set(to, {
+global.lastVariantList.set(from, {
   ts: Date.now(),
-  variants: distinct
+  variants: allMatches   // FULL pricing matches (correct)
 });
-        await waSendText(to, lines.join('\n'));
-        setLastService(to, 'NEW');
+
+await waSendText(to, lines.join('\n'));
+setLastService(to, 'NEW');
         return true;
       }
     }
