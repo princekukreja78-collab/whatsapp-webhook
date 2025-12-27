@@ -3640,7 +3640,7 @@ if (
 // ---- STORE VARIANT LIST FOR SERIAL SELECTION ----
 if (!global.lastVariantList) global.lastVariantList = new Map();
 
-global.lastVariantList.set(from, {
+global.lastVariantList.set(to, {
   ts: Date.now(),
   variants: allMatches   // FULL pricing matches (correct)
 });
