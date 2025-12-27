@@ -2123,6 +2123,14 @@ console.log("EXEC_PATH: tryQuickNewCarQuote HIT", msgText);
   if (!msgText) return false;
   const tRaw = String(msgText || "");
   let t = tRaw.toLowerCase().trim();
+
+// --------------------------------------------------
+// FORCE AUTOMATIC INTO userNorm (CRITICAL FIX)
+// --------------------------------------------------
+if (/\bautomatic\b/.test(t) && !userNorm.includes('at')) {
+  userNorm += ' at';
+}
+
 // --------------------------------------------------
 // SAFE BUDGET INITIALISATION (MUST EXIST FOR ALL PATHS)
 // --------------------------------------------------
@@ -3273,26 +3281,31 @@ if (wants4x2 && !wants4x4) {
     console.log('HARD_DRIVETRAIN_LOCK_APPLIED: 4x2 → remaining', allMatches.length);
   }
 }
-// ================= HARD TRANSMISSION LOCK (SAFE & FINAL) =================
-const wantsAutomatic = /\b(automatic|auto|at)\b/i.test(userNorm);
+// ================= HARD TRANSMISSION LOCK (FINAL FIX) =================
+const wantsAutomatic = /\b(at|automatic|auto)\b/i.test(userNorm);
 
 if (wantsAutomatic) {
   allMatches = allMatches.filter(m => {
     const v = normForMatch(
-      (m.row[m.idxVariant] || '') + ' ' +
-      (m.row[m.idxSuffix]  || '')
+      [
+        m.row[m.idxModel],
+        m.row[m.idxVariant],
+        m.row[m.idxSuffix],
+        m.row[m.idxTransmission],
+        m.row[m.idxFuel]
+      ].join(' ')
     );
-    return /\b(at|automatic|cvt|dct|tc)\b/i.test(v);
+
+    return /\b(at|automatic|cvt|dct|tc)\b/.test(v);
   });
 
   if (DEBUG) {
     console.log(
-      'HARD_TRANSMISSION_LOCK_APPLIED: automatic → remaining',
+      'HARD_TRANSMISSION_LOCK_APPLIED (EXPANDED): remaining',
       allMatches.length
     );
   }
 }
-
    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
 if (!allMatches.length) {
 
