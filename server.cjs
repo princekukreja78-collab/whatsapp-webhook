@@ -4379,8 +4379,13 @@ if (numMatch) {
       // Clear after successful selection
       global.lastVariantList.delete(from);
 
-      await sendSingleNewCarQuote(from, chosen);
-      return res.sendStatus(200); // 🔒 STOP ALL FURTHER PROCESSING
+     // Reuse existing single-quote flow by forcing single match
+await tryQuickNewCarQuote(
+  `${chosen.row[chosen.idxModel] || ''} ${chosen.row[chosen.idxVariant] || ''}`.trim(),
+  from
+);
+return res.sendStatus(200);
+
     }
   }
 }
