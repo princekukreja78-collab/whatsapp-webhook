@@ -3635,7 +3635,15 @@ if (
           lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
         }
         lines.push('');
-        lines.push('Reply with the *exact variant* (e.g., "Hycross ZXO Delhi individual") for a detailed deal.');
+        lines.push('Reply with the *number* (1–25) to get the detailed on-road price & offers for that variant.');
+
+// ---- STORE VARIANT LIST FOR SERIAL SELECTION ----
+if (!global.lastVariantList) global.lastVariantList = new Map();
+
+global.lastVariantList.set(to, {
+  ts: Date.now(),
+  variants: distinct   // IMPORTANT: same array used to render the list
+});
         await waSendText(to, lines.join('\n'));
         setLastService(to, 'NEW');
         return true;
