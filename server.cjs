@@ -4367,40 +4367,28 @@ const numMatch = msgText && msgText.trim().match(/^(\d{1,2})$/);
 if (numMatch) {
   const rec = global.lastVariantList.get(from);
 
-  // 🔒 Case 1: User typed a number but there is NO active variant list
+  // 🔒 No active variant list → silently ignore numbers
   if (!rec) {
-    await waSendText(
-      from,
-      'Please ask for a *car model* to see available variants.'
-    );
     return res.sendStatus(200);
   }
 
-  // 🔒 Case 2: Variant list exists but has expired
+  // 🔒 Expired list
   if (Date.now() - rec.ts > 5 * 60 * 1000) {
     global.lastVariantList.delete(from);
-    await waSendText(
-      from,
-      'That variant list has expired. Please ask for the model again.'
-    );
     return res.sendStatus(200);
   }
 
   const idx = Number(numMatch[1]) - 1;
 
-  // 🔒 Case 3: Invalid serial number
+  // 🔒 Invalid number
   if (!rec.variants[idx]) {
-    await waSendText(
-      from,
-      `Please reply with a number between 1 and ${rec.variants.length}.`
-    );
     return res.sendStatus(200);
   }
 
-  // 🔒 Case 4: Valid selection (ONE-TIME)
+  // 🔒 Valid ONE-TIME selection
   const chosen = rec.variants[idx];
 
-  // IMPORTANT: close the variant list permanently
+  // Close the variant list permanently
   global.lastVariantList.delete(from);
 
   // Reuse existing single-quote logic
