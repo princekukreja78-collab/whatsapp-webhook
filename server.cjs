@@ -3273,6 +3273,25 @@ if (wants4x2 && !wants4x4) {
     console.log('HARD_DRIVETRAIN_LOCK_APPLIED: 4x2 → remaining', allMatches.length);
   }
 }
+// ================= HARD TRANSMISSION LOCK (SAFE & FINAL) =================
+const wantsAutomatic = /\b(automatic|auto|at)\b/i.test(userNorm);
+
+if (wantsAutomatic) {
+  allMatches = allMatches.filter(m => {
+    const v = normForMatch(
+      (m.row[m.idxVariant] || '') + ' ' +
+      (m.row[m.idxSuffix]  || '')
+    );
+    return /\b(at|automatic|cvt|dct|tc)\b/i.test(v);
+  });
+
+  if (DEBUG) {
+    console.log(
+      'HARD_TRANSMISSION_LOCK_APPLIED: automatic → remaining',
+      allMatches.length
+    );
+  }
+}
 
    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
 if (!allMatches.length) {
