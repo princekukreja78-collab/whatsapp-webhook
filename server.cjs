@@ -3640,9 +3640,9 @@ if (
 // ---- STORE VARIANT LIST FOR SERIAL SELECTION ----
 if (!global.lastVariantList) global.lastVariantList = new Map();
 
-global.lastVariantList.set(to, {
+global.lastVariantList.set(from, {
   ts: Date.now(),
-  variants: distinct   // IMPORTANT: same array used to render the list
+  variants: distinct
 });
         await waSendText(to, lines.join('\n'));
         setLastService(to, 'NEW');
@@ -4356,6 +4356,34 @@ global.__WA_MSG_LOCK__.add(dedupKey);
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
     }
+// ==================================================
+// SERIAL NUMBER VARIANT SELECTION (TOP PRIORITY)
+// ==================================================
+if (!global.lastVariantList) global.lastVariantList = new Map();
+
+const numMatch = msgText && msgText.trim().match(/^(\d{1,2})$/);
+
+if (numMatch) {
+  const rec = global.lastVariantList.get(from);
+
+  if (rec && Array.isArray(rec.variants)) {
+    const idx = Number(numMatch[1]) - 1;
+
+    // Expiry safeguard: 5 minutes
+    if (Date.now() - rec.ts > 5 * 60 * 1000) {
+      global.lastVariantList.delete(from);
+    } else if (rec.variants[idx]) {
+      const chosen = rec.variants[idx];
+
+      // Clear after successful selection
+      global.lastVariantList.delete(from);
+
+      await sendSingleNewCarQuote(from, chosen);
+      return res.sendStatus(200); // 🔒 STOP ALL FURTHER PROCESSING
+    }
+  }
+}
+
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
 // Check last service to avoid hijacking active loan flows
