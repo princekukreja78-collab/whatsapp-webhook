@@ -3639,6 +3639,7 @@ if (
 
 // ---- STORE VARIANT LIST FOR SERIAL SELECTION ----
 if (!global.lastVariantList) global.lastVariantList = new Map();
+if (!global.panIndiaPrompt) global.panIndiaPrompt = new Map();
 
 global.lastVariantList.set(to, {
   ts: Date.now(),
@@ -3940,15 +3941,29 @@ try {
 }
 
 
- // ---------- CTA ----------
-  if (isSingleQuote) {
-    lines.push('\nReply *SPEC* for features or *EMI* for finance.');
-  }
-
-  await waSendText(to, lines.join('\n'));
-  setLastService(to, 'NEW');
-  return true;
+// ---------- CTA ----------
+if (isSingleQuote) {
+  lines.push('\nReply *SPEC model* for features or *EMI* for finance.');
 }
+
+// ---- PAN-INDIA FOLLOW-UP CONTEXT (SAFE) ----
+global.panIndiaPrompt.set(to, {
+  row: best.row,
+  header: tables[best.brand]?.header || [],
+  title: `${best.brand} ${mdl} ${varr}`
+});
+
+await waSendText(to, lines.join('\n'));
+
+await waSendText(
+  to,
+  'Would you like a *Pan-India on-road price comparison* for this variant?\n\nReply *YES* or *NO*.'
+);
+
+setLastService(to, 'PAN_INDIA_PROMPT');
+return true;
+}
+
    // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
 try {
   const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
