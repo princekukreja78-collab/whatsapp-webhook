@@ -3934,7 +3934,12 @@ if (
 
   const lines = [];
   lines.push(`*${best.brand}* ${mdl} ${varr}`);
-  lines.push(`*City:* ${city.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
+  const displayLocation =
+  (audience && audience !== 'DELHI')
+    ? audience
+    : city;
+
+lines.push(`*Location:* ${displayLocation.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
   if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
   if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
   if (best.onroad)
