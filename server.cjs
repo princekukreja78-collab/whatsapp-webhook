@@ -2124,6 +2124,75 @@ console.log("EXEC_PATH: tryQuickNewCarQuote HIT", msgText);
   const tRaw = String(msgText || "");
   let t = tRaw.toLowerCase().trim();
 
+// ================= PAN-INDIA YES / NO HANDLER =================
+const panSvc = (getLastService(to) || '').toUpperCase();
+
+if (lastSvc === 'PAN_INDIA_PROMPT') {
+  const reply = String(msgText || '').trim().toLowerCase();
+
+  // YES → show Pan-India pricing
+  if (reply === 'yes' || reply === 'y') {
+    const ctx = global.panIndiaPrompt?.get(to);
+
+    if (!ctx) {
+      await waSendText(
+        to,
+        'Sorry, I could not retrieve the variant again. Please ask for the quote once more.'
+      );
+      setLastService(to, 'NEW');
+      return true;
+    }
+
+    const aggregate = extractPanIndiaPricesFromRow(ctx.row, ctx.header);
+    const states = Object.keys(aggregate || {});
+
+    if (!states.length) {
+      await waSendText(
+        to,
+        'Pan-India pricing is not available for this variant.'
+      );
+      global.panIndiaPrompt.delete(to);
+      setLastService(to, 'NEW');
+      return true;
+    }
+
+    states.sort((a, b) => aggregate[a] - aggregate[b]);
+
+    const out = [];
+    out.push(`*${ctx.title} — Pan-India On-Road Pricing*`);
+    out.push('');
+    out.push(`✅ *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
+    out.push(`❌ *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
+    out.push('');
+    out.push('*State-wise prices:*');
+
+    states.forEach(st => {
+      out.push(`• *${st}* → ₹ ${fmtMoney(aggregate[st])}`);
+    });
+
+    await waSendText(to, out.join('\n'));
+
+    global.panIndiaPrompt.delete(to);
+    setLastService(to, 'NEW');
+    return true;
+  }
+
+  // NO → exit cleanly
+  if (reply === 'no' || reply === 'n') {
+    await waSendText(
+      to,
+      'No problem 👍 Let me know if you want EMI options or another quote.'
+    );
+    global.panIndiaPrompt.delete(to);
+    setLastService(to, 'NEW');
+    return true;
+  }
+
+  // Anything else → ask again
+  await waSendText(to, 'Please reply with *YES* or *NO*.');
+  return true;
+}
+
 // --------------------------------------------------
 // FORCE AUTOMATIC INTO userNorm (CRITICAL FIX)
 // --------------------------------------------------
