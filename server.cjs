@@ -2130,22 +2130,31 @@ const panSvc = (getLastService(to) || '').toUpperCase();
 if (panSvc === 'PAN_INDIA_PROMPT') {
   const reply = String(msgText || '').trim().toLowerCase();
 
-  // YES → delegate to existing Pan-India pricing logic
+  // YES → rerun smart intent WITH model + variant context
   if (reply === 'yes' || reply === 'y') {
-    // clean up prompt state
-    if (global.panIndiaPrompt) {
-      global.panIndiaPrompt.delete(to);
+    const ctx = global.panIndiaPrompt && global.panIndiaPrompt.get(to);
+
+    if (!ctx || !ctx.title) {
+      await waSendText(
+        to,
+        'Sorry, I could not retrieve the variant again. Please ask for the quote once more.'
+      );
+      setLastService(to, 'NEW');
+      return true;
     }
 
+    // cleanup state
+    global.panIndiaPrompt.delete(to);
     setLastService(to, 'NEW');
 
-    // Re-run the intent engine with explicit Pan-India intent
-    // This uses your EXISTING, WORKING Pan-India block
-    await trySmartNewCarIntent('pan india', to);
+    // 🔑 CRITICAL: send model + variant + pan india
+    const panIndiaText = `${ctx.title} pan india`;
+
+    await trySmartNewCarIntent(panIndiaText, to);
     return true;
   }
 
-  // NO → exit cleanly
+  // NO → clean exit
   if (reply === 'no' || reply === 'n') {
     await waSendText(
       to,
@@ -2160,7 +2169,7 @@ if (panSvc === 'PAN_INDIA_PROMPT') {
     return true;
   }
 
-  // Any other reply → ask again
+  // Anything else → prompt again
   await waSendText(
     to,
     'Please reply with *YES* or *NO*.'
