@@ -2864,15 +2864,45 @@ if (stateMatch) {
   if (stateMatch === 'mh') stateMatch = 'maharashtra';
 }
 
-// ---------------- DEFAULT CITY (LAST RESORT ONLY) ----------------
+// ---------------- DEFAULT CITY (DELHI UNLESS EXPLICIT) ----------------
 if (!cityMatch) {
   cityMatch = 'delhi';
 }
 
 const city = cityMatch;
 
-    const profile = (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] || 'individual';
-    const audience = /company|corporate|firm/i.test(profile) ? 'corporate' : 'individual';
+// ---------- PROFILE / AUDIENCE ----------
+const profile =
+  (t.match(/\b(individual|company|corporate|firm|personal)\b/) || [])[1] ||
+  'individual';
+
+const audience = /company|corporate|firm/i.test(profile)
+  ? 'corporate'
+  : 'individual';
+
+// ---------- PRICING CITY / STATE TOKEN (STRICT RULE) ----------
+// Default pricing is DELHI
+let priceCityToken = 'DELHI';
+
+// Change pricing ONLY if user explicitly typed a non-Delhi city
+const cityExplicit =
+  typeof city === 'string' &&
+  city.length > 0 &&
+  city.toLowerCase() !== 'delhi' &&
+  t.includes(city.toLowerCase());
+
+if (cityExplicit) {
+  try {
+    if (typeof CITY_TO_STATE === 'object' && CITY_TO_STATE[city]) {
+      priceCityToken = CITY_TO_STATE[city].toUpperCase();
+    } else {
+      // fallback: use city itself if sheet supports city columns
+      priceCityToken = city.toUpperCase();
+    }
+  } catch (e) {
+    priceCityToken = 'DELHI';
+  }
+}
 
     // ---------- BUDGET PARSER ----------
     function parseBudgetFromText(s) {
