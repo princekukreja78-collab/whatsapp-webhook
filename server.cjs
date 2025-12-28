@@ -1976,6 +1976,24 @@ function isAdvisory(msgText) {
 
   return false;
 }
+function extractModelsForComparisonFallback(text) {
+  if (!text) return [];
+  const t = text.toLowerCase();
+
+  // split on common comparison separators
+  const parts = t.split(/\bvs\b|v\/s|compare|comparison|better than|difference between|or/i)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  // take first 2 meaningful chunks
+  return parts.slice(0, 2)
+    .map(s =>
+      s
+        .replace(/price|onroad|on road|specs?|features?|mileage|compare|which is better/g, '')
+        .trim()
+    )
+    .filter(s => s.length >= 3);
+}
 
 // brochure index loader
 function loadBrochureIndex() {
@@ -2512,10 +2530,15 @@ function resolveStateFromRow(row, idxMap) {
 if (hasComparisonIntent && !wantsAllStates) {
 
   let foundModels = [];
-  if (typeof detectModelsFromText === 'function') {
-    foundModels = await detectModelsFromText(t);
-  }
 
+if (typeof detectModelsFromText === 'function') {
+  foundModels = await detectModelsFromText(t);
+}
+
+// 🔁 FALLBACK: simple text-based extraction
+if (!Array.isArray(foundModels) || foundModels.length < 2) {
+  foundModels = extractModelsForComparisonFallback(t);
+}
   if (Array.isArray(foundModels) && foundModels.length >= 2) {
     const m1 = foundModels[0];
     const m2 = foundModels[1];
