@@ -3983,8 +3983,13 @@ try {
   pricingLocation = city;
 }
 
+// ---------- LOCATION DISPLAY (MATCH PRICING STATE) ----------
+const displayLocation = cityExplicit
+  ? priceCityToken
+  : 'DELHI';
+
 lines.push(
-  `*Location:* ${pricingLocation.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`
+  `*Location:* ${displayLocation.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`
 );
   if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
   if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
