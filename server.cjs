@@ -3939,7 +3939,12 @@ if (
     ? audience
     : city;
 
-lines.push(`*Location:* ${displayLocation.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`);
+const pricingLocation =
+  (priceState || state || resolvedState || city || 'Delhi');
+
+lines.push(
+  `*Location:* ${String(pricingLocation).toUpperCase()} • *Profile:* ${profile.toUpperCase()}`
+);
   if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
   if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
   if (best.onroad)
