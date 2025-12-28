@@ -3933,17 +3933,28 @@ if (
   const fuelStr = best.fuel ? String(best.fuel).toUpperCase() : '';
 
   const lines = [];
-  lines.push(`*${best.brand}* ${mdl} ${varr}`);
-  const displayLocation =
-  (audience && audience !== 'DELHI')
-    ? audience
-    : city;
+lines.push(`*${best.brand}* ${mdl} ${varr}`);
 
-const pricingLocation =
-  (priceState || state || resolvedState || city || 'Delhi');
+// ✅ SAFE location display — no undefined variables
+let pricingLocation = city;
+
+try {
+  // If pricing row contains a city/state column, prefer it
+  if (
+    best &&
+    best.row &&
+    typeof best.idxCity === 'number' &&
+    best.idxCity >= 0 &&
+    best.row[best.idxCity]
+  ) {
+    pricingLocation = String(best.row[best.idxCity]);
+  }
+} catch (e) {
+  pricingLocation = city;
+}
 
 lines.push(
-  `*Location:* ${String(pricingLocation).toUpperCase()} • *Profile:* ${profile.toUpperCase()}`
+  `*Location:* ${pricingLocation.toUpperCase()} • *Profile:* ${profile.toUpperCase()}`
 );
   if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
   if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
