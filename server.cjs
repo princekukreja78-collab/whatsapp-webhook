@@ -4587,15 +4587,27 @@ if (numMatch) {
   // Close the variant list permanently
   global.lastVariantList.delete(from);
 
-  // Reuse existing single-quote logic
-  await tryQuickNewCarQuote(
-    `${chosen.row[chosen.idxModel] || ''} ${chosen.row[chosen.idxVariant] || ''}`.trim(),
-    from
-  );
+ // Reuse existing single-quote logic (SAFE FOR ALL VARIANT SHAPES)
+let queryText = '';
 
-  return res.sendStatus(200);
+if (chosen.row && typeof chosen.idxModel === 'number') {
+  const mdl = chosen.row[chosen.idxModel] || '';
+  const varr =
+    (typeof chosen.idxVariant === 'number' && chosen.row[chosen.idxVariant])
+      ? chosen.row[chosen.idxVariant]
+      : '';
+  queryText = `${mdl} ${varr}`.trim();
+} else if (chosen.title) {
+  // Fallback for simplified variant objects (BMW / Defender safe)
+  queryText = String(chosen.title).trim();
 }
 
+if (queryText) {
+  await tryQuickNewCarQuote(queryText, from);
+}
+
+return res.sendStatus(200);
+}
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
 // Check last service to avoid hijacking active loan flows
