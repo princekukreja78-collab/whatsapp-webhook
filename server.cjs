@@ -2129,76 +2129,79 @@ const panSvc = (getLastService(from) || '').toUpperCase();
 
 if (panSvc === 'PAN_INDIA_PROMPT') {
   const reply = String(msgText || '').trim().toLowerCase();
+  const isYes = reply === 'yes' || reply === 'y';
+  const isNo  = reply === 'no'  || reply === 'n';
 
-  // YES → rerun smart intent WITH model + variant context
-  if (reply === 'yes' || reply === 'y') {
-  const ctx = global.panIndiaPrompt && global.panIndiaPrompt.get(to);
-
-  if (!ctx || !ctx.row || !ctx.header) {
-    await waSendText(
-      to,
-      'Sorry, I could not retrieve the variant again. Please ask for the quote once more.'
-    );
-    setLastService(to, 'NEW');
+  // HARD GUARD: accept ONLY pure YES / NO
+  if (reply.includes(' ') || reply.length > 3) {
+    await waSendText(from, 'Please reply with *YES* or *NO* only.');
     return true;
   }
 
-  // ---- EXACT SAME LOGIC AS WORKING PAN-INDIA BLOCK ----
-  const aggregate = extractPanIndiaPricesFromRow(ctx.row, ctx.header);
-  const states = Object.keys(aggregate || {});
+  // YES → show Pan-India pricing
+  if (isYes) {
+    const ctx = global.panIndiaPrompt && global.panIndiaPrompt.get(from);
 
-  if (!states.length) {
-    await waSendText(
-      to,
-      'State-wise pricing is not available for this variant.'
-    );
-    global.panIndiaPrompt.delete(to);
-    setLastService(to, 'NEW');
+    if (!ctx || !ctx.row || !ctx.header) {
+      await waSendText(
+        from,
+        'Sorry, I could not retrieve the variant again. Please ask for the quote once more.'
+      );
+      setLastService(from, 'NEW');
+      return true;
+    }
+
+    const aggregate = extractPanIndiaPricesFromRow(ctx.row, ctx.header);
+    const states = Object.keys(aggregate || {});
+
+    if (!states.length) {
+      await waSendText(
+        from,
+        'State-wise pricing is not available for this variant.'
+      );
+      global.panIndiaPrompt.delete(from);
+      setLastService(from, 'NEW');
+      return true;
+    }
+
+    states.sort((a, b) => aggregate[a] - aggregate[b]);
+
+    const out = [];
+    out.push(`*${ctx.title} — Pan-India On-Road Pricing*`);
+    out.push('');
+    out.push(`✅ *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
+    out.push(`❌ *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
+    out.push('');
+    out.push('*State-wise prices:*');
+
+    states.forEach(st => {
+      out.push(`• *${st}* → ₹ ${fmtMoney(aggregate[st])}`);
+    });
+
+    await waSendText(from, out.join('\n'));
+
+    global.panIndiaPrompt.delete(from);
+    setLastService(from, 'NEW');
     return true;
   }
 
-  states.sort((a, b) => aggregate[a] - aggregate[b]);
-
-  const out = [];
-  out.push(`*${ctx.title} — Pan-India On-Road Pricing*`);
-  out.push('');
-  out.push(`✅ *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
-  out.push(`❌ *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
-  out.push('');
-  out.push('*State-wise prices:*');
-
-  states.forEach(st => {
-    out.push(`• *${st}* → ₹ ${fmtMoney(aggregate[st])}`);
-  });
-
-  await waSendText(to, out.join('\n'));
-
-  global.panIndiaPrompt.delete(to);
-  setLastService(to, 'NEW');
-  return true;
-}
   // NO → clean exit
-  if (reply === 'no' || reply === 'n') {
+  if (isNo) {
     await waSendText(
-      to,
+      from,
       'No problem 👍 Let me know if you want EMI options, specs, or another quote.'
     );
 
-    if (global.panIndiaPrompt) {
-      global.panIndiaPrompt.delete(to);
-    }
-
-    setLastService(to, 'NEW');
+    global.panIndiaPrompt.delete(from);
+    setLastService(from, 'NEW');
     return true;
   }
 
   // Anything else → prompt again
-  await waSendText(
-    to,
-    'Please reply with *YES* or *NO*.'
-  );
+  await waSendText(from, 'Please reply with *YES* or *NO*.');
   return true;
 }
+
 // --------------------------------------------------
 // FORCE AUTOMATIC INTO userNorm (CRITICAL FIX)
 // --------------------------------------------------
