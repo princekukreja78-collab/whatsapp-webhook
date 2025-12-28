@@ -2506,30 +2506,43 @@ function resolveStateFromRow(row, idxMap) {
     "airbags","turbo","sunroof","engine","mileage","bs6","e20"
   ];
 
-  // ------------------------------
-  // 1️⃣ COMPARISON INTENT
-  // ------------------------------
-  if (
-  /vs|compare|better|difference between/.test(t) &&
-  !wantsAllStates
-) {
-    const foundModels = (typeof detectModelsFromText === 'function') ? await detectModelsFromText(t) : [];
-    if (foundModels && foundModels.length >= 2) {
-      const m1 = foundModels[0];
-      const m2 = foundModels[1];
-      const comparison = (typeof SignatureAI_RAG === 'function')
-        ? await SignatureAI_RAG(
-          `Provide a clean customer-friendly comparison between ${m1} and ${m2} covering:\n - Price\n - Engine & performance\n - Mileage\n - Features & safety\n - Comfort & space\n - Best for which type of customer`
-        )
-        : `Comparison: ${m1} vs ${m2}`;
-      await waSendText(to, `*${m1} vs ${m2} — Detailed Comparison*\n\n${comparison}`);
-      setLastService(to, "NEW");
-      return true;
-    } else {
-      await waSendText(to, "Please tell me the two car models you want me to compare (e.g., *Creta vs Hyryder*).");
-      return true;
-    }
+ // ======================================================
+// 1️⃣ COMPARISON INTENT (MINIMAL, SAFE)
+// ======================================================
+if (hasComparisonIntent && !wantsAllStates) {
+
+  let foundModels = [];
+  if (typeof detectModelsFromText === 'function') {
+    foundModels = await detectModelsFromText(t);
   }
+
+  if (Array.isArray(foundModels) && foundModels.length >= 2) {
+    const m1 = foundModels[0];
+    const m2 = foundModels[1];
+
+    const out = [];
+    out.push(`*${m1} vs ${m2} — Quick Comparison*`);
+    out.push('');
+    out.push('• *Price:* Depends on variant & city');
+    out.push('• *Engine & performance:* Varies by powertrain');
+    out.push('• *Mileage:* Differs by fuel type');
+    out.push('• *Features & safety:* Variant-dependent');
+    out.push('• *Comfort & space:* Segment-specific');
+    out.push('');
+    out.push('Reply with *PRICE*, *SPEC*, or *COMPARE VARIANTS* to go deeper.');
+
+    await waSendText(to, out.join('\n'));
+    setLastService(to, 'NEW');
+    return true; // ⛔ HARD STOP
+  }
+
+  await waSendText(
+    to,
+    'Please tell me the two models to compare (example: *Creta vs Hyryder*).'
+  );
+  return true;
+}
+
 // 🔒 GUARD: Skip NEW-car budget when USED-car intent is active
 if (
   lastSvc &&
