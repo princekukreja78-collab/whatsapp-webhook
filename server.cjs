@@ -3926,19 +3926,6 @@ if (
   if (distinct.length >= VARIANT_LIST_LIMIT) break;
 }
 
-if (distinct.length > 1 && !userHasExplicitVariant) {
-  const lines = [];
-  lines.push(`*Available variants — ${coreTokensArr[0].toUpperCase()}*`);
-  distinct.forEach((d, i) => {
-    lines.push(`${i + 1}) *${d.title}* – On-road ₹ ${fmtMoney(d.onroad)}`);
-  });
-  lines.push('');
-  lines.push('Reply with the *exact variant* for price, offers & EMI.');
-
-  await waSendText(to, lines.join('\n'));
-  setLastService(to, 'NEW');
-  return true;
-}
 console.log('DEBUG_FLOW: BEFORE SINGLE QUOTE', {
   allMatches: allMatches.length,
   exactModelHit,
