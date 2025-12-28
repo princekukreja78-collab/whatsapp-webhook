@@ -2125,35 +2125,58 @@ console.log("EXEC_PATH: tryQuickNewCarQuote HIT", msgText);
   let t = tRaw.toLowerCase().trim();
 
 // ================= PAN-INDIA YES / NO HANDLER =================
-const panSvc = (getLastService(to) || '').toUpperCase();
+const panSvc = (getLastService(from) || '').toUpperCase();
 
 if (panSvc === 'PAN_INDIA_PROMPT') {
   const reply = String(msgText || '').trim().toLowerCase();
 
   // YES → rerun smart intent WITH model + variant context
   if (reply === 'yes' || reply === 'y') {
-    const ctx = global.panIndiaPrompt && global.panIndiaPrompt.get(to);
+  const ctx = global.panIndiaPrompt && global.panIndiaPrompt.get(to);
 
-    if (!ctx || !ctx.title) {
-      await waSendText(
-        to,
-        'Sorry, I could not retrieve the variant again. Please ask for the quote once more.'
-      );
-      setLastService(to, 'NEW');
-      return true;
-    }
-
-    // cleanup state
-    global.panIndiaPrompt.delete(to);
+  if (!ctx || !ctx.row || !ctx.header) {
+    await waSendText(
+      to,
+      'Sorry, I could not retrieve the variant again. Please ask for the quote once more.'
+    );
     setLastService(to, 'NEW');
-
-    // 🔑 CRITICAL: send model + variant + pan india
-    const panIndiaText = `${ctx.title} pan india`;
-
-    await trySmartNewCarIntent(panIndiaText, to);
     return true;
   }
 
+  // ---- EXACT SAME LOGIC AS WORKING PAN-INDIA BLOCK ----
+  const aggregate = extractPanIndiaPricesFromRow(ctx.row, ctx.header);
+  const states = Object.keys(aggregate || {});
+
+  if (!states.length) {
+    await waSendText(
+      to,
+      'State-wise pricing is not available for this variant.'
+    );
+    global.panIndiaPrompt.delete(to);
+    setLastService(to, 'NEW');
+    return true;
+  }
+
+  states.sort((a, b) => aggregate[a] - aggregate[b]);
+
+  const out = [];
+  out.push(`*${ctx.title} — Pan-India On-Road Pricing*`);
+  out.push('');
+  out.push(`✅ *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
+  out.push(`❌ *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
+  out.push('');
+  out.push('*State-wise prices:*');
+
+  states.forEach(st => {
+    out.push(`• *${st}* → ₹ ${fmtMoney(aggregate[st])}`);
+  });
+
+  await waSendText(to, out.join('\n'));
+
+  global.panIndiaPrompt.delete(to);
+  setLastService(to, 'NEW');
+  return true;
+}
   // NO → clean exit
   if (reply === 'no' || reply === 'n') {
     await waSendText(
