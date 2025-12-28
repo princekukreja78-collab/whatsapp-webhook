@@ -3749,9 +3749,17 @@ if (
   const variantVal = m.idxVariant >= 0 ? String(row[m.idxVariant] || '').toUpperCase() : '';
 
   // 🔒 HARD BASE-MODEL LOCK (NO MIXING)
-  if (!modelVal.startsWith(baseModelToken)) continue;
+  if (
+  baseModelToken &&
+  !modelVal.includes(baseModelToken)
+) continue;
 
-  const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
+  const title = [
+  modelVal,
+  variantVal,
+  m.fuel || ''
+].filter(Boolean).join(' ').trim();
+
   if (!title) continue;
   if (seenTitles.has(title)) continue;
 
@@ -3789,7 +3797,7 @@ if (!global.panIndiaPrompt) global.panIndiaPrompt = new Map();
 
 global.lastVariantList.set(to, {
   ts: Date.now(),
-  variants: allMatches   // FULL pricing matches (correct)
+  variants: distinct   // EXACTLY what user sees
 });
 
 await waSendText(to, lines.join('\n'));
@@ -3904,7 +3912,12 @@ if (
   continue;
 }
 
-  const title = [modelVal, variantVal].filter(Boolean).join(' ').trim();
+  const title = [
+  modelVal,
+  variantVal,
+  m.fuel || ''
+].filter(Boolean).join(' ').trim();
+
   if (!title || seenTitles.has(title)) continue;
 
   seenTitles.add(title);
