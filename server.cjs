@@ -1487,48 +1487,39 @@ function simulateBulletPlan({ amount, rate, months, bulletPct }) {
     total_payable
   };
 }
-// ---------------- Build SINGLE used car quote (from row) ----------------
-function buildSingleUsedCarQuote(row) {
+// ---------------- Build SINGLE used car quote (REUSE EXISTING FORMAT) ----------------
+async function buildSingleUsedCarQuote(row, from) {
   if (!row || !Array.isArray(row)) {
     return { text: 'Used car details unavailable.' };
   }
 
-  // Use the SAME header logic as buildUsedCarQuoteFreeText
-  // We rely on column positions already resolved there
-  // This keeps behavior consistent
+  // Build a query from the row so we reuse the SAME formatter
+  const parts = [];
+  for (const v of row) {
+    const s = String(v || '').trim();
+    if (!s) continue;
 
-  try {
-    const make   = row.find(v => typeof v === 'string' && v.length && v === v.toUpperCase()) || '';
-    const values = row.map(v => String(v || '').trim()).filter(Boolean);
-
-    const textLines = [];
-    textLines.push('*PRE-OWNED CAR DETAILS*');
-    textLines.push('');
-
-    // Best-effort rendering (safe, no crash)
-    values.slice(0, 8).forEach(v => {
-      if (v) textLines.push(`• ${v}`);
-    });
-
-    // Try to detect a photo link
-    let picLink = '';
-    for (const v of row) {
-      const s = String(v || '');
-      if (s.startsWith('http') && /(jpg|jpeg|png|webp)/i.test(s)) {
-        picLink = s;
-        break;
-      }
+    // Pick likely identifiers: brand / model / year
+    if (
+      /\b(19|20)\d{2}\b/.test(s) ||   // year
+      s.length <= 20                  // brand / model / variant
+    ) {
+      parts.push(s);
     }
 
-    return {
-      text: textLines.join('\n'),
-      picLink
-    };
-  } catch (e) {
-    return { text: 'Unable to build used car quote.' };
+    if (parts.length >= 3) break;
   }
-}
 
+  const queryText = parts.join(' ');
+
+  // Reuse the existing used-car quote engine
+  const res = await buildUsedCarQuoteFreeText({
+    query: queryText,
+    from
+  });
+
+  return res || { text: 'Used car quote unavailable.' };
+}
 // ---------------- Build used car quote ----------------
 async function buildUsedCarQuoteFreeText({ query, from }) {
   const rows = await loadUsedSheetRows();
@@ -1772,7 +1763,10 @@ global.lastUsedCarList.set(from, {
         lines.push(line);
       }
       lines.push('');
-      lines.push('Please reply with the *exact car* you are interested in (for example: "Audi A6 2018") for a detailed quote.');
+      lines.push(
+  'Reply with the *number* (1, 2, 3…) to get full details instantly, or type the *car name* (e.g. "Audi A6 2018").'
+);
+
 // ---- STORE USED CAR LIST FOR SERIAL SELECTION (BRAND FLOW) ----
 if (!global.lastUsedCarList) global.lastUsedCarList = new Map();
 global.lastUsedCarList.set(from, {
@@ -4667,7 +4661,7 @@ if (numMatch) {
   const row = usedRec.rows[idx];
   global.lastUsedCarList.delete(from);
 
-  const { text, picLink } = buildSingleUsedCarQuote(row);
+  const { text, picLink } = await buildSingleUsedCarQuote(row, from);
 
   if (picLink) {
     await waSendImage(from, picLink, text);
