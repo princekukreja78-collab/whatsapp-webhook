@@ -971,7 +971,7 @@ async function waSendListMenu(to) {
   ];
   const interactive = {
     type: 'list',
-    header: { type: 'text', text: 'MR. CAR SERVICES' },
+    header: { type: 'text', text: 'VehYra by MR. CAR SERVICES' },
     body:   { text: 'Please choose one option 👇' },
     footer: { text: 'Premium Deals • Trusted Service • Mr. Car' },
     action: { button: 'Select Service', sections: [ { title: 'Available', rows } ] }
@@ -1486,6 +1486,47 @@ function simulateBulletPlan({ amount, rate, months, bulletPct }) {
     total_bullets_paid: Math.round(total_bullets_paid),
     total_payable
   };
+}
+// ---------------- Build SINGLE used car quote (from row) ----------------
+function buildSingleUsedCarQuote(row) {
+  if (!row || !Array.isArray(row)) {
+    return { text: 'Used car details unavailable.' };
+  }
+
+  // Use the SAME header logic as buildUsedCarQuoteFreeText
+  // We rely on column positions already resolved there
+  // This keeps behavior consistent
+
+  try {
+    const make   = row.find(v => typeof v === 'string' && v.length && v === v.toUpperCase()) || '';
+    const values = row.map(v => String(v || '').trim()).filter(Boolean);
+
+    const textLines = [];
+    textLines.push('*PRE-OWNED CAR DETAILS*');
+    textLines.push('');
+
+    // Best-effort rendering (safe, no crash)
+    values.slice(0, 8).forEach(v => {
+      if (v) textLines.push(`• ${v}`);
+    });
+
+    // Try to detect a photo link
+    let picLink = '';
+    for (const v of row) {
+      const s = String(v || '');
+      if (s.startsWith('http') && /(jpg|jpeg|png|webp)/i.test(s)) {
+        picLink = s;
+        break;
+      }
+    }
+
+    return {
+      text: textLines.join('\n'),
+      picLink
+    };
+  } catch (e) {
+    return { text: 'Unable to build used car quote.' };
+  }
 }
 
 // ---------------- Build used car quote ----------------
@@ -5426,7 +5467,7 @@ case 'BTN_LOAN_CUSTOM':
     if (shouldGreetNow(from, msgText)) {
       await waSendText(
         from,
-        '🔴 *MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.'
+        '🔴 *VehYra by MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.'
       );
       await waSendListMenu(from);
       return res.sendStatus(200);
