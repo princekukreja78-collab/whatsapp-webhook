@@ -5221,29 +5221,23 @@ await waSendText(
 case 'BTN_USED_MORE':
   setLastService(from, 'USED');
   await waSendText(
-    from,
-    '🚘 *Used Car Search*\n\n' +
-    'Find the right pre-owned car in 4 simple ways:\n\n' +
-    '1️⃣ *Model-based search*\n' +
-    'Example: `Creta`\n' +
-    '→ View available used Creta options\n\n' +
-    '2️⃣ *Model + year + city*\n' +
-    'Examples:\n' +
-    '• `Creta 2021 Delhi`\n' +
-    '• `City 2019 Mumbai`\n' +
-    '→ Price, condition & availability\n\n' +
-    '3️⃣ *Budget-based search*\n' +
-    'Examples:\n' +
-    '• `SUV under 8 lakh`\n' +
-    '• `Car under 5 lakh`\n' +
-    '→ Best options in your budget\n\n' +
-    '4️⃣ *Specific requirement*\n' +
-    'Example: `Diesel automatic SUV Delhi`\n' +
-    '→ Closest matching cars available\n\n' +
-    'Type exactly as shown above.'
-  );
-  return res.sendStatus(200);
-
+  from,
+  '🚘 *Used Car Search*\n\n' +
+  'Find the right pre-owned car in these simple ways:\n\n' +
+  '1️⃣ *Brand or model search*\n' +
+  'Examples:\n' +
+  '• `Audi`\n' +
+  '• `Creta`\n\n' +
+  '→ View available used car options\n\n' +
+  '2️⃣ *Budget-based search*\n' +
+  'Examples:\n' +
+  '• `Car around 15 lakh`\n' +
+  '• `Used car around 18 lakh`\n' +
+  '• `Budget 15 lakh`\n\n' +
+  '→ Best options near your budget\n\n' +
+  '💡 You can also reply with the *number* from any list shown to get full details instantly.'
+);
+return res.sendStatus(200);
         case 'SRV_SELL_CAR':
           setLastService(from, 'SELL');
           await waSendText(
