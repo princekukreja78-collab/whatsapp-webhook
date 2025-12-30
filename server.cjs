@@ -2749,7 +2749,7 @@ if (
         if (dynamicPicks.length) {
           dynamicPicks.sort((a,b) => Math.abs(a.onroad - budget) - Math.abs(b.onroad - budget));
           const out = [];
-          out.push(`*Best New Car Options Under ₹${fmtMoney(budget)}*`);
+          out.push(`*Best New Car Options Around ₹${fmtMoney(budget)}*`);
           out.push('');
           if (wantsSUV) out.push('• Segment: *SUV*'); else if (wantsSedan) out.push('• Segment: *Sedan*'); else if (wantsHatch) out.push('• Segment: *Hatchback*'); else out.push('• Segment: *Any*');
           out.push('');
@@ -2768,7 +2768,7 @@ if (
     const picks = CARS.filter(c => c.price <= budget && ((wantsSUV && c.type === "SUV") || (wantsSedan && c.type === "SEDAN") || (wantsHatch && c.type === "HATCH") || (!wantsSUV && !wantsSedan && !wantsHatch)));
     if (picks.length > 0) {
       const out = [];
-      out.push(`*Best New Car Options Under ₹${fmtMoney(budget)}*`);
+      out.push(`*Best New Car Options Around ₹${fmtMoney(budget)}*`);
       if (wantsSUV) out.push("• Segment: *SUV*"); else if (wantsSedan) out.push("• Segment: *Sedan*"); else if (wantsHatch) out.push("• Segment: *Hatchback*"); else out.push("• Segment: *Any*");
       out.push("");
       picks.slice(0, 6).forEach(c => { out.push(`• *${c.model}* — starts at ₹${fmtMoney(c.price)}`); });
@@ -5210,8 +5210,9 @@ await waSendText(
   '→ Lowest & highest prices across states\n\n' +
   '4️⃣ *Budget-based search*\n' +
   'Examples:\n' +
-  '• `SUV under 20 lakh`\n' +
-  '• `Car under 15 lakh`\n' +
+  '• `SUV around 20 lakh`\n' +
+  '• `Car around 15 lakh`\n' +
+  '• `Budget 15 lakh`\n\n' +
   '→ Best options available in your budget\n\n' +
   'Type exactly as shown above.'
 );
