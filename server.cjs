@@ -1489,7 +1489,7 @@ function simulateBulletPlan({ amount, rate, months, bulletPct }) {
 }
 
 // ---------------- Build used car quote ----------------
-async function buildUsedCarQuoteFreeText({ query }) {
+async function buildUsedCarQuoteFreeText({ query, from }) {
   const rows = await loadUsedSheetRows();
   if (!rows || !rows.length) {
     return { text: 'Used car pricing not configured.' };
@@ -5532,7 +5532,7 @@ case 'BTN_LOAN_CUSTOM':
       const lastSvc = getLastService(from);
 
       if (explicitUsed || hasYear || lastSvc === 'USED') {
-        const usedRes = await buildUsedCarQuoteFreeText({ query: msgText });
+        const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
         await waSendText(from, usedRes.text || 'Used car quote failed.');
         if (usedRes.picLink) {
           await waSendText(from, `Photos: ${usedRes.picLink}`);
