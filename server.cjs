@@ -1647,6 +1647,12 @@ async function buildUsedCarQuoteFreeText({ query }) {
           }
         }
       }
+// ---- STORE USED CAR LIST FOR SERIAL SELECTION (BUDGET FLOW) ----
+if (!global.lastUsedCarList) global.lastUsedCarList = new Map();
+global.lastUsedCarList.set(from, {
+  ts: Date.now(),
+  rows: budgetMatches.map(bm => bm.row)
+});
 
       return { text: lines.join('\n'), picLink };
     }
@@ -1726,6 +1732,13 @@ async function buildUsedCarQuoteFreeText({ query }) {
       }
       lines.push('');
       lines.push('Please reply with the *exact car* you are interested in (for example: "Audi A6 2018") for a detailed quote.');
+// ---- STORE USED CAR LIST FOR SERIAL SELECTION (BRAND FLOW) ----
+if (!global.lastUsedCarList) global.lastUsedCarList = new Map();
+global.lastUsedCarList.set(from, {
+  ts: Date.now(),
+  rows: top.map(t => t.row)
+});
+
       return { text: lines.join('\n') };
     }
   }
@@ -4544,56 +4557,85 @@ global.__WA_MSG_LOCK__.add(dedupKey);
 // SERIAL NUMBER VARIANT SELECTION (TOP PRIORITY)
 // ==================================================
 if (!global.lastVariantList) global.lastVariantList = new Map();
+if (!global.lastUsedCarList) global.lastUsedCarList = new Map();
 
 const numMatch = msgText && msgText.trim().match(/^(\d{1,2})$/);
 
 if (numMatch) {
+
+  // ================= NEW CAR SERIAL SELECTION =================
   const rec = global.lastVariantList.get(from);
 
-  // 🔒 No active variant list → silently ignore numbers
-  if (!rec) {
+  if (rec) {
+    // 🔒 Expired list
+    if (Date.now() - rec.ts > 5 * 60 * 1000) {
+      global.lastVariantList.delete(from);
+      return res.sendStatus(200);
+    }
+
+    const idx = Number(numMatch[1]) - 1;
+
+    // 🔒 Invalid number
+    if (!rec.variants[idx]) {
+      return res.sendStatus(200);
+    }
+
+    const chosen = rec.variants[idx];
+    global.lastVariantList.delete(from);
+
+    let queryText = '';
+
+    if (chosen.row && typeof chosen.idxModel === 'number') {
+      const mdl = chosen.row[chosen.idxModel] || '';
+      const varr =
+        (typeof chosen.idxVariant === 'number' && chosen.row[chosen.idxVariant])
+          ? chosen.row[chosen.idxVariant]
+          : '';
+      queryText = `${mdl} ${varr}`.trim();
+    } else if (chosen.title) {
+      queryText = String(chosen.title).trim();
+    }
+
+    if (queryText) {
+      await tryQuickNewCarQuote(queryText, from);
+    }
+
+    return res.sendStatus(200);
+  }
+
+  // ================= USED CAR SERIAL SELECTION =================
+  const usedRec = global.lastUsedCarList.get(from);
+
+  if (!usedRec) {
     return res.sendStatus(200);
   }
 
   // 🔒 Expired list
-  if (Date.now() - rec.ts > 5 * 60 * 1000) {
-    global.lastVariantList.delete(from);
+  if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
+    global.lastUsedCarList.delete(from);
     return res.sendStatus(200);
   }
 
   const idx = Number(numMatch[1]) - 1;
 
   // 🔒 Invalid number
-  if (!rec.variants[idx]) {
+  if (!usedRec.rows || !usedRec.rows[idx]) {
     return res.sendStatus(200);
   }
 
-  // 🔒 Valid ONE-TIME selection
-  const chosen = rec.variants[idx];
+  const row = usedRec.rows[idx];
+  global.lastUsedCarList.delete(from);
 
-  // Close the variant list permanently
-  global.lastVariantList.delete(from);
+  const { text, picLink } = buildSingleUsedCarQuote(row);
 
- // Reuse existing single-quote logic (SAFE FOR ALL VARIANT SHAPES)
-let queryText = '';
+  if (picLink) {
+    await waSendImage(from, picLink, text);
+  } else {
+    await waSendText(from, text);
+  }
 
-if (chosen.row && typeof chosen.idxModel === 'number') {
-  const mdl = chosen.row[chosen.idxModel] || '';
-  const varr =
-    (typeof chosen.idxVariant === 'number' && chosen.row[chosen.idxVariant])
-      ? chosen.row[chosen.idxVariant]
-      : '';
-  queryText = `${mdl} ${varr}`.trim();
-} else if (chosen.title) {
-  // Fallback for simplified variant objects (BMW / Defender safe)
-  queryText = String(chosen.title).trim();
-}
-
-if (queryText) {
-  await tryQuickNewCarQuote(queryText, from);
-}
-
-return res.sendStatus(200);
+  setLastService(from, 'USED');
+  return res.sendStatus(200);
 }
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
