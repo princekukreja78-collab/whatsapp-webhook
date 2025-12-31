@@ -2269,6 +2269,10 @@ async function trySmartNewCarIntent(msgText, to) {
   // 👇 ONLY AFTER THIS SHOULD NORMAL INTENT LOGIC RUN
   const tRaw = String(msgText || "");
   let t = tRaw.toLowerCase().trim();
+// ---------------- LOCAL VARIANT LOCK (REQUIRED) ----------------
+const hasVariantLock =
+  /\b(4x4|4\/4|4x2|4\/2|automatic|auto|at|mt|dsg|cvt)\b/i.test(t);
+
 
 // --------------------------------------------------
 // FORCE AUTOMATIC INTO userNorm (CRITICAL FIX)
@@ -2342,9 +2346,6 @@ const wantsModelList =
 
 const explicitStatePricingIntent =
   /\b(price in|on[- ]?road in|cost in|rate in)\b/i.test(t);
-
-const hasVariantLock =
-  /\b(4x4|4\/2|4x2|automatic|auto|at|mt)\b/i.test(t);
 
 // ---------------- DEBUG: INTENT SNAPSHOT ----------------
 if (DEBUG) {
@@ -4614,9 +4615,12 @@ if (numMatch) {
 
     // 🔒 Invalid number
     if (!rec.variants[idx]) {
-      return res.sendStatus(200);
-    }
-
+  await waSendText(
+    from,
+    `Please reply with a number between 1 and ${rec.variants.length}.`
+  );
+  return res.sendStatus(200);
+}
     const chosen = rec.variants[idx];
     global.lastVariantList.delete(from);
 
