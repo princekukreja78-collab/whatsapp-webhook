@@ -4594,7 +4594,9 @@ global.__WA_MSG_LOCK__.add(dedupKey);
 if (!global.lastVariantList) global.lastVariantList = new Map();
 if (!global.lastUsedCarList) global.lastUsedCarList = new Map();
 
-const numMatch = msgText && msgText.trim().match(/^(\d{1,2})$/);
+// Extract serial from text OR list/button reply
+const src = `${selectedId || ''} ${msgText || ''}`;
+const numMatch = src.match(/\b(\d{1,2})\b/);
 
 if (numMatch) {
 
