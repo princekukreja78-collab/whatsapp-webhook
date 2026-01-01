@@ -4601,12 +4601,12 @@ if (numMatch) {
   // ================= NEW CAR SERIAL SELECTION =================
   const lastSvc = getLastService(from);
 
- // 🔒 HARD LOCK: serial selection valid ONLY immediately after variant list
-if (lastSvc !== 'NEW_VARIANT_LIST') {
+const rec = global.lastVariantList.get(from);
+
+// 🔒 Only enforce lock if a variant list actually exists
+if (rec && lastSvc !== 'NEW_VARIANT_LIST') {
   return res.sendStatus(200);
 }
-
- const rec = global.lastVariantList.get(from);
 
   if (rec) {
     // 🔒 Expired list
