@@ -3843,13 +3843,13 @@ if (
 if (!global.lastVariantList) global.lastVariantList = new Map();
 if (!global.panIndiaPrompt) global.panIndiaPrompt = new Map();
 
-global.lastVariantList.set(to, {
+global.lastVariantList.set(from, {
   ts: Date.now(),
   variants: distinct   // EXACTLY what user sees
 });
 
-await waSendText(to, lines.join('\n'));
-setLastService(to, 'NEW');
+await waSendText(from, lines.join('\n'));
+setLastService(from, 'NEW_VARIANT_LIST');
         return true;
       }
     }
