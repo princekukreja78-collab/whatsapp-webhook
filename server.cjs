@@ -4381,6 +4381,9 @@ app.post('/webhook', async (req, res) => {
           value  = change?.value || {};
         }
       }
+// ✅ capture the phone number that RECEIVED the message
+const incomingPhoneNumberId = value?.metadata?.phone_number_id;
+
     } catch (e) {
       console.warn("WEBHOOK PARSE FAILED:", e?.message || e);
       entry  = null;
@@ -5798,7 +5801,9 @@ useLink = imageUrl;
 
 // send via WhatsApp Cloud API
 const token = process.env.META_TOKEN;
-const phoneNumberId = process.env.PHONE_NUMBER_ID;
+const phoneNumberId =
+  incomingPhoneNumberId || process.env.PHONE_NUMBER_ID;
+
 if (!token || !phoneNumberId) return res.status(500).json({ ok:false, error:'missing META_TOKEN or PHONE_NUMBER_ID' });
 
 const body = {
@@ -5822,16 +5827,19 @@ return res.status(500).json({ ok:false, error: String(e) });
 }
 });
 // === waSendImage helper (WhatsApp Cloud API) ===
-async function waSendImage(to, mediaId, caption="") {
+async function waSendImage(to, mediaId, phoneNumberId, caption = "") {
   const token = process.env.META_TOKEN;
-  const phoneNumberId = process.env.PHONE_NUMBER_ID;
+  if (!token || !phoneNumberId) {
+    throw new Error("Missing META_TOKEN or phoneNumberId");
+  }
+
   const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
 
   const payload = {
     messaging_product: "whatsapp",
-    to: to,
+    to: String(to).replace(/\D/g, ""),
     type: "image",
-    image: { id: mediaId, caption: caption }
+    image: { id: mediaId, caption }
   };
 
   const r = await fetch(url, {
@@ -5953,39 +5961,55 @@ async function waForwardImage(to, mediaId, caption = "") {
 
 
 // === uploadMediaToWhatsApp: upload a local file to WhatsApp Cloud and return media_id ===
-async function uploadMediaToWhatsApp(localPath) {
+async function uploadMediaToWhatsApp(localPath, phoneNumberId) {
   try {
-    const token = process.env.META_TOKEN || process.env.WA_TOKEN || process.env.META_ACCESS_TOKEN;
-    const phoneNumberId = (process.env.PHONE_NUMBER_ID || process.env.WA_PHONE_NUMBER_ID || "").trim();
-    if (!token || !phoneNumberId) throw new Error('Missing META_TOKEN or PHONE_NUMBER_ID');
+    const token =
+      process.env.META_TOKEN ||
+      process.env.WA_TOKEN ||
+      process.env.META_ACCESS_TOKEN;
+
+    if (!token || !phoneNumberId) {
+      throw new Error('Missing META_TOKEN or phoneNumberId');
+    }
 
     // resolve local file path (accept "/uploads/xxx" or "uploads/xxx" or "public/uploads/xxx")
     const rel = String(localPath).replace(/^\/+/, '');
     let fullPath = path.resolve(__dirname, rel);
+
     if (!fs.existsSync(fullPath)) {
-      // try under public/
       fullPath = path.resolve(__dirname, 'public', rel);
     }
-    if (!fs.existsSync(fullPath)) throw new Error('Local file not found: ' + fullPath);
+    if (!fs.existsSync(fullPath)) {
+      throw new Error('Local file not found: ' + fullPath);
+    }
 
     const form = new FormData();
     form.append('file', fs.createReadStream(fullPath));
     form.append('messaging_product', 'whatsapp');
 
-    const resp = await fetch(`https://graph.facebook.com/v17.0/${phoneNumberId}/media`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + token, ...form.getHeaders() },
-      body: form
-    });
+    const resp = await fetch(
+      `https://graph.facebook.com/v17.0/${phoneNumberId}/media`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + token,
+          ...form.getHeaders()
+        },
+        body: form
+      }
+    );
 
     const j = await resp.json().catch(() => null);
     if (!resp.ok) {
       throw new Error('Upload failed: ' + JSON.stringify(j));
     }
-    // usually { id: "..." }
-    return j && (j.id || j.media || j) ;
+
+    return j && (j.id || j.media || j);
   } catch (e) {
-    console.error('uploadMediaToWhatsApp error', e && e.message ? e.message : e);
+    console.error(
+      'uploadMediaToWhatsApp error',
+      e && e.message ? e.message : e
+    );
     throw e;
   }
 }
