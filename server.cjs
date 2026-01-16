@@ -891,7 +891,8 @@ async function waSendImage(to, imageUrl, caption = "") {
 // === ONE SINGLE GREETING (image header + personalised text body) ===
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
-    throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
+    console.error("WA SEND SKIPPED: Missing META_TOKEN or phoneNumberId");
+return;
   }
 
   const displayName = name || "Customer";
@@ -6107,9 +6108,10 @@ async function fetchContactsFromSheet() {
 // ORDER = 1) TEMPLATE FIRST  2) POSTER IMAGE SECOND
 
 async function sendSheetWelcomeTemplate_OLD(to, name = "Customer") {
-  if (!META_TOKEN || !PHONE_NUMBER_ID) {
-    throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
-  }
+  if (!META_TOKEN || !phoneNumberId) {
+  console.error("WA SEND SKIPPED: META_TOKEN or PHONE_NUMBER_ID not set");
+  return;
+}
 
   const displayName = name || "Customer";
 
