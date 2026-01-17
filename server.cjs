@@ -651,7 +651,6 @@ async function autoIngest(enriched = {}) {
 
 // ---------------- ENV ----------------
 const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
-const PHONE_NUMBER_ID = (process.env.PHONE_NUMBER_ID || '').trim();
 const ADMIN_WA        = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
 const VERIFY_TOKEN    = (process.env.VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
 
@@ -680,6 +679,16 @@ const USED_CAR_ROI_INTERNAL   = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0
 // keep DEBUG false by default unless env enables it explicitly
 const DEBUG = (process.env.DEBUG_VARIANT === 'true') || false;
 
+
+function resolvePhoneNumberId(incomingPhoneNumberId) {
+  return (
+    incomingPhoneNumberId ||
+    process.env.MRCAR_PHONE_NUMBER_ID ||
+    process.env.VEHYRA_PHONE_NUMBER_ID ||
+    process.env.PHONE_NUMBER_ID || // last fallback only
+    ''
+  );
+}
 // ---------------- file helpers ----------------
 function safeJsonRead(filename) {
   try {
@@ -804,16 +813,32 @@ async function waSendImageLink(to, imageUrl, caption = "") {
 }
 
 // Low-level sender
-async function waSendRaw(payload) {
-  if (!META_TOKEN || !PHONE_NUMBER_ID) {
-    console.warn("WA skipped - META_TOKEN or PHONE_NUMBER_ID missing");
+async function waSendRaw(payload, incomingPhoneNumberId) {
+  const phoneNumberId =
+    incomingPhoneNumberId ||
+    process.env.MRCAR_PHONE_NUMBER_ID ||
+    process.env.VEHYRA_PHONE_NUMBER_ID ||
+    process.env.PHONE_NUMBER_ID ||
+    '';
+
+  if (!META_TOKEN || !phoneNumberId) {
+    console.warn("WA skipped - META_TOKEN or phoneNumberId missing", {
+      META_TOKEN: !!META_TOKEN,
+      phoneNumberId
+    });
     return null;
   }
 
-  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
 
   try {
-    if (DEBUG) console.log("WA OUTGOING PAYLOAD:", JSON.stringify(payload).slice(0, 400));
+    if (DEBUG) {
+      console.log(
+        "WA OUTGOING:",
+        phoneNumberId,
+        JSON.stringify(payload).slice(0, 400)
+      );
+    }
 
     const r = await fetch(url, {
       method: "POST",
@@ -890,7 +915,9 @@ async function waSendImage(to, imageUrl, caption = "") {
 }
 // === ONE SINGLE GREETING (image header + personalised text body) ===
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
-  if (!META_TOKEN || !PHONE_NUMBER_ID) {
+  const phoneNumberId = resolvePhoneNumberId(incomingPhoneNumberId);
+if (!META_TOKEN || !phoneNumberId) {
+
     console.error("WA SEND SKIPPED: Missing META_TOKEN or phoneNumberId");
 return;
   }
@@ -998,7 +1025,9 @@ async function sendUsedCarButtons(to) {
 // ---------------- Admin alerts (throttled) ----------------
 async function sendAdminAlert({ from, name, text }) {
   try {
-    if (!META_TOKEN || !PHONE_NUMBER_ID || !ADMIN_WA) return;
+   const phoneNumberId = resolvePhoneNumberId(incomingPhoneNumberId);
+if (!META_TOKEN || !phoneNumberId || !ADMIN_WA) return;
+
     const now = Date.now();
     const prev = lastAlert.get(from) || 0;
     const ALERT_WINDOW_MS = (Number(process.env.ALERT_WINDOW_MINUTES || 10)) * 60 * 1000;
@@ -4323,29 +4352,38 @@ app.post('/admin/test_alert', async (req, res) => {
       to: process.env.ADMIN_WA,
       type: "text",
       text: {
-        body: `🔔 ADMIN TEST ALERT\n\nThis is a test admin alert from MR.CAR server.\nTime: ${new Date().toLocaleString()}`
+        body: `🔔 ADMIN TEST ALERT
+
+This is a test admin alert from MR.CAR server.
+Time: ${new Date().toLocaleString()}`
       }
     };
 
     console.log("ADMIN TEST ALERT → WA PAYLOAD:", JSON.stringify(payload, null, 2));
 
-    const resp = await fetch(
-      `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.META_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      }
-    );
+    // Resolve phone number BEFORE using it
+    const phoneNumberId = resolvePhoneNumberId(/* no incoming WA here */);
+
+    if (!process.env.META_TOKEN || !phoneNumberId) {
+      console.warn("ADMIN ALERT SKIPPED: META_TOKEN or phoneNumberId missing");
+      return res.status(500).json({ ok: false, error: "Missing META_TOKEN or phoneNumberId" });
+    }
+
+    const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`;
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.META_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
 
     const result = await resp.json();
     console.log("ADMIN ALERT WA RESPONSE:", result);
 
     return res.json({ ok: true, result });
-
   } catch (e) {
     console.error("ADMIN TEST ALERT FAILED:", e);
     return res.status(500).json({ ok: false, error: String(e) });
@@ -4373,24 +4411,27 @@ app.post('/webhook', async (req, res) => {
     let change = null;
     let value  = {};
 
-    try {
-      if (Array.isArray(req.body?.entry) && req.body.entry.length > 0) {
-        entry = req.body.entry[0] || null;
+    let incomingPhoneNumberId = null;
 
-        if (Array.isArray(entry?.changes) && entry.changes.length > 0) {
-          change = entry.changes[0] || null;
-          value  = change?.value || {};
-        }
-      }
-// ✅ capture the phone number that RECEIVED the message
-const incomingPhoneNumberId = value?.metadata?.phone_number_id;
+try {
+  if (Array.isArray(req.body?.entry) && req.body.entry.length > 0) {
+    entry = req.body.entry[0] || null;
 
-    } catch (e) {
-      console.warn("WEBHOOK PARSE FAILED:", e?.message || e);
-      entry  = null;
-      change = null;
-      value  = {};
+    if (Array.isArray(entry?.changes) && entry.changes.length > 0) {
+      change = entry.changes[0] || null;
+      value  = change?.value || {};
     }
+  }
+
+  // capture the phone number that RECEIVED the message
+  incomingPhoneNumberId = value?.metadata?.phone_number_id || null;
+
+} catch (e) {
+  console.warn("WEBHOOK PARSE FAILED:", e?.message || e);
+  entry  = null;
+  change = null;
+  value  = {};
+}
 
           /* AUTO-INGEST using actual WhatsApp message fields + photo forward + AI vision */
     try {
@@ -5935,7 +5976,8 @@ async function getMediaUrl(mediaId) {
 
 // === Forward existing WhatsApp media to another number ===
 async function waForwardImage(to, mediaId, caption = "") {
-  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+  const phoneNumberId = resolvePhoneNumberId(incomingPhoneNumberId);
+const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
 
   const payload = {
     messaging_product: "whatsapp",
@@ -6371,18 +6413,16 @@ app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
 
 app.listen(PORT, () => {
 console.log("🟢 Server fully started — READY to receive greeting UI and webhook events");
-  console.log('==== MR.CAR BUILD TAG: 2025-11-25-NEWCAR-ADVISORY-FIX ====');
-  console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
-  console.log('ENV summary:', {
-    SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL,
-    SHEET_USED_CSV_URL: !!SHEET_USED_CSV_URL || fs.existsSync(LOCAL_USED_CSV_PATH),
-    PHONE_NUMBER_ID: !!PHONE_NUMBER_ID,
-    META_TOKEN: !!META_TOKEN,
-    ADMIN_WA: !!ADMIN_WA,
-    DEBUG
+console.log('==== MR.CAR BUILD TAG: 2025-11-25-NEWCAR-ADVISORY-FIX ====');
+console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
+console.log('ENV summary:', {
+  SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL,
+  SHEET_USED_CSV_URL: !!SHEET_USED_CSV_URL || fs.existsSync(LOCAL_USED_CSV_PATH),
+  META_TOKEN: !!META_TOKEN,
+  ADMIN_WA: !!ADMIN_WA,
+  DEBUG
   });
 });
-
 //    Uses existing LEADS_FILE and safeJsonRead helper.
 if (!app._leads_compat_installed) {
   app.get('/leads', (req, res) => {
