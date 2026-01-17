@@ -5554,9 +5554,10 @@ case 'BTN_LOAN_CUSTOM':
       const loanAmt = Number(loanRaw);
       if (!loanAmt || !months) {
         await waSendText(
-          from,
-          'Please send: `bullet <loan amount> <rate% optional> <tenure months>` e.g. `bullet 750000 10 60`'
-        );
+  from,
+  'Please send: `bullet <loan amount> <rate% optional> <tenure months>` e.g. `bullet 750000 10 60`',
+  incomingPhoneNumberId
+);
         return res.sendStatus(200);
       }
       const sim = simulateBulletPlan({
@@ -5566,7 +5567,7 @@ case 'BTN_LOAN_CUSTOM':
   bulletPct: 0.25                   // ✔ 25%
 });
       if (!sim) {
-        await waSendText(from, 'Bullet calculation failed.');
+        await waSendText(from, 'Bullet calculation failed.', incomingPhoneNumberId);
         return res.sendStatus(200);
       }
       const lines = [];
@@ -5583,7 +5584,7 @@ case 'BTN_LOAN_CUSTOM':
       );
       lines.push('');
       lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*');
-      await waSendText(from, lines.join('\n'));
+      await waSendText(from, lines.join('\n'), incomingPhoneNumberId);
       try {
         postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `BULLET_CALC ${loanAmt} ${months}`, service: 'LOAN', tags: ['BULLET_EMI'], meta: {} });
       } catch (_) {}
@@ -5599,9 +5600,10 @@ case 'BTN_LOAN_CUSTOM':
       const loanAmt = Number(loanRaw);
       if (!loanAmt || !months) {
         await waSendText(
-          from,
-          'Please send: `emi <loan amount> <rate% optional> <tenure months>` e.g. `emi 1500000 9.5 60`'
-        );
+  from,
+  'Please send: `emi <loan amount> <rate% optional> <tenure months>` e.g. `emi 1500000 9.5 60`',
+  incomingPhoneNumberId
+);
         return res.sendStatus(200);
       }
       const monthly = calcEmiSimple(loanAmt, rate, months);
@@ -5620,7 +5622,7 @@ case 'BTN_LOAN_CUSTOM':
         '✅ *Loan approval possible in ~30 minutes (T&Cs apply)*',
         '\n*Terms & Conditions Apply ✅*'
       ];
-      await waSendText(from, lines.join('\n'));
+      await waSendText(from, lines.join('\n'), incomingPhoneNumberId);
       return res.sendStatus(200);
     }
 
@@ -5629,10 +5631,11 @@ case 'BTN_LOAN_CUSTOM':
       const trimmed = msgText.trim();
       const lastSvc = getLastService(from);
       if (lastSvc === 'USED' && /^[1-9]\d*$/.test(trimmed)) {
-        await waSendText(
-          from,
-          'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.'
-        );
+       await waSendText(
+  from,
+  'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.',
+  incomingPhoneNumberId
+);
         return res.sendStatus(200);
       }
     }
