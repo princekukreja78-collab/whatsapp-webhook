@@ -681,13 +681,9 @@ const DEBUG = (process.env.DEBUG_VARIANT === 'true') || false;
 
 
 function resolvePhoneNumberId(incomingPhoneNumberId) {
-  return (
-    incomingPhoneNumberId ||
-    process.env.MRCAR_PHONE_NUMBER_ID ||
-    process.env.VEHYRA_PHONE_NUMBER_ID ||
-    process.env.PHONE_NUMBER_ID || // last fallback only
-    ''
-  );
+  // Always reply from the number that received the message.
+  // Env fallback is only for non-WhatsApp-triggered paths (e.g. admin/test).
+  return incomingPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
 }
 // ---------------- file helpers ----------------
 function safeJsonRead(filename) {
@@ -814,12 +810,7 @@ async function waSendImageLink(to, imageUrl, caption = "") {
 
 // Low-level sender
 async function waSendRaw(payload, incomingPhoneNumberId) {
-  const phoneNumberId =
-    incomingPhoneNumberId ||
-    process.env.MRCAR_PHONE_NUMBER_ID ||
-    process.env.VEHYRA_PHONE_NUMBER_ID ||
-    process.env.PHONE_NUMBER_ID ||
-    '';
+  const phoneNumberId = resolvePhoneNumberId(incomingPhoneNumberId);
 
   if (!META_TOKEN || !phoneNumberId) {
     console.warn("WA skipped - META_TOKEN or phoneNumberId missing", {
@@ -863,7 +854,6 @@ async function waSendRaw(payload, incomingPhoneNumberId) {
     return null;
   }
 }
-
 // Simple text
 async function waSendText(to, body) {
   return waSendRaw({
