@@ -873,7 +873,7 @@ async function waSendText(to, body, incomingPhoneNumberId) {
 }
 
 // Template (single, clean version)
-async function waSendTemplate(to, templateName, components = []) {
+async function waSendTemplate(to, templateName, components = [], incomingPhoneNumberId) {
   const payload = {
     messaging_product: "whatsapp",
     to: String(to).replace(/\D+/g, ""),
@@ -895,13 +895,13 @@ async function waSendTemplate(to, templateName, components = []) {
 }
 
 // Image (poster) – **USES LINK, NOT ID**
-async function waSendImage(to, imageUrl, caption = "") {
+async function waSendImage(to, imageUrl, caption = "", incomingPhoneNumberId) {
   const payload = {
     messaging_product: "whatsapp",
     to,
     type: "image",
     image: {
-      link: imageUrl,          // <<<<<< IMPORTANT
+      link: imageUrl,
       caption: caption || ""
     }
   };
@@ -974,50 +974,64 @@ function delay(ms) {
 }
 
 // compact buttons (used AFTER new-car quote)
-async function sendNewCarButtons(to) {
+async function sendNewCarButtons(to, incomingPhoneNumberId) {
   const buttons = [
     { type: 'reply', reply: { id: 'BTN_NEW_LOAN',  title: 'Loan Options' } },
     { type: 'reply', reply: { id: 'BTN_NEW_QUOTE', title: 'Another Quote' } }
   ];
+
   const interactive = {
     type: 'button',
     body: { text: 'You can continue with these quick actions:' },
     action: { buttons }
   };
-  return waSendRaw({ messaging_product: 'whatsapp', to, type: 'interactive', interactive });
-}
 
+  return waSendRaw(
+    { messaging_product: 'whatsapp', to, type: 'interactive', interactive },
+    incomingPhoneNumberId
+  );
+}
 // service list (menu) — after greeting
-async function waSendListMenu(to) {
+async function waSendListMenu(to, incomingPhoneNumberId) {
   const rows = [
     { id: 'SRV_NEW_CAR',  title: 'New Car Deals',  description: 'On-road prices & offers' },
     { id: 'SRV_USED_CAR', title: 'Pre-Owned Cars', description: 'Certified used inventory' },
     { id: 'SRV_SELL_CAR', title: 'Sell My Car',    description: 'Get best quote for your car' },
     { id: 'SRV_LOAN',     title: 'Loan / Finance', description: 'EMI & Bullet options' }
   ];
+
   const interactive = {
     type: 'list',
     header: { type: 'text', text: 'VehYra by MR. CAR SERVICES' },
-    body:   { text: 'Please choose one option 👇' },
+    body:   { text: 'Please choose one option' },
     footer: { text: 'Premium Deals • Trusted Service • Mr. Car' },
     action: { button: 'Select Service', sections: [ { title: 'Available', rows } ] }
   };
-  return waSendRaw({ messaging_product: 'whatsapp', to, type: 'interactive', interactive });
+
+  return waSendRaw(
+    { messaging_product: 'whatsapp', to, type: 'interactive', interactive },
+    incomingPhoneNumberId
+  );
 }
 
 // used car quick buttons (after used quote)
-async function sendUsedCarButtons(to) {
+async function sendUsedCarButtons(to, incomingPhoneNumberId) {
   const buttons = [
     { type: 'reply', reply: { id: 'BTN_USED_MORE',     title: 'More Similar Cars' } },
     { type: 'reply', reply: { id: 'BTN_BOOK_TEST',     title: 'Book Test Drive' } },
     { type: 'reply', reply: { id: 'BTN_CONTACT_SALES', title: 'Contact Sales' } }
   ];
+
   const interactive = {
     type: 'button',
     body: { text: 'Quick actions:' },
     action: { buttons }
   };
-  return waSendRaw({ messaging_product: 'whatsapp', to, type: 'interactive', interactive });
+
+  return waSendRaw(
+    { messaging_product: 'whatsapp', to, type: 'interactive', interactive },
+    incomingPhoneNumberId
+  );
 }
 
 // ---------------- Admin alerts (throttled) ----------------
@@ -4712,7 +4726,7 @@ if (numMatch) {
   if (picLink) {
     await waSendImage(from, picLink, text);
   } else {
-    await waSendText(from, text);
+    await waSendText(from, text, incomingPhoneNumberId);
   }
 
   setLastService(from, 'USED');
