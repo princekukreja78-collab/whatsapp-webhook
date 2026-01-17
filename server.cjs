@@ -4439,7 +4439,11 @@ try {
   }
 
   // capture the phone number that RECEIVED the message
-  incomingPhoneNumberId = value?.metadata?.phone_number_id || null;
+  // fallback to env PHONE_NUMBER_ID if Meta omits it
+  incomingPhoneNumberId =
+    value?.metadata?.phone_number_id ||
+    process.env.PHONE_NUMBER_ID ||
+    '';
 
 } catch (e) {
   console.warn("WEBHOOK PARSE FAILED:", e?.message || e);
@@ -4447,6 +4451,7 @@ try {
   change = null;
   value  = {};
 }
+
 
           /* AUTO-INGEST using actual WhatsApp message fields + photo forward + AI vision */
     try {
