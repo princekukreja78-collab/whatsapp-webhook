@@ -791,18 +791,23 @@ function incrementQuoteUsage(from) {
 }
 // ---------------- WA helpers ----------------
 
-async function waSendImageLink(to, imageUrl, caption = "") {
+async function waSendImageLink(
+  to,
+  imageUrl,
+  caption = "",
+  incomingPhoneNumberId
+) {
   const payload = {
     messaging_product: "whatsapp",
     to,
     type: "image",
     image: {
-      link: imageUrl,          // use URL, not media ID
+      link: imageUrl,
       caption: caption || ""
     }
   };
 
-  const r = await waSendRaw(payload);
+  const r = await waSendRaw(payload, incomingPhoneNumberId);
 
   if (r && r.messages) return { ok: true, resp: r };
   return { ok: false, error: r?.error || r };
@@ -855,13 +860,16 @@ async function waSendRaw(payload, incomingPhoneNumberId) {
   }
 }
 // Simple text
-async function waSendText(to, body) {
-  return waSendRaw({
-    messaging_product: "whatsapp",
-    to,
-    type: "text",
-    text: { body }
-  });
+async function waSendText(to, body, incomingPhoneNumberId) {
+  return waSendRaw(
+    {
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body }
+    },
+    incomingPhoneNumberId
+  );
 }
 
 // Template (single, clean version)
@@ -877,7 +885,7 @@ async function waSendTemplate(to, templateName, components = []) {
     }
   };
 
-  const r = await waSendRaw(payload);
+  const r = await waSendRaw(payload, incomingPhoneNumberId);
 
   if (r && r.messages && r.messages.length > 0) {
     return { ok: true, resp: r };
@@ -898,7 +906,7 @@ async function waSendImage(to, imageUrl, caption = "") {
     }
   };
 
-  const r = await waSendRaw(payload);
+  const r = await waSendRaw(payload, incomingPhoneNumberId);
 
   if (r && r.messages) return { ok: true };
   return { ok: false, error: r?.error || r };
@@ -1031,13 +1039,16 @@ if (!META_TOKEN || !phoneNumberId || !ADMIN_WA) return;
       `From: ${from}\n` +
       `Name: ${name || '-'}\n` +
       `Msg: ${String(text || '').slice(0, 1000)}`;
-    const resp = await waSendRaw({
-      messaging_product: 'whatsapp',
-      to: ADMIN_WA,
-      type: 'text',
-      text: { body }
-    });
-    if (DEBUG) console.log('sendAdminAlert response', resp);
+    const resp = await waSendRaw(
+  {
+    messaging_product: 'whatsapp',
+    to: ADMIN_WA,
+    type: 'text',
+    text: { body }
+  },
+  incomingPhoneNumberId
+);
+   if (DEBUG) console.log('sendAdminAlert response', resp);
   } catch (e) {
     console.warn('sendAdminAlert failed', e && e.message ? e.message : e);
   }
@@ -4728,40 +4739,14 @@ if (!selectedId && msgText && !inLoanFlow && !looksLikeEmiInput) {
 
     setLastService(from, 'LOAN');
 
-    await waSendRaw({
-      messaging_product: 'whatsapp',
-      to: from,
-      type: 'interactive',
-      interactive: {
-        type: 'button',
-        body: { text: 'Loan & EMI options:' },
-        action: {
-          buttons: [
-            { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
-            { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
-            { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI' } }
-          ]
-        }
-      }
-    });
-
-    return res.sendStatus(200); // 🔒 stop further processing
-  }
-}
-
-// ================= PRIORITY INTERACTIVE HANDLING =================
-if (selectedId === 'SRV_LOAN') {
-  console.log('PRIORITY HIT: SRV_LOAN');
-
-  setLastService(from, 'LOAN');
-
-  await waSendRaw({
+   await waSendRaw(
+  {
     messaging_product: 'whatsapp',
     to: from,
     type: 'interactive',
     interactive: {
       type: 'button',
-      body: { text: 'Choose loan option:' },
+      body: { text: 'Loan & EMI options:' },
       action: {
         buttons: [
           { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
@@ -4770,10 +4755,43 @@ if (selectedId === 'SRV_LOAN') {
         ]
       }
     }
-  });
+  },
+  incomingPhoneNumberId
+);
+
+return res.sendStatus(200); // 🔒 stop further processing
+}
+
+} // ✅ CLOSES: if (!selectedId && msgText && !inLoanFlow && !looksLikeEmiInput)
+// ================= PRIORITY INTERACTIVE HANDLING =================
+if (selectedId === 'SRV_LOAN') {
+  console.log('PRIORITY HIT: SRV_LOAN');
+
+  setLastService(from, 'LOAN');
+
+  await waSendRaw(
+    {
+      messaging_product: 'whatsapp',
+      to: from,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: 'Choose loan option:' },
+        action: {
+          buttons: [
+            { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
+            { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
+            { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI' } }
+          ]
+        }
+      }
+    },
+    incomingPhoneNumberId
+  );
 
   return res.sendStatus(200); // 🔒 stop before intent engine
 }
+
 // ================= LOAN TYPE BUTTON HANDLING =================
 if (selectedId === 'BTN_LOAN_NEW') {
   setLastService(from, 'LOAN_NEW');
@@ -4791,7 +4809,8 @@ if (selectedId === 'BTN_LOAN_USED') {
 
   await waSendText(
     from,
-    '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`'
+    '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`',
+    incomingPhoneNumberId
   );
 
   return res.sendStatus(200);
@@ -4800,24 +4819,28 @@ if (selectedId === 'BTN_LOAN_USED') {
 if (selectedId === 'BTN_LOAN_CUSTOM') {
   setLastService(from, 'LOAN_MANUAL');
 
-  await waSendRaw({
-    messaging_product: 'whatsapp',
-    to: from,
-    type: 'interactive',
-    interactive: {
-      type: 'button',
-      body: { text: '📊 Choose EMI type:' },
-      action: {
-        buttons: [
-          { type: 'reply', reply: { id: 'BTN_EMI_NORMAL', title: 'Normal EMI' } },
-          { type: 'reply', reply: { id: 'BTN_EMI_BULLET', title: 'Bullet EMI' } }
-        ]
+  await waSendRaw(
+    {
+      messaging_product: 'whatsapp',
+      to: from,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: '📊 Choose EMI type:' },
+        action: {
+          buttons: [
+            { type: 'reply', reply: { id: 'BTN_EMI_NORMAL', title: 'Normal EMI' } },
+            { type: 'reply', reply: { id: 'BTN_EMI_BULLET', title: 'Bullet EMI' } }
+          ]
+        }
       }
-    }
-  });
+    },
+    incomingPhoneNumberId
+  );
 
   return res.sendStatus(200);
 }
+
 // ================= END LOAN TYPE HANDLING =================
 // ================= MANUAL EMI MODE HANDLING =================
 if (selectedId === 'BTN_EMI_NORMAL') {
@@ -4844,12 +4867,14 @@ if (selectedId === 'BTN_EMI_BULLET') {
 // ================= END MANUAL EMI MODE HANDLING =================
 
 // ================= LOAN TYPE BUTTON HANDLING =================
+
 if (selectedId === 'BTN_LOAN_NEW') {
   setLastService(from, 'LOAN_NEW');
 
   await waSendText(
     from,
-    '🆕 *New Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
+    '🆕 *New Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`',
+    incomingPhoneNumberId
   );
 
   return res.sendStatus(200);
@@ -4860,23 +4885,26 @@ if (selectedId === 'BTN_LOAN_USED') {
 
   await waSendText(
     from,
-    '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`'
+    '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`',
+    incomingPhoneNumberId
   );
 
   return res.sendStatus(200);
 }
 
 if (selectedId === 'BTN_LOAN_CUSTOM') {
-  setLastService(from, 'LOAN');
+  setLastService(from, 'LOAN_MANUAL');
 
   await waSendText(
     from,
-    '📊 *Manual EMI*\n\nPlease share *loan amount + tenure*.\nExample:\n`7 lakh 60 months`'
+    '📊 *Manual EMI*\n\nPlease share *loan amount + tenure*.\nExample:\n`7 lakh 60 months`',
+    incomingPhoneNumberId
   );
 
   return res.sendStatus(200);
 }
-// ================= END LOAN TYPE HANDLING =================
+
+// ================= END LOAN TYPE BUTTON HANDLING =================
 
 
 // ================= LOAN EMI FREE-TEXT HANDLER (SAFE) =================
@@ -5285,7 +5313,8 @@ return res.sendStatus(200);
 case 'SRV_LOAN':
   console.log('HIT: SRV_LOAN');
   setLastService(from, 'LOAN');
-  await waSendRaw({
+  await waSendRaw(
+  {
     messaging_product: 'whatsapp',
     to: from,
     type: 'interactive',
@@ -5297,12 +5326,14 @@ case 'SRV_LOAN':
           { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
           { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
           { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI' } }
-        ]
+      ]
       }
     }
-  });
-  return res.sendStatus(200); // ⬅ THIS LINE IS THE FIX
+  },
+  incomingPhoneNumberId
+);
 
+return res.sendStatus(200);
 // ================= NEW CAR LOAN (AUTO ROI @ 8.1%) =================
 case 'BTN_LOAN_NEW':
   setLastService(from, 'LOAN_NEW');
@@ -5320,7 +5351,8 @@ case 'BTN_LOAN_NEW':
     '_Interest rate is applied automatically._'
   );
 
-  await waSendRaw({
+  await waSendRaw(
+  {
     messaging_product: 'whatsapp',
     to: from,
     type: 'interactive',
@@ -5335,10 +5367,11 @@ case 'BTN_LOAN_NEW':
         ]
       }
     }
-  });
+  },
+  incomingPhoneNumberId
+);
 
-  return res.sendStatus(200);
-
+return res.sendStatus(200);
 
 // -------- Normal EMI (New Car) --------
 case 'BTN_NEW_EMI_NORMAL':
@@ -5388,7 +5421,8 @@ case 'BTN_LOAN_USED':
     '_Interest rate is applied automatically._'
   );
 
-  await waSendRaw({
+  await waSendRaw(
+  {
     messaging_product: 'whatsapp',
     to: from,
     type: 'interactive',
@@ -5401,13 +5435,14 @@ case 'BTN_LOAN_USED':
           { type: 'reply', reply: { id: 'BTN_USED_EMI_BULLET', title: 'Bullet EMI' } },
           { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: 'Loan Documents' } },
           { type: 'reply', reply: { id: 'BTN_LOAN_ELIGIBILITY', title: 'Eligibility' } }
-        ]
+      ]
       }
     }
-  });
+  },
+  incomingPhoneNumberId
+);
 
-  return res.sendStatus(200);
-
+return res.sendStatus(200);
 
 // -------- Normal EMI (Used Car) --------
 case 'BTN_USED_EMI_NORMAL':
@@ -5485,8 +5520,8 @@ case 'BTN_LOAN_CUSTOM':
     '• Every 12th EMI includes higher principal'
   );
   return res.sendStatus(200);
- } 
-} 
+  }
+}
     // Greeting first – ONLY service menu (no quick buttons now)
     if (shouldGreetNow(from, msgText)) {
       await waSendText(
@@ -5643,49 +5678,54 @@ case 'BTN_LOAN_CUSTOM':
         }
 
         // quick helplines from brochure index
-        try {
-          const index = loadBrochureIndex();
-          const relevant = findRelevantBrochures(index, msgText);
-          const phones = findPhonesInBrochures(relevant);
-          if (phones && phones.length) {
-            const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
-            await waSendText(from, `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`);
-          }
-        } catch (e) {
-          if (DEBUG) console.warn('advisory quick-phones failed', e && e.message ? e.message : e);
-        }
+        // quick helplines from brochure index
+try {
+  const index = loadBrochureIndex();
+  const relevant = findRelevantBrochures(index, msgText);
+  const phones = findPhonesInBrochures(relevant);
+  if (phones && phones.length) {
+    const lines = phones.map(p => `${p.label}: ${p.phone}`).slice(0,5);
+    await waSendText(
+      from,
+      `📞 Quick helplines:\n${lines.join('\n')}\n\n(Full advisory below.)`,
+      incomingPhoneNumberId
+    );
+  }
+} catch (e) {
+  if (DEBUG) console.warn('advisory quick-phones failed', e && e.message ? e.message : e);
+}
 
-        // Call Signature GPT
-        const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
-        if (sigReply) {
-          await waSendText(from, sigReply);
-          try {
-            await postLeadToCRM({
-              bot: 'SIGNATURE_ADVISORY',
-              channel: 'whatsapp',
-              from,
-              name,
-              lastMessage: msgText,
-              service: 'ADVISORY',
-              tags: ['SIGNATURE_ADVISORY'],
-              meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
-              createdAt: Date.now()
-            });
-          } catch (e) {
-            if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
-          }
-          return res.sendStatus(200);
-        }
+// Call Signature GPT
+const sigReply = await callSignatureBrain({ from, name, msgText, lastService: getLastService(from), ragHits });
+if (sigReply) {
+  await waSendText(from, sigReply, incomingPhoneNumberId);
+  try {
+    await postLeadToCRM({
+      bot: 'SIGNATURE_ADVISORY',
+      channel: 'whatsapp',
+      from,
+      name,
+      lastMessage: msgText,
+      service: 'ADVISORY',
+      tags: ['SIGNATURE_ADVISORY'],
+      meta: { engine: SIGNATURE_MODEL, snippet: sigReply.slice(0,300) },
+      createdAt: Date.now()
+    });
+  } catch (e) {
+    if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
+  }
+  return res.sendStatus(200);
+}
       } catch (e) {
         if (DEBUG) console.warn('Advisory handler error', e && e.message ? e.message : e);
-      }
+   
     }
-
+  }
     // CRM fallback
     try {
       const crmReply = await fetchCRMReply({ from, msgText });
       if (crmReply) {
-        await waSendText(from, crmReply);
+        await waSendText(from, crmReply, incomingPhoneNumberId);
         return res.sendStatus(200);
       }
     } catch (e) {
@@ -5700,19 +5740,20 @@ case 'BTN_LOAN_CUSTOM':
 // );
 // return res.sendStatus(200);
 
-  } catch (err) {
-    console.error('Webhook error:', err && err.stack ? err.stack : err);
-    try {
-      if (process.env.ADMIN_WA) {
-        await waSendText(
-          process.env.ADMIN_WA,
-          `Webhook crash: ${String(err && err.message ? err.message : err)}`
-        );
-      }
-    } catch (_) {}
-    return res.sendStatus(200);
-  }
-});
+} catch (err) {
+  console.error('Webhook error:', err && err.stack ? err.stack : err);
+  try {
+    if (process.env.ADMIN_WA) {
+      await waSendText(
+        process.env.ADMIN_WA,
+        `Webhook crash: ${String(err && err.message ? err.message : err)}`
+      );
+    }
+  } catch (_) {}
+  return res.sendStatus(200);
+}
+
+ }); // ✅ closes app.post('/webhook')
 
 // ---------------- start server ----------------
 
