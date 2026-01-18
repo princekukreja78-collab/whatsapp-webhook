@@ -4353,6 +4353,9 @@ app.post('/admin/test_alert', async (req, res) => {
 
 // ---------------- main webhook handler ----------------
 app.post('/webhook', async (req, res) => {
+// ✅ IMMEDIATE ACK — DO NOT MOVE THIS
+  res.sendStatus(200);
+
   try {
     // ensure `short` exists in the outer scope so later code can't throw ReferenceError
     let short = {};
