@@ -3549,6 +3549,7 @@ if (wantsAutomatic) {
 if (!allMatches.length) {
 
 const hasVariantLock = false;
+const wantsModelList = false;
 
 // ================= FINAL VARIANT GUARANTEE =================
 if (hasVariantLock) {
