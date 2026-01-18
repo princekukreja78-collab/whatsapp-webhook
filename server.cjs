@@ -3548,9 +3548,6 @@ if (wantsAutomatic) {
    // ---------- PRUNE & RELAXED MATCHING (adaptive) ----------
 if (!allMatches.length) {
 
-const hasVariantLock = false;
-const wantsModelList = false;
-
 // ================= FINAL VARIANT GUARANTEE =================
 if (hasVariantLock) {
   const filtered = allMatches.filter(m => {
