@@ -5561,12 +5561,14 @@ case 'BTN_LOAN_CUSTOM':
         // return res.sendStatus(200);
       }
     }
-// USED CAR detection (FIXED: explicit intent only)
+// USED CAR detection (FINAL: disabled during NEW-car journey)
 if (type === 'text' && msgText) {
   const textLower = msgText.toLowerCase();
   const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
+  const lastSvc = getLastService(from);
 
-  if (explicitUsed) {
+  // 🔒 If user is in NEW CAR journey, do NOT allow USED hijack
+  if (lastSvc !== 'NEW' && explicitUsed) {
     const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
     await waSendText(from, usedRes.text || 'Used car quote failed.');
     if (usedRes.picLink) {
@@ -5574,16 +5576,11 @@ if (type === 'text' && msgText) {
     }
     await sendUsedCarButtons(from);
     setLastService(from, 'USED');
-    return; // ✅ STOP here — do NOT fall into NEW
+    return; // STOP — do not fall into NEW
   }
 }
-// NEW CAR quick quote (only if NOT advisory-style and NOT in USED)
-if (
-  type === 'text' &&
-  msgText &&
-  !isAdvisory(msgText) &&
-  getLastService(from) !== 'USED'
-) {
+// NEW CAR quick quote (PRIMARY path during NEW journey)
+if (type === 'text' && msgText && !isAdvisory(msgText)) {
   const served = await tryQuickNewCarQuote(msgText, from);
   if (served) {
     return;
