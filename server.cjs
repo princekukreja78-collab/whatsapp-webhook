@@ -5561,35 +5561,34 @@ case 'BTN_LOAN_CUSTOM':
         // return res.sendStatus(200);
       }
     }
+// USED CAR detection (FIXED: explicit intent only)
+if (type === 'text' && msgText) {
+  const textLower = msgText.toLowerCase();
+  const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
 
-    // USED CAR detection
-    if (type === 'text' && msgText) {
-      const textLower = msgText.toLowerCase();
-      const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
-      // NEW: treat year mention as used (e.g., "Hycross 2024" -> used)
-      const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
-      const lastSvc = getLastService(from);
-
-      if (explicitUsed || hasYear || lastSvc === 'USED') {
-        const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
-        await waSendText(from, usedRes.text || 'Used car quote failed.');
-        if (usedRes.picLink) {
-          await waSendText(from, `Photos: ${usedRes.picLink}`);
-        }
-        await sendUsedCarButtons(from);
-        setLastService(from, 'USED');
-        // return res.sendStatus(200);
-      }
+  if (explicitUsed) {
+    const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
+    await waSendText(from, usedRes.text || 'Used car quote failed.');
+    if (usedRes.picLink) {
+      await waSendText(from, `Photos: ${usedRes.picLink}`);
     }
-
-    // NEW CAR quick quote (only if NOT advisory-style)
-    if (type === 'text' && msgText && !isAdvisory(msgText)) {
-      const served = await tryQuickNewCarQuote(msgText, from);
-      if (served) {
-        // return res.sendStatus(200);
-      }
-    }
-
+    await sendUsedCarButtons(from);
+    setLastService(from, 'USED');
+    return; // ✅ STOP here — do NOT fall into NEW
+  }
+}
+// NEW CAR quick quote (only if NOT advisory-style and NOT in USED)
+if (
+  type === 'text' &&
+  msgText &&
+  !isAdvisory(msgText) &&
+  getLastService(from) !== 'USED'
+) {
+  const served = await tryQuickNewCarQuote(msgText, from);
+  if (served) {
+    return;
+  }
+}
     // Advisory handler (Signature GPT + brochures) — AFTER pricing
     if (type === 'text' && msgText && isAdvisory(msgText)) {
       try {
