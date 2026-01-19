@@ -4394,6 +4394,11 @@ app.post('/webhook', async (req, res) => {
 
           /* AUTO-INGEST using actual WhatsApp message fields + photo forward + AI vision */
     try {
+
+    // ✅ Ignore non-message events (delivery, read, status updates)
+  if (!value.messages || !Array.isArray(value.messages) || value.messages.length === 0) {
+    return;
+  }
       const msg     = value.messages?.[0];
       const contact = value.contacts?.[0];
 
