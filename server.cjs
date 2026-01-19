@@ -2185,6 +2185,10 @@ Always end with: "Reply 'Talk to agent' to request a human."`;
 /* eslint-disable no-unused-vars */
 
 async function trySmartNewCarIntent(msgText, to) {
+console.log('TRACE_NEW_INTENT', {
+  model: msgText,
+  lastSvc: getLastService(to)
+});
   console.log("EXEC_PATH: trySmartNewCarIntent HIT", msgText);
   if (!msgText) return false;
 
@@ -2853,10 +2857,21 @@ return false;
 
 // ---------------- tryQuickNewCarQuote (FULL REWRITE) ----------------
 async function tryQuickNewCarQuote(msgText, to) {
+
   try {
+
 console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
-    if (!msgText || !msgText.trim()) return false;
+
 const lastSvc = (getLastService(to) || '').toLowerCase();
+
+    if (!msgText || !msgText.trim()) {
+  console.log('TRACE_QUICK_RETURN_FALSE', {
+    model: msgText,
+    lastSvc: getLastService(to),
+    reason: 'empty msgText'
+  });
+  return false;
+}
 
     // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
    
