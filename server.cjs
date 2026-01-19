@@ -2859,6 +2859,7 @@ return false;
 async function tryQuickNewCarQuote(msgText, to) {
 
   try {
+const lines = [];   // ✅ ALWAYS DEFINE ONCE
 
 console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
 
@@ -3841,7 +3842,7 @@ if (
           distinct.sort((a,b) => b.score - a.score);
         }
 
-        const lines = [];
+        
         lines.push(`*Available variants (${distinct.length}) — ${coreTokensArr[0].toUpperCase()}*`);
         if (userBudget) {
           lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/100000)/10}L - ${Math.round((budgetMax||userBudget)/100000)/10}L)`);
@@ -4061,7 +4062,8 @@ if (
     best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
   const fuelStr = best.fuel ? String(best.fuel).toUpperCase() : '';
 
-  const lines = [];
+  lines.length = 0;   // reuse the shared lines array
+
 lines.push(`*${best.brand}* ${mdl} ${varr}`);
 
 // ✅ SAFE location display — no undefined variables
