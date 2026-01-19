@@ -4353,8 +4353,16 @@ app.post('/admin/test_alert', async (req, res) => {
 
 // ---------------- main webhook handler ----------------
 app.post('/webhook', async (req, res) => {
-// ✅ IMMEDIATE ACK — DO NOT MOVE THIS
-  res.sendStatus(200);
+
+    // ---- prevent double responses (WhatsApp sends multiple events) ----
+  const _sendStatus = res.sendStatus.bind(res);
+  let responded = false;
+
+  res.sendStatus = (code) => {
+    if (responded) return;
+    responded = true;
+    return _sendStatus(code);
+  };
 
   try {
     // ensure `short` exists in the outer scope so later code can't throw ReferenceError
