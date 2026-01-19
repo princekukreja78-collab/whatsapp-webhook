@@ -3614,12 +3614,16 @@ if (allMatches.length > 0) {
 }
 
     // Relaxed matching when needed
-    if (userBudget && allMatches.length < 3) {
-      if (typeof DEBUG !== 'undefined' && DEBUG) console.log("Relaxing budget filter because strict matches < 3.");
 
-      const relaxedMatches = [];
-      const RELAX_LIMIT = Number(process.env.RELAXED_LIMIT || 60);
-      const mid = (budgetMin + budgetMax) / 2;
+    // 🔒 HARD BLOCK: never add USED cars in NEW journey
+if (userBudget && allMatches.length < 3 && getLastService(to) !== 'NEW') {
+
+  if (typeof DEBUG !== 'undefined' && DEBUG)
+    console.log("Relaxing budget filter because strict matches < 3.");
+
+  const relaxedMatches = [];
+  const RELAX_LIMIT = Number(process.env.RELAXED_LIMIT || 60);
+  const mid = (budgetMin + budgetMax) / 2;
 
       for (const [brand, tab] of Object.entries(tables)) {
         if (!tab || !tab.data) continue;
@@ -3826,7 +3830,7 @@ if (
           distinct.sort((a,b) => b.score - a.score);
         }
 
-        const lines = [];
+        lines.length = 0;
         lines.push(`*Available variants (${distinct.length}) — ${coreTokensArr[0].toUpperCase()}*`);
         if (userBudget) {
           lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/100000)/10}L - ${Math.round((budgetMax||userBudget)/100000)/10}L)`);
