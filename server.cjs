@@ -5668,7 +5668,6 @@ case 'BTN_LOAN_CUSTOM':
 //   '🚗 *New Car Pricing & Finance*'
 // );
 // return res.sendStatus(200);
-
   } catch (err) {
     console.error('Webhook error:', err && err.stack ? err.stack : err);
     try {
@@ -5679,7 +5678,7 @@ case 'BTN_LOAN_CUSTOM':
         );
       }
     } catch (_) {}
-    return res.sendStatus(200);
+    // ❌ DO NOT send HTTP response here
   }
 });
 
