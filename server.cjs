@@ -4983,7 +4983,7 @@ if (selectedId === 'BTN_LOAN_CUSTOM') {
 
 
 // ================= LOAN EMI FREE-TEXT HANDLER (SAFE) =================
-const svc = (lastSvc || '').toUpperCase();
+const svc = (currentService || '').toUpperCase();
 
 // ================= MANUAL EMI (NORMAL / BULLET) =================
 if (
@@ -5019,7 +5019,7 @@ if (
       from,
       'Please share *Loan Amount + Tenure + ROI*.\nExample:\n`10 lakh 5 years 9%`'
     );
-    setLastService(from, lastSvc);
+    setLastService(from, currentService);
     return;
   }
 
@@ -5053,7 +5053,7 @@ const bulletAmt =
       from,
       'Unable to calculate Bullet EMI. Please try again.'
     );
-    setLastService(from, lastSvc);
+    setLastService(from, currentService);
     return;
   }
 
@@ -5075,7 +5075,7 @@ const bulletAmt =
     `Terms & Conditions Apply ✅`
   );
 
-  setLastService(from, lastSvc);
+  setLastService(from, currentService);
   return;
 }
 
@@ -5091,7 +5091,7 @@ const bulletAmt =
     `👉 EMI: ₹ *${fmtMoney(emi)}*`
   );
 
-  setLastService(from, lastSvc);
+  setLastService(from, currentService);
   return;
 }
 // ================= END MANUAL EMI =================
@@ -5123,7 +5123,7 @@ if (
       from,
       'Please share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
     );
-    setLastService(from, lastSvc);
+    setLastService(from, currentService);
     return;
   }
 
@@ -5143,7 +5143,7 @@ if (
     `👉 EMI: ₹ *${fmtMoney(emi)}*`
   );
 
-  setLastService(from, lastSvc);
+  setLastService(from, currentService);
   return;
 }
 // ================= END AUTO EMI =================
