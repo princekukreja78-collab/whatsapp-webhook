@@ -3832,7 +3832,7 @@ if (
     if (
   coreTokensArr.length === 1 &&
   !exactModelHit &&
-  !wantsAllStates
+  !wantsAllStatesLocal
 ) {
       const distinct = [];
       const seenTitles = new Set();
@@ -3909,7 +3909,7 @@ const explicitPanIndiaIntent =
 const isPanIndiaFlow = explicitPanIndiaIntent === true;
 
 // If user did NOT explicitly ask for comparison → skip Pan-India
-if (wantsAllStates && !explicitPanIndiaIntent) {
+if (wantsAllStatesLocal && !explicitPanIndiaIntent) {
   // Do nothing here, allow normal single-city quote logic to run
 } else if (!explicitPanIndiaIntent) {
   // extra safety
@@ -4026,13 +4026,13 @@ console.log('DEBUG_FLOW: BEFORE SINGLE QUOTE', {
   allMatches: allMatches.length,
   exactModelHit,
   userBudget,
-  wantsAllStates,
+  wantsAllStatesLocal,
   explicitPanIndiaIntent
 });
 
 const isSingleQuote =
   !explicitPanIndiaIntent &&   // PAN-India explicitly asked → no EMI
-  !wantsAllStates &&           // safety: state-wise request → no EMI
+  !wantsAllStatesLocal &&          // safety: state-wise request → no EMI
   !userBudget &&               // budget flow → no EMI
   allMatches.length >= 1;      // 👈 KEY FIX (was === 1)
 
@@ -4041,7 +4041,7 @@ if (
   allMatches.length >= 2 &&
   !userHasExplicitVariant &&
   !userBudget &&
-  !wantsAllStates
+  !wantsAllStatesLocal
 ) {
   const seen = new Set();
   const variants = [];
@@ -4075,7 +4075,7 @@ if (
 if (
   allMatches.length >= 1 &&
   !userBudget &&
-  !wantsAllStates &&
+  !wantsAllStatesLocal
   (allMatches.length === 1 || userHasExplicitVariant)
 ) {
   const best = allMatches[0];
