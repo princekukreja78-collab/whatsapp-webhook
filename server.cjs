@@ -5553,25 +5553,32 @@ case 'BTN_LOAN_CUSTOM':
       }
     }
 
-    // USED CAR detection
-    if (type === 'text' && msgText) {
-      const textLower = msgText.toLowerCase();
-      const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
-      // NEW: treat year mention as used (e.g., "Hycross 2024" -> used)
-      const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
-      const lastSvc = getLastService(from);
+  // USED CAR detection
+if (type === 'text' && msgText) {
+  const numMatch = msgText.trim().match(/^(\d{1,2})$/);
 
-      if (explicitUsed || hasYear || lastSvc === 'USED') {
-        const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
-        await waSendText(from, usedRes.text || 'Used car quote failed.');
-        if (usedRes.picLink) {
-          await waSendText(from, `Photos: ${usedRes.picLink}`);
-        }
-        await sendUsedCarButtons(from);
-        setLastService(from, 'USED');
-        return res.sendStatus(200);
-      }
+  const textLower = msgText.toLowerCase();
+  const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
+  const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
+  const lastSvc = getLastService(from);
+
+  // 🔒 IMPORTANT: do NOT rebuild used list on serial reply
+  if (
+    !numMatch &&
+    (explicitUsed || hasYear || lastSvc === 'USED')
+  ) {
+    const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
+
+    await waSendText(from, usedRes.text || 'Used car quote failed.');
+    if (usedRes.picLink) {
+      await waSendText(from, `Photos: ${usedRes.picLink}`);
     }
+
+    await sendUsedCarButtons(from);
+    setLastService(from, 'USED');
+    return res.sendStatus(200);
+  }
+}
 
     // NEW CAR quick quote (only if NOT advisory-style)
     if (type === 'text' && msgText && !isAdvisory(msgText)) {
