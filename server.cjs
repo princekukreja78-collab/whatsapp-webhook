@@ -4477,6 +4477,7 @@ app.post('/webhook', async (req, res) => {
       change = null;
       value  = {};
     }
+
      // --------------------------------------------------
     // 🔒 CANONICAL PHONE_NUMBER_ID RESOLUTION (ONCE ONLY)
     // --------------------------------------------------
@@ -4708,116 +4709,112 @@ global.__WA_MSG_LOCK__.add(dedupKey);
       msgText = '';
     }
 // ==================================================
-// SERIAL NUMBER VARIANT SELECTION (TOP PRIORITY)
+// 🔒 SERVICE STATE (DECLARE ONCE PER MESSAGE)
+// ==================================================
+let currentService = getLastService(from);
+
+// ==================================================
+// GLOBAL LIST INIT
 // ==================================================
 if (!global.lastVariantList) global.lastVariantList = new Map();
 if (!global.lastUsedCarList) global.lastUsedCarList = new Map();
 
-const numMatch = msgText && msgText.trim().match(/^(\d{1,2})$/);
+const numMatch = msgText?.trim().match(/^(\d{1,2})$/);
 
+// ==================================================
+// 1️⃣ SERIAL PRIORITY — USED FIRST
+// ==================================================
 if (numMatch) {
+  const usedRec = global.lastUsedCarList.get(from);
 
-  // ================= NEW CAR SERIAL SELECTION =================
-  const rec = global.lastVariantList.get(from);
+  if (usedRec) {
+    if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
+      global.lastUsedCarList.delete(from);
+      return;
+    }
 
-  if (rec) {
-    // 🔒 Expired list
-    if (Date.now() - rec.ts > 5 * 60 * 1000) {
+    const idx = Number(numMatch[1]) - 1;
+    if (!usedRec.rows || !usedRec.rows[idx]) return;
+
+    const row = usedRec.rows[idx];
+    global.lastUsedCarList.delete(from);
+
+    const { text, picLink } = await buildSingleUsedCarQuote(row, from);
+    picLink
+      ? await waSendImage(from, picLink, text)
+      : await waSendText(from, text);
+
+    setLastService(from, 'USED');
+    return;
+  }
+
+  const newRec = global.lastVariantList.get(from);
+  if (newRec) {
+    if (Date.now() - newRec.ts > 5 * 60 * 1000) {
       global.lastVariantList.delete(from);
       return;
     }
 
     const idx = Number(numMatch[1]) - 1;
+    if (!newRec.variants || !newRec.variants[idx]) return;
 
-    // 🔒 Invalid number
-    if (!rec.variants[idx]) {
-      return;
-    }
-
-    const chosen = rec.variants[idx];
+    const chosen = newRec.variants[idx];
     global.lastVariantList.delete(from);
 
-    let queryText = '';
-
+    let queryText = chosen.title || '';
     if (chosen.row && typeof chosen.idxModel === 'number') {
-      const mdl = chosen.row[chosen.idxModel] || '';
-      const varr =
-        (typeof chosen.idxVariant === 'number' && chosen.row[chosen.idxVariant])
-          ? chosen.row[chosen.idxVariant]
-          : '';
-      queryText = `${mdl} ${varr}`.trim();
-    } else if (chosen.title) {
-      queryText = String(chosen.title).trim();
+      queryText = `${chosen.row[chosen.idxModel] || ''} ${
+        typeof chosen.idxVariant === 'number'
+          ? chosen.row[chosen.idxVariant] || ''
+          : ''
+      }`.trim();
     }
 
-    if (queryText) {
-      await tryQuickNewCarQuote(queryText, from);
-    }
-
+    if (queryText) await tryQuickNewCarQuote(queryText, from);
+    setLastService(from, 'NEW');
     return;
   }
-// ================= ABSOLUTE SERIAL PRIORITY (USED) =================
-if (type === 'text' && msgText) {
-  const numMatch = msgText.trim().match(/^(\d{1,2})$/);
-  const usedRec = global.lastUsedCarList?.get(from);
 
-  // 🔥 number + active list → serial MUST handle
-  if (numMatch && usedRec) {
-    // DO NOT let any other logic see this message
-    // serial block is next
-  }
+  return;
+}
 
-  // 🔒 number without list → ignore
-  if (numMatch && !usedRec) {
+// ==================================================
+// 2️⃣ LAST SERVICE HARD LOCK
+// ==================================================
+if (currentService === 'USED') {
+  const handled = await handleUsedCarFlow({ from, msgText, selectedId });
+  if (handled) return;
+}
+
+if (currentService === 'NEW') {
+  const handled = await tryQuickNewCarQuote(msgText, from);
+  if (handled) return;
+}
+
+// ==================================================
+// 3️⃣ USED INTENT INTERCEPT (ONE WAY)
+// ==================================================
+const usedIntentDetected =
+  /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/i.test(msgText) ||
+  /\b(201[0-9]|202[0-4])\b/.test(msgText);
+
+if (usedIntentDetected) {
+  const handled = await handleUsedCarFlow({ from, msgText, selectedId });
+  if (handled) {
+    setLastService(from, 'USED');
     return;
   }
 }
 
- // ================= USED CAR SERIAL SELECTION =================
-const usedRec = global.lastUsedCarList.get(from);
+// ==================================================
+// 4️⃣ NEW FLOW — ONLY HERE
+// ==================================================
+await tryQuickNewCarQuote(msgText, from);
 
-if (!usedRec) {
-  return;
-}
-
-// 🔒 Expired list
-if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
-  global.lastUsedCarList.delete(from);
-  return;
-}
-
-const idx = Number(numMatch[1]) - 1;
-
-// 🔒 Invalid number
-if (!usedRec.rows || !usedRec.rows[idx]) {
-  return;
-}
-
-const row = usedRec.rows[idx];
-global.lastUsedCarList.delete(from);
-
-// 🔒 MARK: this response is from SERIAL
-global.__USED_SERIAL_ACTIVE__ = true;
-
-const { text, picLink } = await buildSingleUsedCarQuote(row, from);
-
-if (picLink) {
-  await waSendImage(from, picLink, text);
-} else {
-  await waSendText(from, text);
-}
-
-// service stays USED (this is fine)
-setLastService(from, 'USED');
-
-// 🔥 HARD STOP — nothing after this runs
-return;
-}
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
 // Check last service to avoid hijacking active loan flows
-const lastSvc = getLastService(from);
-const inLoanFlow = ['LOAN', 'LOAN_NEW', 'LOAN_USED'].includes(lastSvc);
+const inLoanFlow = ['LOAN', 'LOAN_NEW', 'LOAN_USED'].includes(currentService);
 
 // Avoid intercepting numeric EMI inputs
 const looksLikeEmiInput =
@@ -5679,55 +5676,6 @@ case 'BTN_LOAN_CUSTOM':
       ];
       await waSendText(from, lines.join('\n'));
       return;
-    }
-
-    // numeric reply after used-car list (safe behaviour)
-    if (type === 'text' && msgText) {
-      const trimmed = msgText.trim();
-      const lastSvc = getLastService(from);
-      if (lastSvc === 'USED' && /^[1-9]\d*$/.test(trimmed)) {
-        await waSendText(
-          from,
-          'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.'
-        );
-        return;
-      }
-    }
-
-  // USED CAR detection
-if (type === 'text' && msgText) {
-  const numMatch = msgText.trim().match(/^(\d{1,2})$/);
-
-  const textLower = msgText.toLowerCase();
-  const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
-  const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
-  const lastSvc = getLastService(from);
-
-  // 🔒 IMPORTANT: do NOT rebuild used list on serial reply
-  if (
-    !numMatch &&                              // ✅ already present
-    global.__USED_SERIAL_ACTIVE__ !== true && // ✅ ADD THIS LINE
-    (explicitUsed || hasYear) //
-  ) {
-    const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
-
-    await waSendText(from, usedRes.text || 'Used car quote failed.');
-    if (usedRes.picLink) {
-      await waSendText(from, `Photos: ${usedRes.picLink}`);
-    }
-
-    await sendUsedCarButtons(from);
-    setLastService(from, 'USED');
-    return;
-  }
-}
-
-    // NEW CAR quick quote (only if NOT advisory-style)
-    if (type === 'text' && msgText && !isAdvisory(msgText)) {
-      const served = await tryQuickNewCarQuote(msgText, from);
-      if (served) {
-        return;
-      }
     }
 
     // Advisory handler (Signature GPT + brochures) — AFTER pricing
