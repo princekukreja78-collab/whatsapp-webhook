@@ -91,6 +91,24 @@ function logOnceRag(msg) {
   }
   console.log(msg);
 }
+
+// ==================================================
+// WHATSAPP PHONE NUMBER ID RESOLVER (SINGLE SOURCE)
+// ==================================================
+function getActivePhoneNumberId() {
+  const phoneId =
+    global.__LAST_PHONE_ID__ ||
+    process.env.PHONE_NUMBER_ID ||
+    process.env.WA_PHONE_NUMBER_ID;
+
+  if (!phoneId) {
+    console.error('❌ No active WhatsApp phone_number_id available');
+    return null;
+  }
+
+  return phoneId;
+}
+
 // ==================================================
 // PRICING SHEET CACHE (GLOBAL, IN-MEMORY)
 // ==================================================
@@ -651,7 +669,8 @@ async function autoIngest(enriched = {}) {
 
 // ---------------- ENV ----------------
 const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
-const PHONE_NUMBER_ID = (process.env.PHONE_NUMBER_ID || '').trim();
+const PHONE_NUMBER_ID = null; // ❌ deprecated – do not use for sending
+
 const ADMIN_WA        = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
 const VERIFY_TOKEN    = (process.env.VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
 
@@ -810,7 +829,10 @@ async function waSendRaw(payload) {
     return null;
   }
 
-  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+  const phoneId = getActivePhoneNumberId();
+if (!phoneId) return;
+
+const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
 
   try {
     if (DEBUG) console.log("WA OUTGOING PAYLOAD:", JSON.stringify(payload).slice(0, 400));
@@ -4379,6 +4401,14 @@ app.get('/crm/leads', async (req, res) => {
 // ---------- ADMIN TEST ALERT ----------
 app.post('/admin/test_alert', async (req, res) => {
   try {
+    const phoneId =
+      process.env.PHONE_NUMBER_ID ||
+      process.env.WA_PHONE_NUMBER_ID;
+
+    if (!phoneId) {
+      return res.status(500).json({ ok: false, error: "Missing PHONE_NUMBER_ID" });
+    }
+
     const payload = {
       messaging_product: "whatsapp",
       to: process.env.ADMIN_WA,
@@ -4388,19 +4418,16 @@ app.post('/admin/test_alert', async (req, res) => {
       }
     };
 
-    console.log("ADMIN TEST ALERT → WA PAYLOAD:", JSON.stringify(payload, null, 2));
+    const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
 
-    const resp = await fetch(
-      `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.META_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      }
-    );
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.META_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
 
     const result = await resp.json();
     console.log("ADMIN ALERT WA RESPONSE:", result);
@@ -4450,6 +4477,35 @@ app.post('/webhook', async (req, res) => {
       change = null;
       value  = {};
     }
+     // --------------------------------------------------
+    // 🔒 CANONICAL PHONE_NUMBER_ID RESOLUTION (ONCE ONLY)
+    // --------------------------------------------------
+    let phoneNumberId =
+      value?.metadata?.phone_number_id ||
+      (typeof getActivePhoneNumberId === 'function'
+        ? getActivePhoneNumberId()
+        : null) ||
+      (process.env.PHONE_NUMBER_ID || process.env.WA_PHONE_NUMBER_ID || '').trim() ||
+      null;
+
+    if (DEBUG) {
+      console.log('📞 Resolved phoneNumberId =', phoneNumberId);
+    }
+
+// ==================================================
+// CAPTURE INCOMING PHONE_NUMBER_ID (CRITICAL)
+// ==================================================
+const incomingPhoneId = value?.metadata?.phone_number_id;
+
+if (incomingPhoneId) {
+  global.__LAST_PHONE_ID__ = incomingPhoneId;
+
+  if (DEBUG) {
+    console.log('📞 Bound outgoing replies to phone_number_id:', incomingPhoneId);
+  }
+} else if (DEBUG) {
+  console.warn('⚠️ No phone_number_id found in webhook metadata');
+}
 
           /* AUTO-INGEST using actual WhatsApp message fields + photo forward + AI vision */
     try {
@@ -5892,7 +5948,8 @@ useLink = imageUrl;
 
 // send via WhatsApp Cloud API
 const token = process.env.META_TOKEN;
-const phoneNumberId = process.env.PHONE_NUMBER_ID;
+// removed — phoneNumberId already defined above
+if (!phoneNumberId) return;
 if (!token || !phoneNumberId) return res.status(500).json({ ok:false, error:'missing META_TOKEN or PHONE_NUMBER_ID' });
 
 const body = {
@@ -5902,11 +5959,28 @@ type: 'image',
 image: mediaId ? { id: mediaId, caption: caption || '' } : { link: useLink, caption: caption || '' }
 };
 
-const sendResp = await fetch(`https://graph.facebook.com/v17.0/${phoneNumberId}/messages`, {
-method: 'POST',
-headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-body: JSON.stringify(body)
-});
+const activePhoneNumberId =
+  value?.metadata?.phone_number_id ||
+  process.env.PHONE_NUMBER_ID ||
+  process.env.WA_PHONE_NUMBER_ID;
+
+if (!activePhoneNumberId) {
+  return res.status(500).json({
+    ok: false,
+    error: 'Missing phone_number_id (metadata or env)'
+  });
+}
+const sendResp = await fetch(
+  `https://graph.facebook.com/v21.0/${activePhoneNumberId}/messages`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  }
+);
 const jr = await sendResp.json();
 if (!sendResp.ok) return res.status(500).json({ ok:false, error: jr });
 return res.json({ ok:true, sent:true, resp: jr });
@@ -5916,30 +5990,50 @@ return res.status(500).json({ ok:false, error: String(e) });
 }
 });
 // === waSendImage helper (WhatsApp Cloud API) ===
-async function waSendImage(to, mediaId, caption="") {
+async function waSendImage(phoneNumberId, to, mediaId, caption = "") {
   const token = process.env.META_TOKEN;
-  const phoneNumberId = process.env.PHONE_NUMBER_ID;
+
+  if (!token || !phoneNumberId) {
+    console.warn("waSendImage skipped: missing META_TOKEN or phoneNumberId");
+    return null;
+  }
+
   const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
 
   const payload = {
     messaging_product: "whatsapp",
-    to: to,
+    to,
     type: "image",
-    image: { id: mediaId, caption: caption }
+    image: {
+      id: mediaId,
+      ...(caption ? { caption } : {})
+    }
   };
 
-  const r = await fetch(url, {
+  const resp = await fetch(url, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
   });
 
-  const j = await r.json();
-  return j;
+  let data = null;
+  try {
+    data = await resp.json();
+  } catch (_) {}
+
+  if (!resp.ok) {
+    console.error("waSendImage failed:", {
+      status: resp.status,
+      response: data
+    });
+  }
+
+  return data;
 }
+
 
 // === WhatsApp media helper: download and expose via our server ===
 async function getMediaUrl(mediaId) {
@@ -6018,8 +6112,13 @@ async function getMediaUrl(mediaId) {
 }
 
 // === Forward existing WhatsApp media to another number ===
-async function waForwardImage(to, mediaId, caption = "") {
-  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+async function waForwardImage(phoneNumberId, to, mediaId, caption = "") {
+  if (!META_TOKEN || !phoneNumberId) {
+    console.warn("waForwardImage skipped: missing META_TOKEN or phoneNumberId");
+    return null;
+  }
+
+  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
 
   const payload = {
     messaging_product: "whatsapp",
@@ -6027,30 +6126,37 @@ async function waForwardImage(to, mediaId, caption = "") {
     type: "image",
     image: {
       id: mediaId,
-      caption
+      ...(caption ? { caption } : {})
     }
   };
 
   const resp = await fetch(url, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${META_TOKEN}`,
+      Authorization: `Bearer ${META_TOKEN}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
   });
 
-  const data = await resp.json();
-  if (DEBUG) console.log("waForwardImage →", JSON.stringify(data));
+  let data = null;
+  try { data = await resp.json(); } catch (_) {}
+
+  if (!resp.ok) {
+    console.error("waForwardImage failed:", {
+      status: resp.status,
+      response: data
+    });
+  }
+
   return data;
 }
-
 
 // === uploadMediaToWhatsApp: upload a local file to WhatsApp Cloud and return media_id ===
 async function uploadMediaToWhatsApp(localPath) {
   try {
     const token = process.env.META_TOKEN || process.env.WA_TOKEN || process.env.META_ACCESS_TOKEN;
-    const phoneNumberId = (process.env.PHONE_NUMBER_ID || process.env.WA_PHONE_NUMBER_ID || "").trim();
+   phoneNumberId = phoneNumberId || (process.env.PHONE_NUMBER_ID || process.env.WA_PHONE_NUMBER_ID || "").trim();
     if (!token || !phoneNumberId) throw new Error('Missing META_TOKEN or PHONE_NUMBER_ID');
 
     // resolve local file path (accept "/uploads/xxx" or "uploads/xxx" or "public/uploads/xxx")
