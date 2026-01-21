@@ -4648,6 +4648,22 @@ if (numMatch) {
 
     return res.sendStatus(200);
   }
+// ================= ABSOLUTE SERIAL PRIORITY (USED) =================
+if (type === 'text' && msgText) {
+  const numMatch = msgText.trim().match(/^(\d{1,2})$/);
+  const usedRec = global.lastUsedCarList?.get(from);
+
+  // 🔥 number + active list → serial MUST handle
+  if (numMatch && usedRec) {
+    // DO NOT let any other logic see this message
+    // serial block is next
+  }
+
+  // 🔒 number without list → ignore
+  if (numMatch && !usedRec) {
+    return res.sendStatus(200);
+  }
+}
 
  // ================= USED CAR SERIAL SELECTION =================
 const usedRec = global.lastUsedCarList.get(from);
@@ -5569,21 +5585,6 @@ case 'BTN_LOAN_CUSTOM':
         return res.sendStatus(200);
       }
     }
-// ================= ABSOLUTE SERIAL PRIORITY (USED) =================
-if (type === 'text' && msgText) {
-  const numMatch = msgText.trim().match(/^(\d{1,2})$/);
-  const usedRec = global.lastUsedCarList?.get(from);
-
-  // If user replied with a number AND a used list exists,
-  // ONLY the serial handler is allowed to run.
-  if (numMatch && usedRec) {
-    // Do nothing here.
-    // Let the USED CAR SERIAL SELECTION block handle it.
-  } else if (numMatch && !usedRec) {
-    // Number with no active list → ignore safely
-    return res.sendStatus(200);
-  }
-}
 
   // USED CAR detection
 if (type === 'text' && msgText) {
