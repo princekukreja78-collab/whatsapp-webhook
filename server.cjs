@@ -2868,6 +2868,8 @@ async function tryQuickNewCarQuote(msgText, to) {
 console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
     if (!msgText || !msgText.trim()) return false;
 const lastSvc = (getLastService(to) || '').toLowerCase();
+// 🔒 Variant lock: user is selecting from a NEW car variant list
+const hasVariantLock = Boolean(global.lastVariantList?.get(to));
 
     // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
    
@@ -4364,6 +4366,7 @@ app.post('/admin/test_alert', async (req, res) => {
 
 // ---------------- main webhook handler ----------------
 app.post('/webhook', async (req, res) => {
+  res.sendStatus(200); // ACK ONCE
   try {
     // ensure `short` exists in the outer scope so later code can't throw ReferenceError
     let short = {};
@@ -4548,7 +4551,7 @@ if (value.statuses && !value.messages) {
   if (DEBUG) {
     console.log('Status-only event processed for delivery tracking.');
   }
-  return res.sendStatus(200);  // Important: DO NOT REMOVE THIS
+  return;  // Important: DO NOT REMOVE THIS
 }
 
     const msg     = value?.messages?.[0];
@@ -4564,7 +4567,7 @@ const dedupKey =
 
 if (global.__WA_MSG_LOCK__.has(dedupKey)) {
   if (DEBUG) console.log('Duplicate WA message ignored:', dedupKey);
-  return res.sendStatus(200);
+  return;
 }
 
 global.__WA_MSG_LOCK__.add(dedupKey);
@@ -4616,14 +4619,14 @@ if (numMatch) {
     // 🔒 Expired list
     if (Date.now() - rec.ts > 5 * 60 * 1000) {
       global.lastVariantList.delete(from);
-      return res.sendStatus(200);
+      return;
     }
 
     const idx = Number(numMatch[1]) - 1;
 
     // 🔒 Invalid number
     if (!rec.variants[idx]) {
-      return res.sendStatus(200);
+      return;
     }
 
     const chosen = rec.variants[idx];
@@ -4646,7 +4649,7 @@ if (numMatch) {
       await tryQuickNewCarQuote(queryText, from);
     }
 
-    return res.sendStatus(200);
+    return;
   }
 // ================= ABSOLUTE SERIAL PRIORITY (USED) =================
 if (type === 'text' && msgText) {
@@ -4661,7 +4664,7 @@ if (type === 'text' && msgText) {
 
   // 🔒 number without list → ignore
   if (numMatch && !usedRec) {
-    return res.sendStatus(200);
+    return;
   }
 }
 
@@ -4669,20 +4672,20 @@ if (type === 'text' && msgText) {
 const usedRec = global.lastUsedCarList.get(from);
 
 if (!usedRec) {
-  return res.sendStatus(200);
+  return;
 }
 
 // 🔒 Expired list
 if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
   global.lastUsedCarList.delete(from);
-  return res.sendStatus(200);
+  return;
 }
 
 const idx = Number(numMatch[1]) - 1;
 
 // 🔒 Invalid number
 if (!usedRec.rows || !usedRec.rows[idx]) {
-  return res.sendStatus(200);
+  return;
 }
 
 const row = usedRec.rows[idx];
@@ -4703,7 +4706,7 @@ if (picLink) {
 setLastService(from, 'USED');
 
 // 🔥 HARD STOP — nothing after this runs
-return res.sendStatus(200);
+return;
 }
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
@@ -4743,7 +4746,7 @@ if (!selectedId && msgText && !inLoanFlow && !looksLikeEmiInput) {
       }
     });
 
-    return res.sendStatus(200); // 🔒 stop further processing
+    return; // 🔒 stop further processing
   }
 }
 
@@ -4770,7 +4773,7 @@ if (selectedId === 'SRV_LOAN') {
     }
   });
 
-  return res.sendStatus(200); // 🔒 stop before intent engine
+  return; // 🔒 stop before intent engine
 }
 // ================= LOAN TYPE BUTTON HANDLING =================
 if (selectedId === 'BTN_LOAN_NEW') {
@@ -4781,7 +4784,7 @@ if (selectedId === 'BTN_LOAN_NEW') {
     '🆕 *New Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
   );
 
-  return res.sendStatus(200);
+  return;
 }
 
 if (selectedId === 'BTN_LOAN_USED') {
@@ -4792,7 +4795,7 @@ if (selectedId === 'BTN_LOAN_USED') {
     '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`'
   );
 
-  return res.sendStatus(200);
+  return;
 }
 
 if (selectedId === 'BTN_LOAN_CUSTOM') {
@@ -4814,7 +4817,7 @@ if (selectedId === 'BTN_LOAN_CUSTOM') {
     }
   });
 
-  return res.sendStatus(200);
+  return;
 }
 // ================= END LOAN TYPE HANDLING =================
 // ================= MANUAL EMI MODE HANDLING =================
@@ -4826,7 +4829,7 @@ if (selectedId === 'BTN_EMI_NORMAL') {
     '📘 *Normal EMI*\n\nPlease share:\n*Loan Amount + Tenure + ROI*\n\nExample:\n`10 lakh 5 years 9%`'
   );
 
-  return res.sendStatus(200);
+  return;
 }
 
 if (selectedId === 'BTN_EMI_BULLET') {
@@ -4837,7 +4840,7 @@ if (selectedId === 'BTN_EMI_BULLET') {
     '🎯 *Bullet EMI*\n\nPlease share:\n*Loan Amount + Tenure + ROI*\n\nExample:\n`10 lakh 3 years 10%`'
   );
 
-  return res.sendStatus(200);
+  return;
 }
 // ================= END MANUAL EMI MODE HANDLING =================
 
@@ -4850,7 +4853,7 @@ if (selectedId === 'BTN_LOAN_NEW') {
     '🆕 *New Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
   );
 
-  return res.sendStatus(200);
+  return;
 }
 
 if (selectedId === 'BTN_LOAN_USED') {
@@ -4861,7 +4864,7 @@ if (selectedId === 'BTN_LOAN_USED') {
     '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`'
   );
 
-  return res.sendStatus(200);
+  return;
 }
 
 if (selectedId === 'BTN_LOAN_CUSTOM') {
@@ -4872,7 +4875,7 @@ if (selectedId === 'BTN_LOAN_CUSTOM') {
     '📊 *Manual EMI*\n\nPlease share *loan amount + tenure*.\nExample:\n`7 lakh 60 months`'
   );
 
-  return res.sendStatus(200);
+  return;
 }
 // ================= END LOAN TYPE HANDLING =================
 
@@ -4915,7 +4918,7 @@ if (
       'Please share *Loan Amount + Tenure + ROI*.\nExample:\n`10 lakh 5 years 9%`'
     );
     setLastService(from, lastSvc);
-    return res.sendStatus(200);
+    return;
   }
 
   months = Math.min(months, 84);
@@ -4949,7 +4952,7 @@ const bulletAmt =
       'Unable to calculate Bullet EMI. Please try again.'
     );
     setLastService(from, lastSvc);
-    return res.sendStatus(200);
+    return;
   }
 
   const perBullet = Math.round(bulletAmt / 5);
@@ -4971,7 +4974,7 @@ const bulletAmt =
   );
 
   setLastService(from, lastSvc);
-  return res.sendStatus(200);
+  return;
 }
 
   // ---------- MANUAL NORMAL EMI ----------
@@ -4987,7 +4990,7 @@ const bulletAmt =
   );
 
   setLastService(from, lastSvc);
-  return res.sendStatus(200);
+  return;
 }
 // ================= END MANUAL EMI =================
 // ================= AUTO LOAN EMI (NEW / USED) =================
@@ -5019,7 +5022,7 @@ if (
       'Please share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
     );
     setLastService(from, lastSvc);
-    return res.sendStatus(200);
+    return;
   }
 
   const rate =
@@ -5039,7 +5042,7 @@ if (
   );
 
   setLastService(from, lastSvc);
-  return res.sendStatus(200);
+  return;
 }
 // ================= END AUTO EMI =================
 
@@ -5076,7 +5079,7 @@ try {
             text: smartText
           });
         }
-        return res.sendStatus(200);
+        return;
       }
     } else if (DEBUG) {
       console.log("SMART NEW CAR INTENT bypassed for variant-explicit query", {
@@ -5249,7 +5252,7 @@ await waSendText(
   '→ Best options available in your budget\n\n' +
   'Type exactly as shown above.'
 );
-  return res.sendStatus(200);
+  return;
 
      case 'SRV_USED_CAR':
 case 'BTN_USED_MORE':
@@ -5271,14 +5274,14 @@ case 'BTN_USED_MORE':
   '→ Best options near your budget\n\n' +
   '💡 You can also reply with the *number* from any list shown to get full details instantly.'
 );
-return res.sendStatus(200);
+return;
         case 'SRV_SELL_CAR':
           setLastService(from, 'SELL');
           await waSendText(
             from,
             'Please share *car make/model, year, km, city* and a few photos. We’ll get you the best quote.'
           );
-          return res.sendStatus(200);
+          return;
   
 case 'SRV_LOAN':
   console.log('HIT: SRV_LOAN');
@@ -5299,7 +5302,7 @@ case 'SRV_LOAN':
       }
     }
   });
-  return res.sendStatus(200); // ⬅ THIS LINE IS THE FIX
+  return; // ⬅ THIS LINE IS THE FIX
 
 // ================= NEW CAR LOAN (AUTO ROI @ 8.1%) =================
 case 'BTN_LOAN_NEW':
@@ -5335,7 +5338,7 @@ case 'BTN_LOAN_NEW':
     }
   });
 
-  return res.sendStatus(200);
+  return;
 
 
 // -------- Normal EMI (New Car) --------
@@ -5350,7 +5353,7 @@ case 'BTN_NEW_EMI_NORMAL':
     '• `1200000 5`\n\n' +
     '_EMI will be calculated automatically at 8.1%._'
   );
-  return res.sendStatus(200);
+  return;
 
 
 // -------- Bullet EMI (New Car) --------
@@ -5366,7 +5369,7 @@ case 'BTN_NEW_EMI_BULLET':
     '• EMI is paid every month\n' +
     '• Every *12th EMI* has a higher principal component'
   );
-  return res.sendStatus(200);
+  return;
 
 
 // ================= USED CAR LOAN (AUTO ROI @ 10%, SHOWN @ 9.99%) =================
@@ -5404,7 +5407,7 @@ case 'BTN_LOAN_USED':
     }
   });
 
-  return res.sendStatus(200);
+  return;
 
 
 // -------- Normal EMI (Used Car) --------
@@ -5418,7 +5421,7 @@ case 'BTN_USED_EMI_NORMAL':
     '• `₹6,00,000 48`\n\n' +
     '_EMI will be calculated automatically (shown @ 9.99%)._'
   );
-  return res.sendStatus(200);
+  return;
 
 
 // -------- Bullet EMI (Used Car) --------
@@ -5434,7 +5437,7 @@ case 'BTN_USED_EMI_BULLET':
     '• EMI is paid every month\n' +
     '• Every *12th EMI* has a higher principal component'
   );
-  return res.sendStatus(200);
+  return;
 
 
 // ================= COMMON LOAN HELP =================
@@ -5448,7 +5451,7 @@ case 'BTN_LOAN_DOCS':
     '• Address proof\n\n' +
     'Share *city + profile (salaried / self-employed)* for an exact checklist.'
   );
-  return res.sendStatus(200);
+  return;
 
 case 'BTN_LOAN_ELIGIBILITY':
   await waSendText(
@@ -5461,7 +5464,7 @@ case 'BTN_LOAN_ELIGIBILITY':
     '• Existing EMIs (if any)\n\n' +
     'Example:\n`Delhi salaried 1.2L income 15k EMI`'
   );
-  return res.sendStatus(200);
+  return;
 
 
 // ================= MANUAL EMI (CUSTOM RATE) =================
@@ -5482,7 +5485,7 @@ case 'BTN_LOAN_CUSTOM':
     '• EMI paid monthly\n' +
     '• Every 12th EMI includes higher principal'
   );
-  return res.sendStatus(200);
+  return;
  } 
 } 
     // Greeting first – ONLY service menu (no quick buttons now)
@@ -5492,7 +5495,7 @@ case 'BTN_LOAN_CUSTOM':
         '🔴 *VehYra by MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.'
       );
       await waSendListMenu(from);
-      return res.sendStatus(200);
+      return;
     }
 
     // bullet command
@@ -5506,7 +5509,7 @@ case 'BTN_LOAN_CUSTOM':
           from,
           'Please send: `bullet <loan amount> <rate% optional> <tenure months>` e.g. `bullet 750000 10 60`'
         );
-        return res.sendStatus(200);
+        return;
       }
       const sim = simulateBulletPlan({
   amount: loanAmt,                  // ✔ correct parameter
@@ -5516,7 +5519,7 @@ case 'BTN_LOAN_CUSTOM':
 });
       if (!sim) {
         await waSendText(from, 'Bullet calculation failed.');
-        return res.sendStatus(200);
+        return;
       }
       const lines = [];
       lines.push('🔷 *Bullet EMI Plan — Used Car*');
@@ -5536,7 +5539,7 @@ case 'BTN_LOAN_CUSTOM':
       try {
         postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `BULLET_CALC ${loanAmt} ${months}`, service: 'LOAN', tags: ['BULLET_EMI'], meta: {} });
       } catch (_) {}
-      return res.sendStatus(200);
+      return;
     }
 
     // emi command
@@ -5551,7 +5554,7 @@ case 'BTN_LOAN_CUSTOM':
           from,
           'Please send: `emi <loan amount> <rate% optional> <tenure months>` e.g. `emi 1500000 9.5 60`'
         );
-        return res.sendStatus(200);
+        return;
       }
       const monthly = calcEmiSimple(loanAmt, rate, months);
       const total   = monthly * months;
@@ -5570,7 +5573,7 @@ case 'BTN_LOAN_CUSTOM':
         '\n*Terms & Conditions Apply ✅*'
       ];
       await waSendText(from, lines.join('\n'));
-      return res.sendStatus(200);
+      return;
     }
 
     // numeric reply after used-car list (safe behaviour)
@@ -5582,7 +5585,7 @@ case 'BTN_LOAN_CUSTOM':
           from,
           'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.'
         );
-        return res.sendStatus(200);
+        return;
       }
     }
 
@@ -5610,7 +5613,7 @@ if (type === 'text' && msgText) {
 
     await sendUsedCarButtons(from);
     setLastService(from, 'USED');
-    return res.sendStatus(200);
+    return;
   }
 }
 
@@ -5618,7 +5621,7 @@ if (type === 'text' && msgText) {
     if (type === 'text' && msgText && !isAdvisory(msgText)) {
       const served = await tryQuickNewCarQuote(msgText, from);
       if (served) {
-        return res.sendStatus(200);
+        return;
       }
     }
 
@@ -5680,7 +5683,7 @@ if (type === 'text' && msgText) {
           } catch (e) {
             if (DEBUG) console.warn('postLeadToCRM advisory log failed', e && e.message ? e.message : e);
           }
-          return res.sendStatus(200);
+          return;
         }
       } catch (e) {
         if (DEBUG) console.warn('Advisory handler error', e && e.message ? e.message : e);
@@ -5692,7 +5695,7 @@ if (type === 'text' && msgText) {
       const crmReply = await fetchCRMReply({ from, msgText });
       if (crmReply) {
         await waSendText(from, crmReply);
-        return res.sendStatus(200);
+        return;
       }
     } catch (e) {
       console.warn('CRM reply failed', e && e.message ? e.message : e);
@@ -5704,7 +5707,7 @@ if (type === 'text' && msgText) {
 //   from,
 //   '🚗 *New Car Pricing & Finance*'
 // );
-// return res.sendStatus(200);
+// return;
 
   } catch (err) {
     console.error('Webhook error:', err && err.stack ? err.stack : err);
@@ -5716,7 +5719,7 @@ if (type === 'text' && msgText) {
         );
       }
     } catch (_) {}
-    return res.sendStatus(200);
+    return;
   }
 });
 
