@@ -3240,10 +3240,19 @@ if (brandGuess) {
       const idxSuffixCol = header.findIndex(h => h.includes('SUFFIX'));
       const fuelIdx = pickFuelIndex(idxMap);
       const exIdx = detectExShowIdx(idxMap);
-     // --- determine globalPriceIdx (pickOnRoadPriceIndex OR header heuristics OR numeric fallback) ---
-let globalPriceIdx = wantsAllStatesLocal;
-  ? findPriceIndexFallback(header, tab)
-: pickOnRoadPriceIndex(idxMap, cityToken, audience, stateMatch);
+   // --- determine globalPriceIdx (PAN-India vs state-wise) ---
+let globalPriceIdx;
+
+if (wantsAllStatesLocal) {
+  globalPriceIdx = findPriceIndexFallback(header, tab);
+} else {
+  globalPriceIdx = pickOnRoadPriceIndex(
+    idxMap,
+    cityToken,
+    audience,
+    stateMatch
+  );
+}
 
 // robust guard (in case pickOnRoadPriceIndex returns undefined)
 if (typeof globalPriceIdx === 'undefined' || globalPriceIdx < 0) {
