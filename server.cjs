@@ -2870,6 +2870,10 @@ console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
 const lastSvc = (getLastService(to) || '').toLowerCase();
 // 🔒 Variant lock: user is selecting from a NEW car variant list
 const hasVariantLock = Boolean(global.lastVariantList?.get(to));
+// 🔒 Model-list intent: brand-only queries like "Audi", "BMW"
+const wantsModelList =
+  !hasVariantLock &&
+  msgText.trim().split(/\s+/).length === 1;
 
     // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
    
