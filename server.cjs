@@ -1,3 +1,5 @@
+console.log('BOOT_MARKER = F1814B5_RUNNING');
+
 console.log("🚀 MR.CAR Webhook Server Booted (Verbose Logging ON)");
 
 /* Load .env early so process.env is populated for subsequent reads */
