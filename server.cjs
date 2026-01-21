@@ -981,19 +981,30 @@ async function waSendListMenu(to) {
 
 // used car quick buttons (after used quote)
 async function sendUsedCarButtons(to) {
+  // 🔒 HARD BLOCK: never show buttons after serial selection
+  if (global.__USED_SERIAL_ACTIVE__ === true) {
+    return;
+  }
+
   const buttons = [
     { type: 'reply', reply: { id: 'BTN_USED_MORE',     title: 'More Similar Cars' } },
     { type: 'reply', reply: { id: 'BTN_BOOK_TEST',     title: 'Book Test Drive' } },
     { type: 'reply', reply: { id: 'BTN_CONTACT_SALES', title: 'Contact Sales' } }
   ];
+
   const interactive = {
     type: 'button',
     body: { text: 'Quick actions:' },
     action: { buttons }
   };
-  return waSendRaw({ messaging_product: 'whatsapp', to, type: 'interactive', interactive });
-}
 
+  return waSendRaw({
+    messaging_product: 'whatsapp',
+    to,
+    type: 'interactive',
+    interactive
+  });
+}
 // ---------------- Admin alerts (throttled) ----------------
 async function sendAdminAlert({ from, name, text }) {
   try {
@@ -4638,39 +4649,45 @@ if (numMatch) {
     return res.sendStatus(200);
   }
 
-  // ================= USED CAR SERIAL SELECTION =================
-  const usedRec = global.lastUsedCarList.get(from);
+ // ================= USED CAR SERIAL SELECTION =================
+const usedRec = global.lastUsedCarList.get(from);
 
-  if (!usedRec) {
-    return res.sendStatus(200);
-  }
-
-  // 🔒 Expired list
-  if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
-    global.lastUsedCarList.delete(from);
-    return res.sendStatus(200);
-  }
-
-  const idx = Number(numMatch[1]) - 1;
-
-  // 🔒 Invalid number
-  if (!usedRec.rows || !usedRec.rows[idx]) {
-    return res.sendStatus(200);
-  }
-
-  const row = usedRec.rows[idx];
-  global.lastUsedCarList.delete(from);
-
-  const { text, picLink } = await buildSingleUsedCarQuote(row, from);
-
-  if (picLink) {
-    await waSendImage(from, picLink, text);
-  } else {
-    await waSendText(from, text);
-  }
-
-  setLastService(from, 'USED');
+if (!usedRec) {
   return res.sendStatus(200);
+}
+
+// 🔒 Expired list
+if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
+  global.lastUsedCarList.delete(from);
+  return res.sendStatus(200);
+}
+
+const idx = Number(numMatch[1]) - 1;
+
+// 🔒 Invalid number
+if (!usedRec.rows || !usedRec.rows[idx]) {
+  return res.sendStatus(200);
+}
+
+const row = usedRec.rows[idx];
+global.lastUsedCarList.delete(from);
+
+// 🔒 MARK: this response is from SERIAL
+global.__USED_SERIAL_ACTIVE__ = true;
+
+const { text, picLink } = await buildSingleUsedCarQuote(row, from);
+
+if (picLink) {
+  await waSendImage(from, picLink, text);
+} else {
+  await waSendText(from, text);
+}
+
+// service stays USED (this is fine)
+setLastService(from, 'USED');
+
+// 🔥 HARD STOP — nothing after this runs
+return res.sendStatus(200);
 }
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
@@ -5564,7 +5581,8 @@ if (type === 'text' && msgText) {
 
   // 🔒 IMPORTANT: do NOT rebuild used list on serial reply
   if (
-    !numMatch &&
+    !numMatch &&                              // ✅ already present
+    global.__USED_SERIAL_ACTIVE__ !== true && // ✅ ADD THIS LINE
     (explicitUsed || hasYear || lastSvc === 'USED')
   ) {
     const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
