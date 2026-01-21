@@ -2893,6 +2893,9 @@ const hasBudgetIntent =
 // 🔒 Explicit state pricing (e.g. "price in Delhi")
 const explicitStatePricingIntent =
   /\b(price in|on[- ]?road in|cost in|rate in)\b/i.test(msgText);
+// 🔒 Specs intent
+const wantsSpecs =
+  /\b(spec|specs|specification|specifications|feature|features)\b/i.test(msgText);
 
 
 // 🔒 Year mention guard (NEW vs USED safety)
@@ -4075,7 +4078,7 @@ if (
 if (
   allMatches.length >= 1 &&
   !userBudget &&
-  !wantsAllStatesLocal
+  !wantsAllStatesLocal &&
   (allMatches.length === 1 || userHasExplicitVariant)
 ) {
   const best = allMatches[0];
