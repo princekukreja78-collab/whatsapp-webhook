@@ -2874,6 +2874,9 @@ const hasVariantLock = Boolean(global.lastVariantList?.get(to));
 const wantsModelList =
   !hasVariantLock &&
   msgText.trim().split(/\s+/).length === 1;
+// 🔒 Pricing intent: user explicitly asking for price / cost
+const hasPricingIntent =
+  /\b(price|cost|on[-\s]?road|ex[-\s]?showroom|emi|down\s?payment)\b/i.test(msgText);
 
     // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
    
