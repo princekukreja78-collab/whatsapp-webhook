@@ -2871,6 +2871,10 @@ return false;
 async function tryQuickNewCarQuote(msgText, to) {
   try {
 console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
+
+  // ---------- BUILD RESPONSE LINES (MUST BE FIRST) ----------
+  const lines = [];
+
     if (!msgText || !msgText.trim()) return false;
 const lastSvc = (getLastService(to) || '').toLowerCase();
 // 🔒 Variant lock: user is selecting from a NEW car variant list
@@ -2901,6 +2905,14 @@ const wantsSpecs =
 // 🔒 Year mention guard (NEW vs USED safety)
 const hasYearMention =
   /\b(19|20)\d{2}\b/.test(msgText);
+// 🔒 HARD EXIT: USED car intent must NOT enter new-car engine
+const explicitUsed =
+  /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/i.test(msgText);
+
+if (explicitUsed) {
+  if (DEBUG) console.log('USED intent detected → skip new-car engine:', msgText);
+  return false; // let USED engine handle it
+}
 
 
     // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
@@ -4220,8 +4232,7 @@ global.panIndiaPrompt.set(to, {
   title: `${best.brand} ${mdl} ${varr}`
 });
 
-await waSendText(to, lines.join('\n'));
-
+// ❗ DO NOT resend lines here
 await waSendText(
   to,
   'Would you like a *Pan-India on-road price comparison* for this variant?\n\nReply *YES* or *NO*.'
@@ -4230,6 +4241,7 @@ await waSendText(
 setLastService(to, 'PAN_INDIA_PROMPT');
 return true;
 }
+
 
    // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
 try {
@@ -4292,7 +4304,6 @@ try {
   if (DEBUG) console.warn("Spec block error:", err?.message);
 }
 // ---------------- END SPEC SHEET ----------------
-    await waSendText(to, lines.join('\n'));
     await sendNewCarButtons(to);
     incrementQuoteUsage(to);
     setLastService(to, 'NEW');
