@@ -3241,7 +3241,7 @@ if (brandGuess) {
       const fuelIdx = pickFuelIndex(idxMap);
       const exIdx = detectExShowIdx(idxMap);
      // --- determine globalPriceIdx (pickOnRoadPriceIndex OR header heuristics OR numeric fallback) ---
-let globalPriceIdx = wantsAllStates
+let globalPriceIdx = wantsAllStatesLocal;
   ? findPriceIndexFallback(header, tab)
 : pickOnRoadPriceIndex(idxMap, cityToken, audience, stateMatch);
 
