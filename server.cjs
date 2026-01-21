@@ -2354,8 +2354,13 @@ const wantsModelList =
 const explicitStatePricingIntent =
   /\b(price in|on[- ]?road in|cost in|rate in)\b/i.test(t);
 
-const hasVariantLock =
-  /\b(4x4|4\/2|4x2|automatic|auto|at|mt)\b/i.test(t);
+const hasVariantLock = Boolean(global.lastVariantList?.get(to));
+
+const hasBudgetIntent =
+  /\b(under|below|within|around|upto|up to|budget)\b/i.test(t) &&
+  /\b\d+(\.\d+)?\s*(l|lac|lakh|lakhs|cr|crore|rs|₹)\b/i.test(t);
+const isSingleWordBrandQuery =
+  t.trim().split(/\s+/).length === 1;
 
 // ---------------- DEBUG: INTENT SNAPSHOT ----------------
 if (DEBUG) {
@@ -2877,6 +2882,23 @@ const wantsModelList =
 // 🔒 Pricing intent: user explicitly asking for price / cost
 const hasPricingIntent =
   /\b(price|cost|on[-\s]?road|ex[-\s]?showroom|emi|down\s?payment)\b/i.test(msgText);
+// 🔒 Comparison intent: user wants to compare models
+const hasComparisonIntent =
+  /\b(vs|versus|compare|comparison|difference|better\s+than|\bor\b)\b/i.test(msgText);
+// 🔒 Budget intent (safe default)
+const hasBudgetIntent =
+  /\b(under|below|within|around|upto|up to|budget)\b/i.test(msgText) &&
+  /\b\d+(\.\d+)?\s*(l|lac|lakh|lakhs|cr|crore|rs|₹)\b/i.test(msgText);
+
+// 🔒 Explicit state pricing (e.g. "price in Delhi")
+const explicitStatePricingIntent =
+  /\b(price in|on[- ]?road in|cost in|rate in)\b/i.test(msgText);
+
+
+// 🔒 Year mention guard (NEW vs USED safety)
+const hasYearMention =
+  /\b(19|20)\d{2}\b/.test(msgText);
+
 
     // 🔒 HARD GUARD: If user is already in LOAN flow, do NOT treat numbers as budget
    
@@ -2931,12 +2953,9 @@ if (tables && Object.keys(tables).length) {
     const tRaw = String(msgText || '');
     const t = tRaw.toLowerCase();
     const tUpper = t.toUpperCase();
-// ------------------------------
 // PAN-INDIA / ALL-STATES INTENT (LOCAL TO QUOTE ENGINE)
-// ------------------------------
-const wantsAllStates =
+const wantsAllStatesLocal =
   /\b(all states|pan india|india wide|state wise|across states|all india)\b/i.test(t);
-
 
     // --- unified brand detection (uses global helper) ---
     let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
