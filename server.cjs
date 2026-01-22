@@ -4159,7 +4159,7 @@ if (
   }
 
   if (best.onroad) {
-    lines.push(`On-road price: ₹ ${best.onroad}`);
+    lines.push(`With best offers On-road price: ₹ ${best.onroad}`);
   } else if (best.exShow) {
     lines.push(`Ex-showroom: ₹ ${best.exShow}`);
   }
@@ -4222,16 +4222,29 @@ if (
     lines.push('*Terms & Conditions Apply ✅*');
   }
 
-  // ---------- CTA ----------
-  lines.push('');
-  lines.push('Reply *PAN INDIA* for price comparison across states.');
-  lines.push('Reply *SPEC model* for features or *EMI* for finance.');
-
-  // 🔒 TERMINAL EXIT — SINGLE QUOTE COMPLETE
-  await waSendText(to, lines.join('\n'));
-  setLastService(to, 'NEW');
-  return true; // ⛔ ABSOLUTE STOP
+ // ---------- CTA ----------
+if (isSingleQuote) {
+  lines.push('\nReply *SPEC model* for features or *EMI* for finance.');
 }
+
+// ---- PAN-INDIA FOLLOW-UP CONTEXT (SAFE) ----
+global.panIndiaPrompt.set(to, {
+  row: best.row,
+  header: tables[best.brand]?.header || [],
+  title: `${best.brand} ${mdl} ${varr}`
+});
+
+await waSendText(to, lines.join('\n'));
+
+await waSendText(
+  to,
+  'Would you like a *Pan-India on-road price comparison* for this variant?\n\nReply *YES* or *NO*.'
+);
+
+setLastService(to, 'PAN_INDIA_PROMPT');
+return true;
+}
+
    // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
 try {
   const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
