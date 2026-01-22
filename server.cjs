@@ -4122,20 +4122,26 @@ if (
   if (!best) return false;
 
   const loanAmt =
-  Number(String(best.exShow || '').replace(/[,₹\s]/g, '')) ||
-  Number(String(best.onroad || '').replace(/[,₹\s]/g, '')) ||
-  0;
-  const roi = Number(process.env.NEW_CAR_ROI || 8.1); // default ROI
+    Number(String(best.exShow || '').replace(/[,₹\s]/g, '')) ||
+    Number(String(best.onroad || '').replace(/[,₹\s]/g, '')) ||
+    0;
+
+  const roi = Number(process.env.NEW_CAR_ROI || 8.1);
   const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
 
   const mdl =
     best.idxModel >= 0 ? String(best.row[best.idxModel] || '').toUpperCase() : '';
   const varr =
     best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
-  const fuelStr = best.fuel ? String(best.fuel).toUpperCase() : '';
 
   const lines = [];
-lines.push(`*${best.brand}* ${mdl} ${varr}`);
+  lines.push(`*${best.brand}* ${mdl} ${varr}`);
+
+  // 🔒 TERMINAL EXIT — DO NOT FALL INTO PAN-INDIA
+  await waSendText(from, lines.join('\n'));
+  setLastService(from, 'NEW');
+  return true; //
+
 
 // ✅ SAFE location display — no undefined variables
 let pricingLocation = city;
