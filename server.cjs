@@ -1,8 +1,7 @@
 console.log("🚀 MR.CAR Webhook Server Booted (Verbose Logging ON)");
 
 /* Load .env early so process.env is populated for subsequent reads */
-require('dotenv').config({ debug: false });
-
+require('dotenv').config({ override: false, debug: false });
 
 /* Canonical SIGNATURE_MODEL wired from env */
 const SIGNATURE_MODEL = process.env.OPENAI_MODEL || process.env.SIGNATURE_BRAIN_MODEL || process.env.SIGNATURE_MODEL || process.env.ENGINE_USED || 'gpt-4o-mini';
