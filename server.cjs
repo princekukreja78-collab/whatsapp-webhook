@@ -4133,135 +4133,104 @@ if (
     best.idxModel >= 0 ? String(best.row[best.idxModel] || '').toUpperCase() : '';
   const varr =
     best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
+  const fuelStr = best.fuel ? String(best.fuel).toUpperCase() : '';
 
   const lines = [];
   lines.push(`*${best.brand}* ${mdl} ${varr}`);
 
-  // 🔒 TERMINAL EXIT — DO NOT FALL INTO PAN-INDIA
-  await waSendText(to, lines.join('\n'));
-setLastService(to, 'NEW');
-return true;//
+  // ✅ SAFE location display — never undefined
+  let pricingLocation = city || '';
 
-
-// ✅ SAFE location display — no undefined variables
-let pricingLocation = city;
-
-try {
-  // If pricing row contains a city/state column, prefer it
-  if (
-    best &&
-    best.row &&
-    typeof best.idxCity === 'number' &&
-    best.idxCity >= 0 &&
-    best.row[best.idxCity]
-  ) {
-    pricingLocation = String(best.row[best.idxCity]);
-  }
-} catch (e) {
-  pricingLocation = city;
-}
-
-// ---------- LOCATION DISPLAY (FINAL & CORRECT) ----------
-lines.push(
-  `*Location:* ${(stateMatch || 'DELHI').toUpperCase()} • *Profile:* ${profile.toUpperCase()}`
-);
-  if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
-  if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
-  if (best.onroad)
-    lines.push(`*On-Road (${audience.toUpperCase()}):* ₹ ${fmtMoney(best.onroad)}`);
-
-// ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
-if (isSingleQuote && loanAmt > 0) {
-
-  // 🔍 DEBUG — confirms EMI gate is entered
-  if (DEBUG) {
-    console.log('DEBUG_EMI_RENDER:', {
-      isSingleQuote,
-      loanAmt,
-      exShow: best.exShow,
-      onroad: best.onroad,
-      emi60,
-      roi
-    });
+  try {
+    if (
+      typeof best.idxCity === 'number' &&
+      best.idxCity >= 0 &&
+      best.row &&
+      best.row[best.idxCity]
+    ) {
+      pricingLocation = String(best.row[best.idxCity]);
+    }
+  } catch (_) {
+    pricingLocation = city || '';
   }
 
-  lines.push('*🔹 Loan & EMI Options*');
-  lines.push('');
+  if (pricingLocation) {
+    lines.push(`📍 ${pricingLocation}`);
+  }
 
-  // OPTION 1 — NORMAL EMI
-  lines.push('*OPTION 1 – NORMAL EMI*');
-  lines.push(`Loan Amount: 100% of Ex-Showroom → ₹ ${fmtMoney(loanAmt)}`);
-  lines.push(`Tenure: 60 months @ ${roi}% p.a.`);
-  lines.push(`Approx EMI: ₹ *${fmtMoney(emi60)}*`);
+  if (best.onroad) {
+    lines.push(`On-road price: ₹ ${best.onroad}`);
+  } else if (best.exShow) {
+    lines.push(`Ex-showroom: ₹ ${best.exShow}`);
+  }
 
- // OPTION 2 — BULLET EMI (25%)  ✅ BANK-APPROVED LOGIC
-try {
-  const bulletPct = 0.25;
+  if (fuelStr) {
+    lines.push(`Fuel: ${fuelStr}`);
+  }
 
-  // 🔁 EXACT SAME ENGINE AS MANUAL BULLET EMI
-  const bulletSim = simulateBulletPlan({
-    amount: loanAmt,
-    rate: roi,
-    months: 60,
-    bulletPct
-  });
+  // ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
+  if (loanAmt > 0) {
+    lines.push('');
+    lines.push('*🔹 Loan & EMI Options*');
+    lines.push('');
+    lines.push('*OPTION 1 – NORMAL EMI*');
+    lines.push(`Loan Amount: ₹ ${fmtMoney(loanAmt)}`);
+    lines.push(`Tenure: 60 months @ ${roi}% p.a.`);
+    lines.push(`Approx EMI: ₹ *${fmtMoney(emi60)}*`);
 
-  const bulletEmi =
-    bulletSim?.monthly_emi ||
-    bulletSim?.monthlyEmi ||
-    bulletSim?.emi ||
-    null;
-
-  const bulletAmt =
-    bulletSim?.bullet_amount ||
-    bulletSim?.bulletAmount ||
-    Math.round(loanAmt * bulletPct);
-
-  if (!bulletEmi || !bulletAmt) {
-    if (DEBUG) console.warn('NEW CAR BULLET EMI FAILED');
-  } else {
-    const perBullet = Math.round(bulletAmt / 5);
-    const bulletSchedule = [12, 24, 36, 48, 60]
-      .map(m => `₹ ${fmtMoney(perBullet)} at month ${m}`)
-      .join('\n');
-
-    if (DEBUG) {
-      console.log('DEBUG_BULLET_NEW_CAR_BANK_ALIGNED:', {
-        loanAmt,
-        roi,
-        bulletEmi,
-        bulletAmt
+    // OPTION 2 — BULLET EMI (25%)
+    try {
+      const bulletPct = 0.25;
+      const bulletSim = simulateBulletPlan({
+        amount: loanAmt,
+        rate: roi,
+        months: 60,
+        bulletPct
       });
+
+      const bulletEmi =
+        bulletSim?.monthly_emi ||
+        bulletSim?.monthlyEmi ||
+        bulletSim?.emi ||
+        null;
+
+      const bulletAmt =
+        bulletSim?.bullet_amount ||
+        bulletSim?.bulletAmount ||
+        Math.round(loanAmt * bulletPct);
+
+      if (bulletEmi && bulletAmt) {
+        const perBullet = Math.round(bulletAmt / 5);
+        const bulletSchedule = [12, 24, 36, 48, 60]
+          .map(m => `₹ ${fmtMoney(perBullet)} at month ${m}`)
+          .join('\n');
+
+        lines.push('');
+        lines.push('*OPTION 2 – BULLET EMI (25%)*');
+        lines.push(`Monthly EMI (approx): ₹ *${fmtMoney(bulletEmi)}*`);
+        lines.push(`Bullet total: ₹ *${fmtMoney(bulletAmt)}*`);
+        lines.push('');
+        lines.push('*Bullets:*');
+        lines.push(bulletSchedule);
+      }
+    } catch (e) {
+      if (DEBUG) console.warn('NEW CAR BULLET EMI ERROR:', e?.message);
     }
 
     lines.push('');
-    lines.push('*OPTION 2 – BULLET EMI (25%)*');
-    lines.push(`Monthly EMI (approx): ₹ *${fmtMoney(bulletEmi)}*`);
-    lines.push(`Bullet total (25% of loan): ₹ *${fmtMoney(bulletAmt)}*`);
-    lines.push('');
-    lines.push('*Bullets:*');
-    lines.push(bulletSchedule);
+    lines.push('_EMI figures are indicative. Final approval subject to bank terms._');
+    lines.push('*Terms & Conditions Apply ✅*');
   }
-} catch (e) {
-  if (DEBUG) console.warn('NEW CAR BULLET EMI ERROR:', e?.message);
-}
-  lines.push('');
-  lines.push('_EMI figures are indicative. Final approval, ROI & structure subject to bank terms._');
-  lines.push('*Terms & Conditions Apply ✅*');
-}
 
-
-// ---------- CTA ----------
-if (isSingleQuote) {
+  // ---------- CTA ----------
   lines.push('');
   lines.push('Reply *PAN INDIA* for price comparison across states.');
   lines.push('Reply *SPEC model* for features or *EMI* for finance.');
-}
 
-// 🔒 TERMINAL EXIT — SINGLE QUOTE COMPLETE
-await waSendText(to, lines.join('\n'));
-setLastService(to, 'NEW');
-return true; // ⛔ ABSOLUTE STOP
+  // 🔒 TERMINAL EXIT — SINGLE QUOTE COMPLETE
+  await waSendText(to, lines.join('\n'));
+  setLastService(to, 'NEW');
+  return true; // ⛔ ABSOLUTE STOP
 }
    // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
 try {
