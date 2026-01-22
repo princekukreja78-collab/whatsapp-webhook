@@ -1,7 +1,7 @@
 console.log("🚀 MR.CAR Webhook Server Booted (Verbose Logging ON)");
 
 /* Load .env early so process.env is populated for subsequent reads */
-require('dotenv').config({ debug: false });
+require('dotenv').config({ override: false, debug: false });
 
 
 /* Canonical SIGNATURE_MODEL wired from env */
@@ -824,15 +824,18 @@ async function waSendImageLink(to, imageUrl, caption = "") {
 
 // Low-level sender
 async function waSendRaw(payload) {
-  if (!META_TOKEN || !PHONE_NUMBER_ID) {
+  const metaToken = process.env.META_TOKEN;
+  const phoneId =
+    getActivePhoneNumberId() ||
+    process.env.PHONE_NUMBER_ID ||
+    null;
+
+  if (!metaToken || !phoneId) {
     console.warn("WA skipped - META_TOKEN or PHONE_NUMBER_ID missing");
     return null;
   }
 
-  const phoneId = getActivePhoneNumberId();
-if (!phoneId) return;
-
-const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
+  const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
 
   try {
     if (DEBUG) console.log("WA OUTGOING PAYLOAD:", JSON.stringify(payload).slice(0, 400));
@@ -840,7 +843,7 @@ const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
     const r = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${META_TOKEN}`,
+        Authorization: `Bearer ${metaToken}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify(payload)
