@@ -5666,34 +5666,43 @@ case 'BTN_LOAN_CUSTOM':
       }
     }
 
-  // USED CAR detection
+ // ================= USED CAR DETECTION (RESTORED & SAFE) =================
 if (type === 'text' && msgText) {
-  const numMatch = msgText.trim().match(/^(\d{1,2})$/);
+  const trimmed = msgText.trim();
+  const textLower = trimmed.toLowerCase();
 
-  const textLower = msgText.toLowerCase();
-  const explicitUsed = /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
+  const explicitUsed =
+    /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
+
+  // Year mention = USED (e.g. "Audi A6 2019")
   const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
+
+  const isPureSerial = /^\d{1,2}$/.test(trimmed);
   const lastSvc = getLastService(from);
 
-  // 🔒 IMPORTANT: do NOT rebuild used list on serial reply
-  if (
-    !numMatch &&                              // ✅ already present
-    global.__USED_SERIAL_ACTIVE__ !== true && // ✅ ADD THIS LINE
-    (explicitUsed || hasYear) //
-  ) {
-    const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
+  // 🔒 SERIAL replies are handled elsewhere — never rebuild list here
+  if (isPureSerial && global.lastUsedCarList?.get(from)) {
+    return;
+  }
+
+  // 🔒 HARD USED ENTRY OR CONTINUATION
+  if (explicitUsed || hasYear || lastSvc === 'USED') {
+    const usedRes = await buildUsedCarQuoteFreeText({
+      query: msgText,
+      from
+    });
 
     await waSendText(from, usedRes.text || 'Used car quote failed.');
+
     if (usedRes.picLink) {
       await waSendText(from, `Photos: ${usedRes.picLink}`);
     }
 
     await sendUsedCarButtons(from);
     setLastService(from, 'USED');
-    return;
+    return; // ⛔ HARD STOP — DO NOT FALL INTO NEW
   }
 }
-
     // NEW CAR quick quote (only if NOT advisory-style)
     if (type === 'text' && msgText && !isAdvisory(msgText)) {
       const served = await tryQuickNewCarQuote(msgText, from);
