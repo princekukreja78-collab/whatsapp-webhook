@@ -4253,27 +4253,16 @@ try {
 
 // ---------- CTA ----------
 if (isSingleQuote) {
-  lines.push('\nReply *SPEC model* for features or *EMI* for finance.');
+  lines.push('');
+  lines.push('Reply *PAN INDIA* for price comparison across states.');
+  lines.push('Reply *SPEC model* for features or *EMI* for finance.');
 }
 
-// ---- PAN-INDIA FOLLOW-UP CONTEXT (SAFE) ----
-global.panIndiaPrompt.set(to, {
-  row: best.row,
-  header: tables[best.brand]?.header || [],
-  title: `${best.brand} ${mdl} ${varr}`
-});
-
-// ❗ DO NOT resend lines here
-await waSendText(
-  to,
-  'Would you like a *Pan-India on-road price comparison* for this variant?\n\nReply *YES* or *NO*.'
-);
-
-setLastService(to, 'PAN_INDIA_PROMPT');
-return true;
+// 🔒 TERMINAL EXIT — SINGLE QUOTE COMPLETE
+await waSendText(to, lines.join('\n'));
+setLastService(to, 'NEW');
+return true; // ⛔ ABSOLUTE STOP
 }
-
-
    // ---------------- SPEC SHEET (FINAL, SAFE) ----------------
 try {
   const specIntent = /\b(spec|specs|specification|specifications|feature|features)\b/i;
