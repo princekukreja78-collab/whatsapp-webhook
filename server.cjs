@@ -4138,9 +4138,9 @@ if (
   lines.push(`*${best.brand}* ${mdl} ${varr}`);
 
   // 🔒 TERMINAL EXIT — DO NOT FALL INTO PAN-INDIA
-  await waSendText(from, lines.join('\n'));
-  setLastService(from, 'NEW');
-  return true; //
+  await waSendText(to, lines.join('\n'));
+setLastService(to, 'NEW');
+return true;//
 
 
 // ✅ SAFE location display — no undefined variables
