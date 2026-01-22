@@ -4728,62 +4728,46 @@ if (numMatch) {
 
     return;
   }
-// ================= ABSOLUTE SERIAL PRIORITY (USED) =================
+// ================= USED CAR SERIAL SELECTION (CANONICAL) =================
 if (type === 'text' && msgText) {
-  const numMatch = msgText.trim().match(/^(\d{1,2})$/);
-  const usedRec = global.lastUsedCarList?.get(from);
+  const trimmed = msgText.trim();
+  const numMatch = trimmed.match(/^(\d{1,2})$/);
 
-  // 🔥 number + active list → serial MUST handle
-  if (numMatch && usedRec) {
-    // DO NOT let any other logic see this message
-    // serial block is next
+  if (numMatch) {
+    const usedRec = global.lastUsedCarList?.get(from);
+
+    // 🔒 Number but no active used list → ignore silently
+    if (!usedRec) return;
+
+    // 🔒 Expired list
+    if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
+      global.lastUsedCarList.delete(from);
+      return;
+    }
+
+    const idx = Number(numMatch[1]) - 1;
+
+    // 🔒 Invalid index
+    if (!usedRec.rows || !usedRec.rows[idx]) return;
+
+    const row = usedRec.rows[idx];
+    global.lastUsedCarList.delete(from);
+
+    // 🔒 Mark: serial flow active (prevents rebuild)
+    global.__USED_SERIAL_ACTIVE__ = true;
+
+    const { text, picLink } = await buildSingleUsedCarQuote(row, from);
+
+    if (picLink) {
+      await waSendImage(from, picLink, text);
+    } else {
+      await waSendText(from, text);
+    }
+
+    setLastService(from, 'USED');
+
+    return; // ⛔ ABSOLUTE HARD STOP
   }
-
-  // 🔒 number without list → ignore
-  if (numMatch && !usedRec) {
-    return;
-  }
-}
-
- // ================= USED CAR SERIAL SELECTION =================
-const usedRec = global.lastUsedCarList.get(from);
-
-if (!usedRec) {
-  return;
-}
-
-// 🔒 Expired list
-if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
-  global.lastUsedCarList.delete(from);
-  return;
-}
-
-const idx = Number(numMatch[1]) - 1;
-
-// 🔒 Invalid number
-if (!usedRec.rows || !usedRec.rows[idx]) {
-  return;
-}
-
-const row = usedRec.rows[idx];
-global.lastUsedCarList.delete(from);
-
-// 🔒 MARK: this response is from SERIAL
-global.__USED_SERIAL_ACTIVE__ = true;
-
-const { text, picLink } = await buildSingleUsedCarQuote(row, from);
-
-if (picLink) {
-  await waSendImage(from, picLink, text);
-} else {
-  await waSendText(from, text);
-}
-
-// service stays USED (this is fine)
-setLastService(from, 'USED');
-
-// 🔥 HARD STOP — nothing after this runs
-return;
 }
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
