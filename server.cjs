@@ -4138,35 +4138,27 @@ if (
   const lines = [];
   lines.push(`*${best.brand}* ${mdl} ${varr}`);
 
-  // ✅ SAFE location display — never undefined
-  let pricingLocation = city || '';
+ // ---------- LOCATION & PRICING (FINAL) ----------
 
-  try {
-    if (
-      typeof best.idxCity === 'number' &&
-      best.idxCity >= 0 &&
-      best.row &&
-      best.row[best.idxCity]
-    ) {
-      pricingLocation = String(best.row[best.idxCity]);
-    }
-  } catch (_) {
-    pricingLocation = city || '';
-  }
+// 📍 Location + buyer profile
+lines.push(
+  `📍 *${(stateMatch || 'DELHI').toUpperCase()}* • *${profile.toUpperCase()}*`
+);
 
-  if (pricingLocation) {
-    lines.push(`📍 ${pricingLocation}`);
-  }
+// Fuel
+if (fuelStr) {
+  lines.push(`*Fuel:* ${fuelStr}`);
+}
 
-  if (best.onroad) {
-    lines.push(`With best offers On-road price: ₹ ${best.onroad}`);
-  } else if (best.exShow) {
-    lines.push(`Ex-showroom: ₹ ${best.exShow}`);
-  }
+// Ex-showroom
+if (best.exShow) {
+  lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
+}
 
-  if (fuelStr) {
-    lines.push(`Fuel: ${fuelStr}`);
-  }
+// On-road (Best Offer)
+if (best.onroad) {
+  lines.push(`*Best Offer On-Road:* ₹ *${fmtMoney(best.onroad)}*`);
+}
 
   // ---------- EMI (ONLY FOR SINGLE QUOTE) ----------
   if (loanAmt > 0) {
