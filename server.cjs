@@ -5664,7 +5664,11 @@ if (type === 'text' && msgText) {
   // Year mention = USED (e.g. "Audi A6 2019")
   const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
 
-  const isPureSerial = /^\d{1,2}$/.test(trimmed);
+  // 🔒 Used-car serial must NEVER be treated as generic serial
+const isPureSerial =
+  !global.lastUsedCarList?.get(from) &&
+  /^\d{1,2}$/.test(trimmed);
+
   const lastSvc = getLastService(from);
 
   // 🔒 SERIAL replies are handled elsewhere — never rebuild list here
