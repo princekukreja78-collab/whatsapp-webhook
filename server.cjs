@@ -1006,11 +1006,10 @@ async function waSendListMenu(to) {
 
 // used car quick buttons (after used quote)
 async function sendUsedCarButtons(to) {
-  // 🔒 HARD BLOCK: never show buttons after serial selection
-  if (global.__USED_SERIAL_ACTIVE__ === true) {
-    return;
-  }
-
+ // 🔒 HARD BLOCK: never show buttons if used-serial context existed
+if (global.lastUsedCarList?.get(to)) {
+  return;
+}
   const buttons = [
     { type: 'reply', reply: { id: 'BTN_USED_MORE',     title: 'More Similar Cars' } },
     { type: 'reply', reply: { id: 'BTN_BOOK_TEST',     title: 'Book Test Drive' } },
@@ -4729,61 +4728,49 @@ if (numMatch) {
     return;
   }
 // ================= ABSOLUTE SERIAL PRIORITY (USED) =================
-if (type === 'text' && msgText) {
-  const numMatch = msgText.trim().match(/^(\d{1,2})$/);
-  const usedRec = global.lastUsedCarList?.get(from);
+const numMatch =
+  type === 'text' && msgText
+    ? msgText.trim().match(/^(\d{1,2})$/)
+    : null;
 
-  // 🔥 number + active list → serial MUST handle
-  if (numMatch && usedRec) {
-    // DO NOT let any other logic see this message
-    // serial block is next
-  }
+const usedRec = global.lastUsedCarList?.get(from);
 
-  // 🔒 number without list → ignore
-  if (numMatch && !usedRec) {
+// 🔒 number without active used list → ignore safely
+if (numMatch && !usedRec) {
+  return;
+}
+}
+// ================= USED CAR SERIAL SELECTION =================
+if (numMatch && usedRec) {
+
+  // 🔒 Expired list
+  if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
+    global.lastUsedCarList.delete(from);
     return;
   }
-}
 
- // ================= USED CAR SERIAL SELECTION =================
-const usedRec = global.lastUsedCarList.get(from);
+  const idx = Number(numMatch[1]) - 1;
 
-if (!usedRec) {
-  return;
-}
+  // 🔒 Invalid number
+  if (!usedRec.rows || !usedRec.rows[idx]) {
+    return;
+  }
 
-// 🔒 Expired list
-if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
+  const row = usedRec.rows[idx];
   global.lastUsedCarList.delete(from);
+
+  const { text, picLink } = await buildSingleUsedCarQuote(row, from);
+
+  if (picLink) {
+    await waSendImage(from, picLink, text);
+  } else {
+    await waSendText(from, text);
+  }
+
+  setLastService(from, 'USED');
+
+  // 🔥 HARD STOP — NOTHING AFTER THIS RUNS
   return;
-}
-
-const idx = Number(numMatch[1]) - 1;
-
-// 🔒 Invalid number
-if (!usedRec.rows || !usedRec.rows[idx]) {
-  return;
-}
-
-const row = usedRec.rows[idx];
-global.lastUsedCarList.delete(from);
-
-// 🔒 MARK: this response is from SERIAL
-global.__USED_SERIAL_ACTIVE__ = true;
-
-const { text, picLink } = await buildSingleUsedCarQuote(row, from);
-
-if (picLink) {
-  await waSendImage(from, picLink, text);
-} else {
-  await waSendText(from, text);
-}
-
-// service stays USED (this is fine)
-setLastService(from, 'USED');
-
-// 🔥 HARD STOP — nothing after this runs
-return;
 }
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
