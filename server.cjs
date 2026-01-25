@@ -4748,9 +4748,10 @@ if (numMatch && usedRec) {
 
   const idx = Number(numMatch[1]) - 1;
 
-  if (!usedRec.rows || !usedRec.rows[idx]) {
-    return;
-  }
+ if (!usedRec.rows || !usedRec.rows[idx]) {
+  global.lastUsedCarList.delete(from);
+  return;
+}
 
   const row = usedRec.rows[idx];
   global.lastUsedCarList.delete(from);
