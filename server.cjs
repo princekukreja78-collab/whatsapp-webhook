@@ -4674,6 +4674,13 @@ global.__WA_MSG_LOCK__.add(dedupKey);
       } else {
         msgText = '';
       }
+   if (
+  type === 'text' &&
+  /^\d{1,2}$/.test(msgText) &&
+  global.lastUsedCarList?.get(from)
+) {
+  return;
+}
     } catch (e) {
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
