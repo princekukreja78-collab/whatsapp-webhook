@@ -4728,45 +4728,55 @@ if (numMatch) {
 
     return;
   }
-// ================= SERIAL NUMBER ROUTER =================
+// ================= USED CAR SERIAL SELECTION =================
+const usedRec = global.lastUsedCarList?.get(from);
+
+// Not in used-serial mode → do nothing, let other logic continue
+if (!usedRec) {
+  return;
+}
+
+// 🔒 Expired list → exit used mode cleanly
+if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
+  global.lastUsedCarList.delete(from);
+  return;
+}
+
+// Only handle pure serial numbers here
 const numMatch =
   type === 'text' && msgText
     ? msgText.trim().match(/^(\d{1,2})$/)
     : null;
 
-// declare ONCE, in outer scope
-const usedRec = global.lastUsedCarList?.get(from);
+if (!numMatch) {
+  return; // not a serial reply, let other logic run
+}
 
-// ================= USED CAR SERIAL SELECTION =================
-if (numMatch && usedRec) {
+const idx = Number(numMatch[1]) - 1;
 
-  // 🔒 Expired list
-  if (Date.now() - usedRec.ts > 5 * 60 * 1000) {
-    global.lastUsedCarList.delete(from);
-    return;
-  }
-
-  const idx = Number(numMatch[1]) - 1;
-
- if (!usedRec.rows || !usedRec.rows[idx]) {
+// 🔒 Invalid number → EXIT used mode + inform user
+if (!usedRec.rows || !usedRec.rows[idx]) {
   global.lastUsedCarList.delete(from);
+  await waSendText(from, 'Please select a valid option from the list.');
   return;
 }
 
-  const row = usedRec.rows[idx];
-  global.lastUsedCarList.delete(from);
+// ✅ Valid serial selected
+const row = usedRec.rows[idx];
+global.lastUsedCarList.delete(from);
 
-  const { text, picLink } = await buildSingleUsedCarQuote(row, from);
+const { text, picLink } = await buildSingleUsedCarQuote(row, from);
 
-  if (picLink) {
-    await waSendImage(from, picLink, text);
-  } else {
-    await waSendText(from, text);
-  }
-
-  setLastService(from, 'USED');
-  return;
+if (picLink) {
+  await waSendImage(from, picLink, text);
+} else {
+  await waSendText(from, text);
 }
+
+setLastService(from, 'USED');
+
+// 🔥 HARD STOP — nothing else runs after this
+return;
 
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
