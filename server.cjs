@@ -93,23 +93,6 @@ function logOnceRag(msg) {
 }
 
 // ==================================================
-// WHATSAPP PHONE NUMBER ID RESOLVER (SINGLE SOURCE)
-// ==================================================
-function getActivePhoneNumberId() {
-  const phoneId =
-    global.__LAST_PHONE_ID__ ||
-    process.env.PHONE_NUMBER_ID ||
-    process.env.WA_PHONE_NUMBER_ID;
-
-  if (!phoneId) {
-    console.error('❌ No active WhatsApp phone_number_id available');
-    return null;
-  }
-
-  return phoneId;
-}
-
-// ==================================================
 // PRICING SHEET CACHE (GLOBAL, IN-MEMORY)
 // ==================================================
 const SHEET_CACHE = new Map(); 
@@ -822,23 +805,25 @@ async function waSendImageLink(to, imageUrl, caption = "") {
   return { ok: false, error: r?.error || r };
 }
 
-// Low-level sender
+// Low-level sender (STRICT)
 async function waSendRaw(payload) {
   const metaToken = process.env.META_TOKEN;
-  const phoneId =
-    getActivePhoneNumberId() ||
-    process.env.PHONE_NUMBER_ID ||
-    null;
 
-  if (!metaToken || !phoneId) {
-    console.warn("WA skipped - META_TOKEN or PHONE_NUMBER_ID missing");
+  // phoneNumberId MUST come from webhook scope (closure)
+  if (!metaToken || !phoneNumberId) {
+    console.warn("WA skipped - missing META_TOKEN or phoneNumberId");
     return null;
   }
 
-  const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
+  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
 
   try {
-    if (DEBUG) console.log("WA OUTGOING PAYLOAD:", JSON.stringify(payload).slice(0, 400));
+    if (DEBUG) {
+      console.log(
+        "WA OUTGOING:",
+        { phoneNumberId, to: payload.to, type: payload.type }
+      );
+    }
 
     const r = await fetch(url, {
       method: "POST",
@@ -853,8 +838,6 @@ async function waSendRaw(payload) {
 
     if (!r.ok) {
       console.error("WA send error", r.status, j);
-    } else if (DEBUG) {
-      console.log("WA send OK:", r.status, JSON.stringify(j).slice(0, 400));
     }
 
     return j;
@@ -4369,48 +4352,56 @@ app.get('/crm/leads', async (req, res) => {
 });
 
 
-// ---------- ADMIN TEST ALERT ----------
+// ---------- ADMIN TEST ALERT (SAFE, DISABLED) ----------
+/*
 app.post('/admin/test_alert', async (req, res) => {
   try {
-    const phoneId =
-      process.env.PHONE_NUMBER_ID ||
-      process.env.WA_PHONE_NUMBER_ID;
+    // 🔒 Explicit phone_number_id required
+    const phoneNumberId = req.body?.phone_number_id;
 
-    if (!phoneId) {
-      return res.status(500).json({ ok: false, error: "Missing PHONE_NUMBER_ID" });
+    if (!phoneNumberId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'phone_number_id is required'
+      });
+    }
+
+    if (!process.env.META_TOKEN || !process.env.ADMIN_WA) {
+      return res.status(500).json({
+        ok: false,
+        error: 'Missing META_TOKEN or ADMIN_WA'
+      });
     }
 
     const payload = {
-      messaging_product: "whatsapp",
+      messaging_product: 'whatsapp',
       to: process.env.ADMIN_WA,
-      type: "text",
+      type: 'text',
       text: {
-        body: `🔔 ADMIN TEST ALERT\n\nThis is a test admin alert from MR.CAR server.\nTime: ${new Date().toLocaleString()}`
+        body: `🔔 ADMIN TEST ALERT\n\nTime: ${new Date().toLocaleString()}`
       }
     };
 
-    const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
+    const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
 
     const resp = await fetch(url, {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${process.env.META_TOKEN}`,
-        "Content-Type": "application/json"
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
     });
 
     const result = await resp.json();
-    console.log("ADMIN ALERT WA RESPONSE:", result);
-
     return res.json({ ok: true, result });
 
   } catch (e) {
-    console.error("ADMIN TEST ALERT FAILED:", e);
+    console.error('ADMIN TEST ALERT FAILED:', e);
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
-
+*/
 // ---------------- main webhook handler ----------------
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200); // ACK ONCE
@@ -4448,20 +4439,35 @@ app.post('/webhook', async (req, res) => {
       change = null;
       value  = {};
     }
-     // --------------------------------------------------
-    // 🔒 CANONICAL PHONE_NUMBER_ID RESOLUTION (ONCE ONLY)
-    // --------------------------------------------------
-    let phoneNumberId =
-      value?.metadata?.phone_number_id ||
-      (typeof getActivePhoneNumberId === 'function'
-        ? getActivePhoneNumberId()
-        : null) ||
-      (process.env.PHONE_NUMBER_ID || process.env.WA_PHONE_NUMBER_ID || '').trim() ||
-      null;
-
-    if (DEBUG) {
-      console.log('📞 Resolved phoneNumberId =', phoneNumberId);
+// --------------------------------------------------
+// 🔍 DEBUG: inbound routing authority
+// --------------------------------------------------
+if (DEBUG) {
+  console.log(
+    '📨 Webhook inbound:',
+    {
+      phone_number_id: value?.metadata?.phone_number_id,
+      display_phone_number: value?.metadata?.display_phone_number,
+      wa_id: value?.contacts?.[0]?.wa_id,
+      message_from: value?.messages?.[0]?.from,
+      message_type: value?.messages?.[0]?.type
     }
+  );
+}
+
+  // --------------------------------------------------
+// 🔒 CANONICAL PHONE_NUMBER_ID (STRICT)
+// --------------------------------------------------
+const phoneNumberId = value?.metadata?.phone_number_id;
+
+if (!phoneNumberId) {
+  console.error('❌ Missing phone_number_id in webhook payload');
+  return;
+}
+
+if (DEBUG) {
+  console.log('📞 Incoming phoneNumberId =', phoneNumberId);
+}
 
 // ==================================================
 // CAPTURE INCOMING PHONE_NUMBER_ID (CRITICAL)
@@ -5926,28 +5932,24 @@ useLink = imageUrl;
 
 // send via WhatsApp Cloud API
 const token = process.env.META_TOKEN;
-// removed — phoneNumberId already defined above
-if (!phoneNumberId) return;
-if (!token || !phoneNumberId) return res.status(500).json({ ok:false, error:'missing META_TOKEN or PHONE_NUMBER_ID' });
+
+if (!token) {
+  return res.status(500).json({ ok:false, error:'missing META_TOKEN' });
+}
+
+// 🚫 DO NOT RESOLVE PHONE NUMBER AGAIN
+// ✅ REUSE webhook-resolved phoneNumberId
+const activePhoneNumberId = phoneNumberId;
 
 const body = {
-messaging_product: 'whatsapp',
-to: String(to).replace(/\D/g, ''),
-type: 'image',
-image: mediaId ? { id: mediaId, caption: caption || '' } : { link: useLink, caption: caption || '' }
+  messaging_product: 'whatsapp',
+  to: String(to).replace(/\D/g, ''),
+  type: 'image',
+  image: mediaId
+    ? { id: mediaId, caption: caption || '' }
+    : { link: useLink, caption: caption || '' }
 };
 
-const activePhoneNumberId =
-  value?.metadata?.phone_number_id ||
-  process.env.PHONE_NUMBER_ID ||
-  process.env.WA_PHONE_NUMBER_ID;
-
-if (!activePhoneNumberId) {
-  return res.status(500).json({
-    ok: false,
-    error: 'Missing phone_number_id (metadata or env)'
-  });
-}
 const sendResp = await fetch(
   `https://graph.facebook.com/v21.0/${activePhoneNumberId}/messages`,
   {
@@ -5959,8 +5961,12 @@ const sendResp = await fetch(
     body: JSON.stringify(body)
   }
 );
+
 const jr = await sendResp.json();
-if (!sendResp.ok) return res.status(500).json({ ok:false, error: jr });
+if (!sendResp.ok) {
+  return res.status(500).json({ ok:false, error: jr });
+}
+
 return res.json({ ok:true, sent:true, resp: jr });
 } catch (e) {
 console.error('send-image error', e && e.message ? e.message : e);
@@ -6130,40 +6136,52 @@ async function waForwardImage(phoneNumberId, to, mediaId, caption = "") {
   return data;
 }
 
-// === uploadMediaToWhatsApp: upload a local file to WhatsApp Cloud and return media_id ===
+// === uploadMediaToWhatsApp (STRICT, SAFE) ===
+// Uses phoneNumberId captured from webhook scope
 async function uploadMediaToWhatsApp(localPath) {
   try {
-    const token = process.env.META_TOKEN || process.env.WA_TOKEN || process.env.META_ACCESS_TOKEN;
-   phoneNumberId = phoneNumberId || (process.env.PHONE_NUMBER_ID || process.env.WA_PHONE_NUMBER_ID || "").trim();
-    if (!token || !phoneNumberId) throw new Error('Missing META_TOKEN or PHONE_NUMBER_ID');
+    const token = process.env.META_TOKEN;
 
-    // resolve local file path (accept "/uploads/xxx" or "uploads/xxx" or "public/uploads/xxx")
+    // 🔒 phoneNumberId must already be set from webhook
+    if (!token || !phoneNumberId) {
+      throw new Error('Missing META_TOKEN or phoneNumberId');
+    }
+
+    // resolve local file path
     const rel = String(localPath).replace(/^\/+/, '');
     let fullPath = path.resolve(__dirname, rel);
+
     if (!fs.existsSync(fullPath)) {
-      // try under public/
       fullPath = path.resolve(__dirname, 'public', rel);
     }
-    if (!fs.existsSync(fullPath)) throw new Error('Local file not found: ' + fullPath);
+    if (!fs.existsSync(fullPath)) {
+      throw new Error('Local file not found: ' + fullPath);
+    }
 
     const form = new FormData();
     form.append('file', fs.createReadStream(fullPath));
     form.append('messaging_product', 'whatsapp');
 
-    const resp = await fetch(`https://graph.facebook.com/v17.0/${phoneNumberId}/media`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + token, ...form.getHeaders() },
-      body: form
-    });
+    const resp = await fetch(
+      `https://graph.facebook.com/v21.0/${phoneNumberId}/media`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + token,
+          ...form.getHeaders()
+        },
+        body: form
+      }
+    );
 
     const j = await resp.json().catch(() => null);
     if (!resp.ok) {
       throw new Error('Upload failed: ' + JSON.stringify(j));
     }
-    // usually { id: "..." }
-    return j && (j.id || j.media || j) ;
+
+    return j?.id || j;
   } catch (e) {
-    console.error('uploadMediaToWhatsApp error', e && e.message ? e.message : e);
+    console.error('uploadMediaToWhatsApp error', e?.message || e);
     throw e;
   }
 }
