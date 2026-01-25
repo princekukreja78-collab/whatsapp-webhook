@@ -651,11 +651,23 @@ async function autoIngest(enriched = {}) {
 }
 
 // ---------------- ENV ----------------
-const META_TOKEN      = (process.env.META_TOKEN || process.env.WA_TOKEN || '').trim();
-const PHONE_NUMBER_ID = null; // ❌ deprecated – do not use for sending
+// 🔑 Meta auth (single source of truth)
+const META_TOKEN = (process.env.META_TOKEN || process.env.WA_TOKEN || "").trim();
+if (!META_TOKEN) {
+  throw new Error("META_TOKEN missing");
+}
 
-const ADMIN_WA        = (process.env.ADMIN_WA || '').replace(/\D/g, '') || null;
-const VERIFY_TOKEN    = (process.env.VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
+// 📞 Phone number isolation (no cross reply)
+const PROD_PHONE_NUMBER_ID = (process.env.PROD_PHONE_NUMBER_ID || "").trim();
+const STAGING_PHONE_NUMBER_ID = (process.env.STAGING_PHONE_NUMBER_ID || "").trim();
+
+if (!PROD_PHONE_NUMBER_ID || !STAGING_PHONE_NUMBER_ID) {
+  throw new Error("PROD_PHONE_NUMBER_ID or STAGING_PHONE_NUMBER_ID missing");
+}
+
+// 🧾 Admin / verify (unchanged behavior)
+const ADMIN_WA = (process.env.ADMIN_WA || "").replace(/\D/g, "") || null;
+const VERIFY_TOKEN = (process.env.VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || "").trim();
 
 const CONTACT_SHEET_CSV_URL = (process.env.CONTACT_SHEET_CSV_URL || '').trim();
 const CONTACT_POSTER_URL    = (process.env.CONTACT_POSTER_URL || '').trim();
@@ -898,9 +910,10 @@ async function waSendImage(to, imageUrl, caption = "") {
 }
 // === ONE SINGLE GREETING (image header + personalised text body) ===
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
-  if (!META_TOKEN || !PHONE_NUMBER_ID) {
-    throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
-  }
+  if (!META_TOKEN) {
+  throw new Error("META_TOKEN not set");
+}
+
 
   const displayName = name || "Customer";
 
@@ -1015,7 +1028,7 @@ if (global.lastUsedCarList?.get(to)) {
 // ---------------- Admin alerts (throttled) ----------------
 async function sendAdminAlert({ from, name, text }) {
   try {
-    if (!META_TOKEN || !PHONE_NUMBER_ID || !ADMIN_WA) return;
+    if (!META_TOKEN || !ADMIN_WA) return;
     const now = Date.now();
     const prev = lastAlert.get(from) || 0;
     const ALERT_WINDOW_MS = (Number(process.env.ALERT_WINDOW_MINUTES || 10)) * 60 * 1000;
@@ -4443,45 +4456,46 @@ app.post('/webhook', async (req, res) => {
 // 🔍 DEBUG: inbound routing authority
 // --------------------------------------------------
 if (DEBUG) {
-  console.log(
-    '📨 Webhook inbound:',
-    {
-      phone_number_id: value?.metadata?.phone_number_id,
-      display_phone_number: value?.metadata?.display_phone_number,
-      wa_id: value?.contacts?.[0]?.wa_id,
-      message_from: value?.messages?.[0]?.from,
-      message_type: value?.messages?.[0]?.type
-    }
-  );
+  console.log("📨 Webhook inbound:", {
+    phone_number_id: value?.metadata?.phone_number_id,
+    display_phone_number: value?.metadata?.display_phone_number,
+    wa_id: value?.contacts?.[0]?.wa_id,
+    message_from: value?.messages?.[0]?.from,
+    message_type: value?.messages?.[0]?.type,
+  });
 }
 
-  // --------------------------------------------------
-// 🔒 CANONICAL PHONE_NUMBER_ID (STRICT)
 // --------------------------------------------------
-const phoneNumberId = value?.metadata?.phone_number_id;
+// 🔒 CANONICAL incoming phone_number_id (SINGLE SOURCE)
+// --------------------------------------------------
+const incomingPhoneNumberId =
+  value?.metadata?.phone_number_id ||
+  value?.statuses?.[0]?.conversation?.origin?.phone_number_id;
 
-if (!phoneNumberId) {
-  console.error('❌ Missing phone_number_id in webhook payload');
-  return;
+if (!incomingPhoneNumberId) {
+  console.error("❌ Missing phone_number_id in webhook payload");
+  return res.sendStatus(200);
 }
 
 if (DEBUG) {
-  console.log('📞 Incoming phoneNumberId =', phoneNumberId);
+  console.log("📞 Incoming phone_number_id =", incomingPhoneNumberId);
 }
 
-// ==================================================
-// CAPTURE INCOMING PHONE_NUMBER_ID (CRITICAL)
-// ==================================================
-const incomingPhoneId = value?.metadata?.phone_number_id;
+// --------------------------------------------------
+// 🔒 HARD LOCK — prevent cross reply (FINAL)
+// --------------------------------------------------
+const IS_PROD = incomingPhoneNumberId === PROD_PHONE_NUMBER_ID;
+const IS_STAGING = incomingPhoneNumberId === STAGING_PHONE_NUMBER_ID;
 
-if (incomingPhoneId) {
-  global.__LAST_PHONE_ID__ = incomingPhoneId;
-
+// This Render service replies ONLY for its own number
+if (!IS_PROD && !IS_STAGING) {
   if (DEBUG) {
-    console.log('📞 Bound outgoing replies to phone_number_id:', incomingPhoneId);
+    console.warn(
+      "⛔ Ignoring message for foreign phone_number_id:",
+      incomingPhoneNumberId
+    );
   }
-} else if (DEBUG) {
-  console.warn('⚠️ No phone_number_id found in webhook metadata');
+  return res.sendStatus(200);
 }
 
           /* AUTO-INGEST using actual WhatsApp message fields + photo forward + AI vision */
@@ -6278,10 +6292,9 @@ async function fetchContactsFromSheet() {
 // ORDER = 1) TEMPLATE FIRST  2) POSTER IMAGE SECOND
 
 async function sendSheetWelcomeTemplate_OLD(to, name = "Customer") {
-  if (!META_TOKEN || !PHONE_NUMBER_ID) {
-    throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
-  }
-
+  if (!META_TOKEN) {
+  throw new Error("META_TOKEN not set");
+}
   const displayName = name || "Customer";
 
   // 1️⃣ TEMPLATE FIRST
@@ -6539,18 +6552,23 @@ app.get(/^\/dashboard(?:\/.*)?$/, (req, res) => {
 });
 
 app.listen(PORT, () => {
-console.log("🟢 Server fully started — READY to receive greeting UI and webhook events");
+  console.log("🟢 Server fully started — READY to receive greeting UI and webhook events");
   console.log('==== MR.CAR BUILD TAG: 2025-11-25-NEWCAR-ADVISORY-FIX ====');
   console.log(`✅ MR.CAR webhook CRM server running on port ${PORT}`);
   console.log('ENV summary:', {
     SHEET_TOYOTA_CSV_URL: !!SHEET_TOYOTA_CSV_URL,
     SHEET_USED_CSV_URL: !!SHEET_USED_CSV_URL || fs.existsSync(LOCAL_USED_CSV_PATH),
-    PHONE_NUMBER_ID: !!PHONE_NUMBER_ID,
+
+    // 🔒 Phone isolation (replaces PHONE_NUMBER_ID)
+    PROD_PHONE_NUMBER_ID: !!PROD_PHONE_NUMBER_ID,
+    STAGING_PHONE_NUMBER_ID: !!STAGING_PHONE_NUMBER_ID,
+
     META_TOKEN: !!META_TOKEN,
     ADMIN_WA: !!ADMIN_WA,
     DEBUG
   });
 });
+
 
 //    Uses existing LEADS_FILE and safeJsonRead helper.
 if (!app._leads_compat_installed) {
