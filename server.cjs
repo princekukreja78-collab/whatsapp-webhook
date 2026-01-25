@@ -4728,15 +4728,15 @@ if (numMatch) {
 
     return;
   }
-// ================= ABSOLUTE SERIAL PRIORITY (USED) =================
+// ================= SERIAL NUMBER ROUTER =================
 const numMatch =
   type === 'text' && msgText
     ? msgText.trim().match(/^(\d{1,2})$/)
     : null;
 
+// declare ONCE, in outer scope
 const usedRec = global.lastUsedCarList?.get(from);
 
-}
 // ================= USED CAR SERIAL SELECTION =================
 if (numMatch && usedRec) {
 
@@ -4748,7 +4748,6 @@ if (numMatch && usedRec) {
 
   const idx = Number(numMatch[1]) - 1;
 
-  // 🔒 Invalid number
   if (!usedRec.rows || !usedRec.rows[idx]) {
     return;
   }
@@ -5781,7 +5780,7 @@ const isPureSerial =
 //   '🚗 *New Car Pricing & Finance*'
 // );
 // return;
-
+}
   } catch (err) {
     console.error('Webhook error:', err && err.stack ? err.stack : err);
     try {
