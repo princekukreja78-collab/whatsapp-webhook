@@ -4674,13 +4674,7 @@ global.__WA_MSG_LOCK__.add(dedupKey);
       } else {
         msgText = '';
       }
-   if (
-  type === 'text' &&
-  /^\d{1,2}$/.test(msgText) &&
-  global.lastUsedCarList?.get(from)
-) {
-  return;
-}
+
     } catch (e) {
       if (DEBUG) console.warn('message parsing failed', e && e.message ? e.message : e);
       msgText = '';
@@ -4742,10 +4736,6 @@ const numMatch =
 
 const usedRec = global.lastUsedCarList?.get(from);
 
-// 🔒 number without active used list → ignore safely
-if (numMatch && !usedRec) {
-  return;
-}
 }
 // ================= USED CAR SERIAL SELECTION =================
 if (numMatch && usedRec) {
@@ -4775,10 +4765,9 @@ if (numMatch && usedRec) {
   }
 
   setLastService(from, 'USED');
-
-  // 🔥 HARD STOP — NOTHING AFTER THIS RUNS
   return;
 }
+
 // ================= GLOBAL LOAN INTENT INTERCEPTOR =================
 
 // Check last service to avoid hijacking active loan flows
