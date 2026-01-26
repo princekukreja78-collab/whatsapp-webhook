@@ -4687,7 +4687,8 @@ if (!global.lastUsedCarList) global.lastUsedCarList = new Map();
 
 const numMatch = msgText && msgText.trim().match(/^(\d{1,2})$/);
 
-if (numMatch) {
+if (numMatch && !global.__USED_SERIAL_ACTIVE__) {
+
 
   // ================= NEW CAR SERIAL SELECTION =================
   const rec = global.lastVariantList.get(from);
