@@ -2270,7 +2270,7 @@ async function trySmartNewCarIntent(msgText, to) {
       out.push(`*${ctx.title} — Pan-India On-Road Pricing*`);
       out.push('');
       out.push(`🔽 *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
-      out.push(`🔼 *Highest:* ${states[states.length - 1]} — ₹ $ {fmtMoney(aggregate[states[states.length - 1]])}`);
+out.push(`🔼 *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
 
       out.push('');
       out.push('*State-wise prices:*');
@@ -2897,6 +2897,7 @@ return false;
 async function tryQuickNewCarQuote(msgText, to) {
   try {
 console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
+if (!global.lastVariantList) global.lastVariantList = new Map();
 
   // ---------- BUILD RESPONSE LINES (MUST BE FIRST) ----------
   const lines = [];
@@ -2985,6 +2986,7 @@ if (!tables || Object.keys(tables).length === 0) {
   if (typeof DEBUG !== 'undefined' && DEBUG) console.log('loadPricingFromSheets returned empty tables. Continuing but dynamic pricing may be limited.');
 }
 // ---------- end ROBUST SHEET LOADING ----------
+if (!tables || typeof tables !== 'object') return false;
 
 // ✅ BUILD GLOBAL BRAND / MODEL REGISTRY FROM SHEETS (ONCE PER CALL)
 if (tables && Object.keys(tables).length) {
