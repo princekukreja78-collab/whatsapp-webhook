@@ -2269,8 +2269,9 @@ async function trySmartNewCarIntent(msgText, to) {
       const out = [];
       out.push(`*${ctx.title} — Pan-India On-Road Pricing*`);
       out.push('');
-      out.push(`✅ *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
-      out.push(`❌ *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
+      out.push(`🔽 *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
+      out.push(`🔼 *Highest:* ${states[states.length - 1]} — ₹ $ {fmtMoney(aggregate[states[states.length - 1]])}`);
+
       out.push('');
       out.push('*State-wise prices:*');
 
@@ -4449,6 +4450,7 @@ app.post('/webhook', async (req, res) => {
       change = null;
       value  = {};
     }
+
      // --------------------------------------------------
     // 🔒 CANONICAL PHONE_NUMBER_ID RESOLUTION (ONCE ONLY)
     // --------------------------------------------------
@@ -4769,6 +4771,7 @@ if (type === 'text' && msgText) {
     }
 
     setLastService(from, 'USED');
+    global.__USED_SERIAL_ACTIVE__ = false;
 
     // 🔥 HARD STOP — NOTHING ELSE RUNS
     return;
@@ -5297,6 +5300,7 @@ try {
         case 'SRV_NEW_CAR':
         case 'BTN_NEW_QUOTE':
           setLastService(from, 'NEW');
+global.lastUsedCarList?.delete(from);
 await waSendText(
   from,
   '🚗 *New Car Pricing & Finance*\n\n' +
@@ -5556,16 +5560,38 @@ case 'BTN_LOAN_CUSTOM':
   return;
  } 
 } 
-    // Greeting first – ONLY service menu (no quick buttons now)
-    if (shouldGreetNow(from, msgText)) {
-      await waSendText(
-        from,
-        '🔴 *VehYra by MR. CAR* welcomes you!\nNamaste 🙏\n\nWe assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\nTell us how we can help — or pick an option below.'
-      );
-      await waSendListMenu(from);
-      return;
-    }
+   // --------------------------------------------------
+// 🔒 HARD GUARD: greet ONLY on real user messages
+// --------------------------------------------------
+if (!Array.isArray(value.messages) || !value.messages[0]) {
+  return;
+}
 
+// Greeting first – ONLY service menu (no quick buttons now)
+if (shouldGreetNow(from, msgText)) {
+
+  // --------------------------------------------------
+  // 🔒 GREETING THROTTLE: max once per 24 hours
+  // --------------------------------------------------
+  const lastGreetTs = lastGreeting.get(from);
+  if (lastGreetTs && Date.now() - lastGreetTs < 24 * 60 * 60 * 1000) {
+    return;
+  }
+
+  await waSendText(
+    from,
+    '🔴 *VehYra by MR. CAR* welcomes you!\nNamaste 🙏\n\n' +
+    'We assist with *pre-owned cars*, *new car deals*, *loans* and *insurance*.\n' +
+    'Tell us how we can help — or pick an option below.'
+  );
+
+  await waSendListMenu(from);
+
+  // 🔒 mark greeting sent
+  lastGreeting.set(from, Date.now());
+
+  return;
+}
     // bullet command
     const bulletCmd = (msgText || '').trim().match(/^bullet\s+([\d,]+)\s*([\d\.]+)?\s*(\d+)?/i);
     if (bulletCmd) {
