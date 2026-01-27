@@ -4785,6 +4785,13 @@ if (type === 'text' && msgText) {
 
 // Check last service to avoid hijacking active loan flows
 const lastSvc = getLastService(from);
+// ============================================================
+// HARD ENGINE ISOLATION — DO NOT MIX NEW & USED
+// ============================================================
+
+const disableUsedEngine = lastSvc === 'NEW';
+const disableNewEngine  = lastSvc === 'USED';
+
 const inLoanFlow = ['LOAN', 'LOAN_NEW', 'LOAN_USED'].includes(lastSvc);
 
 // Avoid intercepting numeric EMI inputs
@@ -5705,7 +5712,7 @@ if (type === 'text' && msgText) {
   }
 
   // 🔒 HARD USED ENTRY OR CONTINUATION
-  if (explicitUsed || hasYear || lastSvc === 'USED') {
+  if (!disableUsedEngine && (explicitUsed || hasYear || lastSvc === 'USED')) {
     const usedRes = await buildUsedCarQuoteFreeText({
       query: msgText,
       from
