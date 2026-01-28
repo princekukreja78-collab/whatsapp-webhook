@@ -1549,15 +1549,16 @@ async function buildSingleUsedCarQuote(row, from) {
   const queryText = parts.join(' ');
 
   // Reuse the existing used-car quote engine
-  const res = await buildUsedCarQuoteFreeText({
-    query: queryText,
-    from
-  });
+ const res = await buildUsedCarQuoteFreeText({
+  query: queryText,
+  from,
+  skipBudget: true   // 🔒 IMPORTANT
+});
 
   return res || { text: 'Used car quote unavailable.' };
 }
 // ---------------- Build used car quote ----------------
-async function buildUsedCarQuoteFreeText({ query, from }) {
+async function buildUsedCarQuoteFreeText({ query, from, skipBudget = false }) {
   const rows = await loadUsedSheetRows();
   if (!rows || !rows.length) {
     return { text: 'Used car pricing not configured.' };
@@ -1617,41 +1618,26 @@ async function buildUsedCarQuoteFreeText({ query, from }) {
 
   const qLower = (query || '').toLowerCase();
   const tokens = qLower.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
-  // ---- Budget-based search for used cars (± ₹10 lakh) ----
-  let budgetRs = 0;
+ // ---- Budget-based search for used cars (± ₹10 lakh) ----
+let budgetRs = 0;
 
-  // Find a number like "20 lakh", "20 lac", "20 l", or a plain "2000000"
-  const mBudget = qLower.match(/(\d+(\.\d+)?)\s*(lakh|lakhs|lac|lacs|l\b|rs|₹|rupees)?/);
-// ============================================================
-// 🔒 HARD STOP: numeric input is SERIAL when USED list is active
-// ============================================================
+if (!skipBudget) {
+  const mBudget = qLower.match(
+    /(\d+(\.\d+)?)\s*(lakh|lakhs|lac|lacs|l\b|rs|₹|rupees)?/
+  );
 
-if (
-  global.lastUsedCarList?.get(from) &&
-  /^[1-9]\d?$/.test(qLower.trim())
-) {
-  console.log('[USED DEBUG] SERIAL input detected — skipping used engine', {
-    from,
-    input: qLower,
-    hasUsedList: true
-  });
+  if (mBudget) {
+    const num = parseFloat(mBudget[1]);
+    if (num > 0) {
+      budgetRs = num < 1000 ? num * 100000 : num;
+    }
+  }
 
-  // Serial handler (later in file) will consume this
-  return null;
-}
-
-// ------------------------------------------------------------
-// BUDGET-BASED SEARCH (only when NOT a serial)
-// ------------------------------------------------------------
-
-if (mBudget) {
-  const num = parseFloat(mBudget[1]);
-  if (num > 0) {
-    // If the number is small (e.g., 20), treat as lakhs → 20 * 1,00,000
-    budgetRs = num < 1000 ? num * 100000 : num;
+  if (budgetRs > 0 && expectedIdx >= 0) {
+    // ⬅️ keep your EXISTING budget flow here UNCHANGED
+    // (list building, lastUsedCarList.set, return { text, picLink })
   }
 }
-
 
   // Helper for simple INR formatting
   function fmtINR(v) {
