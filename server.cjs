@@ -1623,29 +1623,35 @@ async function buildUsedCarQuoteFreeText({ query, from }) {
   // Find a number like "20 lakh", "20 lac", "20 l", or a plain "2000000"
   const mBudget = qLower.match(/(\d+(\.\d+)?)\s*(lakh|lakhs|lac|lacs|l\b|rs|₹|rupees)?/);
 // ============================================================
-// 🔒 SERIAL CONTEXT GUARD — DO NOT TREAT SERIAL AS BUDGET
+// 🔒 HARD STOP: numeric input is SERIAL when USED list is active
 // ============================================================
 
 if (
   global.lastUsedCarList?.get(from) &&
-  /^\d{1,2}$/.test(qLower.trim())
+  /^[1-9]\d?$/.test(qLower.trim())
 ) {
-console.log('[USED DEBUG] budget check', {
-  from,
-  input: qLower,
-  hasUsedList: !!global.lastUsedCarList?.get(from)
-});
+  console.log('[USED DEBUG] SERIAL input detected — skipping used engine', {
+    from,
+    input: qLower,
+    hasUsedList: true
+  });
 
-  // User is selecting a serial number — skip budget detection
-} else {
+  // Serial handler (later in file) will consume this
+  return null;
+}
 
-  if (mBudget) {
-    const num = parseFloat(mBudget[1]);
-    if (num > 0) {
-      // If the number is small (e.g., 20), treat as lakhs → 20 * 1,00,000
-      budgetRs = num < 1000 ? num * 100000 : num;
-    }
+// ------------------------------------------------------------
+// BUDGET-BASED SEARCH (only when NOT a serial)
+// ------------------------------------------------------------
+
+if (mBudget) {
+  const num = parseFloat(mBudget[1]);
+  if (num > 0) {
+    // If the number is small (e.g., 20), treat as lakhs → 20 * 1,00,000
+    budgetRs = num < 1000 ? num * 100000 : num;
   }
+}
+
 
   // Helper for simple INR formatting
   function fmtINR(v) {
@@ -1913,7 +1919,7 @@ const bulletSim = simulateBulletPlan({
 
   return { text: lines.join('\n'), picLink };
 }
-}
+
 // ---------------- Greeting helper ----------------
 const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
 const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
