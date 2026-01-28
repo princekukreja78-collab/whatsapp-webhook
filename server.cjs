@@ -5712,7 +5712,10 @@ if (type === 'text' && msgText) {
   }
 
   // 🔒 HARD USED ENTRY OR CONTINUATION
-  if (!disableUsedEngine && (explicitUsed || hasYear || lastSvc === 'USED')) {
+  if (
+  !disableUsedEngine &&
+  (explicitUsed || hasYear || (lastSvc === 'USED' && !global.lastUsedCarList?.get(from)))
+) {
     const usedRes = await buildUsedCarQuoteFreeText({
       query: msgText,
       from
