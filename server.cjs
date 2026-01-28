@@ -5692,7 +5692,7 @@ if (shouldGreetNow(from, msgText)) {
       }
     }
 
- // ================= USED CAR DETECTION (RESTORED & SAFE) =================
+// ================= USED CAR DETECTION (RESTORED & SAFE) =================
 if (type === 'text' && msgText) {
   const trimmed = msgText.trim();
   const textLower = trimmed.toLowerCase();
@@ -5711,11 +5711,8 @@ if (type === 'text' && msgText) {
     return;
   }
 
-  // 🔒 HARD USED ENTRY OR CONTINUATION
-  if (
-  !disableUsedEngine &&
-  (explicitUsed || hasYear || (lastSvc === 'USED' && !global.lastUsedCarList?.get(from)))
-) {
+  // 🔒 HARD USED ENTRY OR CONTINUATION (INTENT GATED)
+  if (explicitUsed || hasYear || lastSvc === 'USED') {
     const usedRes = await buildUsedCarQuoteFreeText({
       query: msgText,
       from
@@ -5732,6 +5729,7 @@ if (type === 'text' && msgText) {
     return; // ⛔ HARD STOP — DO NOT FALL INTO NEW
   }
 }
+
     // NEW CAR quick quote (only if NOT advisory-style)
     if (type === 'text' && msgText && !isAdvisory(msgText)) {
       const served = await tryQuickNewCarQuote(msgText, from);
