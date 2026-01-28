@@ -1622,6 +1622,23 @@ async function buildUsedCarQuoteFreeText({ query, from }) {
 
   // Find a number like "20 lakh", "20 lac", "20 l", or a plain "2000000"
   const mBudget = qLower.match(/(\d+(\.\d+)?)\s*(lakh|lakhs|lac|lacs|l\b|rs|₹|rupees)?/);
+// ============================================================
+// 🔒 SERIAL CONTEXT GUARD — DO NOT TREAT SERIAL AS BUDGET
+// ============================================================
+
+if (
+  global.lastUsedCarList?.get(from) &&
+  /^\d{1,2}$/.test(qLower.trim())
+) {
+console.log('[USED DEBUG] budget check', {
+  from,
+  input: qLower,
+  hasUsedList: !!global.lastUsedCarList?.get(from)
+});
+
+  // User is selecting a serial number — skip budget detection
+} else {
+
   if (mBudget) {
     const num = parseFloat(mBudget[1]);
     if (num > 0) {
@@ -1896,7 +1913,7 @@ const bulletSim = simulateBulletPlan({
 
   return { text: lines.join('\n'), picLink };
 }
-
+}
 // ---------------- Greeting helper ----------------
 const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
 const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
