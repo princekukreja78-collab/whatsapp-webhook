@@ -2706,7 +2706,7 @@ if (
   typeof lastSvc === 'string' &&
   lastSvc.includes('used')
 ) {
-  // do nothing — let USED-car flow handle it
+  return false; // ⛔ HARD STOP — USED owns this input
 } else {
 
   // ------------------------------
