@@ -5777,8 +5777,12 @@ if (type === 'text' && msgText) {
 
   const engineLock = getEngineLock(from);
 
-// 🔒 HARD USED ENTRY OR CONTINUATION (ENGINE-AWARE)
-if (explicitUsed || hasYear || isUsedContext(from)) {
+// 🔒 HARD USED ENTRY OR CONTINUATION (STRICT & SAFE)
+if (
+  explicitUsed ||
+  hasYear ||
+  getEngineLock(from) === 'USED'
+) {
 
   const usedRes = await buildUsedCarQuoteFreeText({
     query: msgText,
