@@ -5757,54 +5757,76 @@ if (shouldGreetNow(from, msgText)) {
   }
 }
 
-// ================= USED CAR DETECTION (RESTORED & SAFE) =================
+// ================= USED CAR DETECTION (INTENT-GATED & SAFE) =================
 if (type === 'text' && msgText) {
   const trimmed = msgText.trim();
   const textLower = trimmed.toLowerCase();
 
+  // Explicit USED intent keywords
   const explicitUsed =
     /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
 
-  // Year mention = USED (e.g. "Audi A6 2019")
+  // Year mention (valid USED signal ONLY before intent is locked)
   const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
 
+  // Pure numeric serial reply
   const isPureSerial = /^\d{1,2}$/.test(trimmed);
-  const lastSvc = getLastService(from);
 
-  // 🔒 SERIAL replies are handled elsewhere — never rebuild list here
+  const lastSvcRaw = getLastService(from);
+  const lastSvc = (lastSvcRaw || '').toUpperCase();
+  const engineLock = getEngineLock(from);
+
+  // 🔒 SERIAL replies are handled elsewhere — never re-trigger detection here
   if (isPureSerial && global.lastUsedCarList?.get(from)) {
     return;
   }
 
-  const engineLock = getEngineLock(from);
+  /*
+    INTENT RULES (DO NOT BREAK):
+    1) NEVER auto-detect USED once NEW intent is locked
+    2) ALWAYS allow USED continuation
+    3) Allow year-based USED ONLY before intent is chosen
+    4) Explicit 'used' keyword ALWAYS wins
+  */
 
-// 🔒 HARD USED ENTRY OR CONTINUATION (STRICT & SAFE)
-if (
-  explicitUsed ||
-  hasYear ||
-  getEngineLock(from) === 'USED'
-) {
+  const allowUsedDetection =
+    explicitUsed ||                                   // explicit always wins
+    engineLock === 'USED' ||                          // continuation
+    (
+      !engineLock &&                                  // no engine lock yet
+      !lastSvc &&                                     // no service chosen yet
+      hasYear                                         // year-based inference
+    );
 
-  const usedRes = await buildUsedCarQuoteFreeText({
-    query: msgText,
-    from
-  });
+  // ⛔ HARD BLOCK: protect NEW flow absolutely
+  if (
+    (engineLock === 'NEW' || lastSvc === 'NEW') &&
+    !explicitUsed
+  ) {
+    // NEW owns this message — do not auto-route to USED
+  } else if (allowUsedDetection) {
 
-  await waSendText(from, usedRes.text || 'Used car quote failed.');
+    const usedRes = await buildUsedCarQuoteFreeText({
+      query: msgText,
+      from
+    });
 
-  if (usedRes.picLink) {
-    await waSendText(from, `Photos: ${usedRes.picLink}`);
+    await waSendText(from, usedRes.text || 'Used car quote failed.');
+
+    if (usedRes.picLink) {
+      await waSendText(from, `Photos: ${usedRes.picLink}`);
+    }
+
+    await sendUsedCarButtons(from);
+
+    setLastService(from, 'USED');
+    setEngineLock(from, 'USED');
+
+    return; // ⛔ HARD STOP — DO NOT FALL INTO NEW
   }
-
-  await sendUsedCarButtons(from);
-
-  setLastService(from, 'USED');
-  setEngineLock(from, 'USED');
-
-  return; // ⛔ HARD STOP — DO NOT FALL INTO NEW
 }
-}
-    // NEW CAR quick quote (only if NOT advisory-style)
+
+  // NEW CAR quick quote (only if NOT advisory-style)
     if (type === 'text' && msgText && !isAdvisory(msgText)) {
       const served = await tryQuickNewCarQuote(msgText, from);
       if (served) {
