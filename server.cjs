@@ -5754,8 +5754,14 @@ if (type === 'text' && msgText) {
     return;
   }
 
-  // 🔒 HARD USED ENTRY OR CONTINUATION (INTENT GATED)
-  if (explicitUsed || hasYear || lastSvc === 'USED') {
+  const engineLock = getEngineLock(from);
+
+// 🔒 HARD USED ENTRY OR CONTINUATION (ENGINE-AWARE)
+if (
+  engineLock !== 'NEW' &&              // ⬅️ THIS IS THE FIX
+  (explicitUsed || hasYear || lastSvc === 'USED')
+) {
+
     const usedRes = await buildUsedCarQuoteFreeText({
       query: msgText,
       from
