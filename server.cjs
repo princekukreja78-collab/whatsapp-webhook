@@ -2704,7 +2704,8 @@ if (!Array.isArray(foundModels) || foundModels.length < 2) {
 if (
   lastSvc &&
   typeof lastSvc === 'string' &&
-  lastSvc.includes('used')
+  lastSvc.includes('used') &&
+  global.__USED_SERIAL_ACTIVE__ !== true
 ) {
   return false; // ⛔ HARD STOP — USED owns this input
 } else {
