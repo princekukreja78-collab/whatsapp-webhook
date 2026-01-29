@@ -5757,55 +5757,31 @@ if (shouldGreetNow(from, msgText)) {
   }
 }
 
-// ================= USED CAR DETECTION (INTENT-GATED & SAFE) =================
+// ================= USED CAR DETECTION (LAUNCH-SAFE) =================
 if (type === 'text' && msgText) {
   const trimmed = msgText.trim();
   const textLower = trimmed.toLowerCase();
 
-  // Explicit USED intent keywords
   const explicitUsed =
     /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
 
-  // Year mention (valid USED signal ONLY before intent is locked)
-  const hasYear = /\b(19|20)\d{2}\b/.test(textLower);
-
-  // Pure numeric serial reply
   const isPureSerial = /^\d{1,2}$/.test(trimmed);
 
-  const lastSvcRaw = getLastService(from);
-  const lastSvc = (lastSvcRaw || '').toUpperCase();
+  const lastSvc = (getLastService(from) || '').toUpperCase();
   const engineLock = getEngineLock(from);
 
-  // 🔒 SERIAL replies are handled elsewhere — never re-trigger detection here
+  // 🔒 Serial replies are handled elsewhere
   if (isPureSerial && global.lastUsedCarList?.get(from)) {
     return;
   }
 
-  /*
-    INTENT RULES (DO NOT BREAK):
-    1) NEVER auto-detect USED once NEW intent is locked
-    2) ALWAYS allow USED continuation
-    3) Allow year-based USED ONLY before intent is chosen
-    4) Explicit 'used' keyword ALWAYS wins
-  */
-
-  const allowUsedDetection =
-    explicitUsed ||                                   // explicit always wins
-    engineLock === 'USED' ||                          // continuation
-    (
-      !engineLock &&                                  // no engine lock yet
-      !lastSvc &&                                     // no service chosen yet
-      hasYear                                         // year-based inference
-    );
-
-  // ⛔ HARD BLOCK: protect NEW flow absolutely
+  // ⛔ ABSOLUTE RULE:
+  // USED only if explicitly asked OR already in USED flow
   if (
-    (engineLock === 'NEW' || lastSvc === 'NEW') &&
-    !explicitUsed
+    explicitUsed ||
+    engineLock === 'USED' ||
+    lastSvc === 'USED'
   ) {
-    // NEW owns this message — do not auto-route to USED
-  } else if (allowUsedDetection) {
-
     const usedRes = await buildUsedCarQuoteFreeText({
       query: msgText,
       from
@@ -5822,7 +5798,7 @@ if (type === 'text' && msgText) {
     setLastService(from, 'USED');
     setEngineLock(from, 'USED');
 
-    return; // ⛔ HARD STOP — DO NOT FALL INTO NEW
+    return; // ⛔ HARD STOP
   }
 }
 
