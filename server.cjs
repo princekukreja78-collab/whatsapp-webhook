@@ -754,6 +754,31 @@ function getLastService(from) {
     return null;
   }
 }
+// ================= ENGINE LOCK (NEW / USED) =================
+// Explicit engine ownership to prevent NEW/USED hijacking
+
+if (typeof global.engineLock === 'undefined') {
+  global.engineLock = new Map();
+}
+
+function getEngineLock(from) {
+  try {
+    if (!from) return null;
+    return global.engineLock.get(from) || null;
+  } catch {
+    return null;
+  }
+}
+
+function setEngineLock(from, lock) {
+  try {
+    if (!from) return;
+    global.engineLock.set(from, lock);
+  } catch (e) {
+    if (DEBUG) console.warn('setEngineLock failed', e && e.message ? e.message : e);
+  }
+}
+
 // ------------------------------
 // Loan context helper (GLOBAL)
 // ------------------------------
