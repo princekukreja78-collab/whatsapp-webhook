@@ -754,6 +754,7 @@ function getLastService(from) {
     return null;
   }
 }
+
 // ================= ENGINE LOCK (NEW / USED) =================
 // Explicit engine ownership to prevent NEW/USED hijacking
 
@@ -777,6 +778,15 @@ function setEngineLock(from, lock) {
   } catch (e) {
     if (DEBUG) console.warn('setEngineLock failed', e && e.message ? e.message : e);
   }
+}
+
+// ================= USED CONTEXT HELPER =================
+// USED is valid ONLY if engine is not locked to NEW
+function isUsedContext(from) {
+  const lock = getEngineLock(from);
+  const svc  = getLastService(from);
+  return lock !== 'NEW' && svc === 'USED';
+
 }
 
 // ------------------------------
@@ -5768,30 +5778,27 @@ if (type === 'text' && msgText) {
   const engineLock = getEngineLock(from);
 
 // 🔒 HARD USED ENTRY OR CONTINUATION (ENGINE-AWARE)
-if (
-  engineLock !== 'NEW' &&              // ⬅️ THIS IS THE FIX
-  (explicitUsed || hasYear || lastSvc === 'USED')
-) {
+if (explicitUsed || hasYear || isUsedContext(from)) {
 
-    const usedRes = await buildUsedCarQuoteFreeText({
-      query: msgText,
-      from
-    });
+  const usedRes = await buildUsedCarQuoteFreeText({
+    query: msgText,
+    from
+  });
 
-    await waSendText(from, usedRes.text || 'Used car quote failed.');
+  await waSendText(from, usedRes.text || 'Used car quote failed.');
 
-    if (usedRes.picLink) {
-      await waSendText(from, `Photos: ${usedRes.picLink}`);
-    }
-
-    await sendUsedCarButtons(from);
-    setLastService(from, 'USED');
-setEngineLock(from, 'USED');
-
-    return; // ⛔ HARD STOP — DO NOT FALL INTO NEW
+  if (usedRes.picLink) {
+    await waSendText(from, `Photos: ${usedRes.picLink}`);
   }
-}
 
+  await sendUsedCarButtons(from);
+
+  setLastService(from, 'USED');
+  setEngineLock(from, 'USED');
+
+  return; // ⛔ HARD STOP — DO NOT FALL INTO NEW
+}
+}
     // NEW CAR quick quote (only if NOT advisory-style)
     if (type === 'text' && msgText && !isAdvisory(msgText)) {
       const served = await tryQuickNewCarQuote(msgText, from);
