@@ -5350,6 +5350,11 @@ try {
         case 'BTN_NEW_QUOTE':
          setLastService(from, 'NEW');
 setEngineLock(from, 'NEW');
+console.log('[LOCK SET]', {
+  from,
+  engineLock: getEngineLock(from),
+  lastService: getLastService(from)
+});
 
 global.lastUsedCarList?.delete(from);
 await waSendText(
@@ -5723,17 +5728,23 @@ if (shouldGreetNow(from, msgText)) {
     }
 
     // numeric reply after used-car list (safe behaviour)
-    if (type === 'text' && msgText) {
-      const trimmed = msgText.trim();
-      const lastSvc = getLastService(from);
-      if (lastSvc === 'USED' && /^[1-9]\d*$/.test(trimmed)) {
-        await waSendText(
-          from,
-          'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.'
-        );
-        return;
-      }
-    }
+   if (type === 'text' && msgText) {
+  console.log('[MSG ENTER]', {
+    text: msgText,
+    engineLock: getEngineLock(from),
+    lastService: getLastService(from)
+  });
+
+  const trimmed = msgText.trim();
+
+  if (isUsedContext(from) && /^[1-9]\d*$/.test(trimmed)) {
+    await waSendText(
+      from,
+      'Please reply with the *exact car name* from the list (for example: "Audi A6 2018") so that I can share an accurate quote.'
+    );
+    return;
+  }
+}
 
 // ================= USED CAR DETECTION (RESTORED & SAFE) =================
 if (type === 'text' && msgText) {
