@@ -4782,6 +4782,8 @@ if (type === 'text' && msgText) {
     }
 
     setLastService(from, 'USED');
+setEngineLock(from, 'USED');
+
     global.__USED_SERIAL_ACTIVE__ = false;
 
     // 🔥 HARD STOP — NOTHING ELSE RUNS
@@ -4798,8 +4800,12 @@ const lastSvc = getLastService(from);
 // HARD ENGINE ISOLATION — DO NOT MIX NEW & USED
 // ============================================================
 
-const disableUsedEngine = lastSvc === 'NEW';
-const disableNewEngine  = lastSvc === 'USED';
+const engineLock = getEngineLock(from);
+
+// 🔒 Engine ownership (explicit only)
+const disableUsedEngine = engineLock === 'NEW';
+const disableNewEngine  = engineLock === 'USED';
+
 
 const inLoanFlow = ['LOAN', 'LOAN_NEW', 'LOAN_USED'].includes(lastSvc);
 
@@ -5317,7 +5323,9 @@ try {
       switch (selectedId) {
         case 'SRV_NEW_CAR':
         case 'BTN_NEW_QUOTE':
-          setLastService(from, 'NEW');
+         setLastService(from, 'NEW');
+setEngineLock(from, 'NEW');
+
 global.lastUsedCarList?.delete(from);
 await waSendText(
   from,
@@ -5346,7 +5354,8 @@ await waSendText(
 
      case 'SRV_USED_CAR':
 case 'BTN_USED_MORE':
-  setLastService(from, 'USED');
+ setLastService(from, 'USED');
+setEngineLock(from, 'USED');
   await waSendText(
   from,
   '🚘 *Used Car Search*\n\n' +
@@ -5735,6 +5744,8 @@ if (type === 'text' && msgText) {
 
     await sendUsedCarButtons(from);
     setLastService(from, 'USED');
+setEngineLock(from, 'USED');
+
     return; // ⛔ HARD STOP — DO NOT FALL INTO NEW
   }
 }
