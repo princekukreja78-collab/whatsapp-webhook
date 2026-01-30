@@ -1594,6 +1594,16 @@ async function buildSingleUsedCarQuote(row, from) {
 }
 // ---------------- Build used car quote ----------------
 async function buildUsedCarQuoteFreeText({ query, from, skipBudget = false }) {
+
+  // ⛔ ABSOLUTE ENGINE OWNERSHIP GUARD (FINAL)
+  const engineLock = getEngineLock(from);
+  const lastSvc = (getLastService(from) || '').toUpperCase();
+
+  // If NEW flow is active, USED must NEVER respond
+  if (engineLock === 'NEW' || lastSvc === 'NEW') {
+    return null;
+  }
+
   const rows = await loadUsedSheetRows();
   if (!rows || !rows.length) {
     return { text: 'Used car pricing not configured.' };
