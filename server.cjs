@@ -1594,15 +1594,15 @@ async function buildSingleUsedCarQuote(row, from) {
 }
 // ---------------- Build used car quote ----------------
 async function buildUsedCarQuoteFreeText({ query, from, skipBudget = false }) {
-throw new Error("USED_BUILDER_REACHED");
 
   const engineLock = getEngineLock(from);
-const lastSvc = (getLastService(from) || '').toUpperCase();
+  const lastSvc = (getLastService(from) || '').toUpperCase();
 
-// ⛔ FINAL RULE: USED only if EXPLICITLY locked to USED
-if (engineLock !== 'USED' && lastSvc !== 'USED') {
-  return null;
-}
+  // ⛔ FINAL & CORRECT RULE:
+  // USED quotes ONLY when explicitly in USED flow
+  if (engineLock !== 'USED' && lastSvc !== 'USED') {
+    return null; // silently ignore
+  }
 
   const rows = await loadUsedSheetRows();
   if (!rows || !rows.length) {
