@@ -4833,17 +4833,30 @@ setEngineLock(from, 'USED');
 // Check last service to avoid hijacking active loan flows
 const lastSvc = getLastService(from);
 // ============================================================
-// HARD ENGINE ISOLATION — DO NOT MIX NEW & USED
+// HARD ENGINE ISOLATION — DO NOT MIX NEW & USED (SAFE)
 // ============================================================
 
 const engineLock = getEngineLock(from);
+const lastSvcNorm = (lastSvc || '').toUpperCase();
 
 // 🔒 Engine ownership (explicit only)
 const disableUsedEngine = engineLock === 'NEW';
 const disableNewEngine  = engineLock === 'USED';
 
+// ⛔ Compute block flags (DO NOT RETURN HERE)
+const blockUsedEngine = disableUsedEngine && lastSvcNorm === 'NEW';
+const blockNewEngine  = disableNewEngine  && lastSvcNorm === 'USED';
 
-const inLoanFlow = ['LOAN', 'LOAN_NEW', 'LOAN_USED'].includes(lastSvc);
+// NOTE:
+// Do NOT return here.
+// These flags must be enforced INSIDE the respective engines,
+// not at the global interceptor level.
+
+// ============================================================
+// GLOBAL LOAN INTENT (UNCHANGED)
+// ============================================================
+
+const inLoanFlow = ['LOAN', 'LOAN_NEW', 'LOAN_USED'].includes(lastSvcNorm);
 
 // Avoid intercepting numeric EMI inputs
 const looksLikeEmiInput =
