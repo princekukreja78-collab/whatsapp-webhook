@@ -2144,7 +2144,7 @@ function extractModelsForComparisonFallback(text) {
         .replace(/price|onroad|on road|specs?|features?|mileage|compare|which is better/g, '')
         .trim()
     )
-    .filter(s => s.length >= 3);
+    .filter(s => s.length >= 3 && !/^(car|cars|vehicle|suv|sedan|hatch)$/i.test(s));
 }
 
 // brochure index loader
