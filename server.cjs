@@ -1595,14 +1595,13 @@ async function buildSingleUsedCarQuote(row, from) {
 // ---------------- Build used car quote ----------------
 async function buildUsedCarQuoteFreeText({ query, from, skipBudget = false }) {
 
-  // ⛔ ABSOLUTE ENGINE OWNERSHIP GUARD (FINAL)
   const engineLock = getEngineLock(from);
-  const lastSvc = (getLastService(from) || '').toUpperCase();
+const lastSvc = (getLastService(from) || '').toUpperCase();
 
-  // If NEW flow is active, USED must NEVER respond
-  if (engineLock === 'NEW' || lastSvc === 'NEW') {
-    return null;
-  }
+// ⛔ FINAL RULE: USED only if EXPLICITLY locked to USED
+if (engineLock !== 'USED' && lastSvc !== 'USED') {
+  return null;
+}
 
   const rows = await loadUsedSheetRows();
   if (!rows || !rows.length) {
