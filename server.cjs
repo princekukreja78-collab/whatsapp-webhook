@@ -5814,7 +5814,7 @@ if (shouldGreetNow(from, msgText)) {
   }
 }
 
-// ================= USED CAR DETECTION (LAUNCH-SAFE) =================
+// ================= USED CAR DETECTION (EXPLICIT ONLY) =================
 if (type === 'text' && msgText) {
   const trimmed = msgText.trim();
   const textLower = trimmed.toLowerCase();
@@ -5823,40 +5823,36 @@ if (type === 'text' && msgText) {
     /\b(used|pre[-\s]?owned|preowned|second[-\s]?hand)\b/.test(textLower);
 
   const isPureSerial = /^\d{1,2}$/.test(trimmed);
-
   const lastSvc = (getLastService(from) || '').toUpperCase();
   const engineLock = getEngineLock(from);
+  const usedSerialActive =
+    global.lastUsedCarList && global.lastUsedCarList.has(from);
 
-  // 🔒 Serial replies are handled elsewhere
-  if (isPureSerial && global.lastUsedCarList?.get(from)) {
+  // Serial continuation — allowed
+  if (isPureSerial && usedSerialActive) {
     return;
   }
 
   // ⛔ ABSOLUTE RULE:
-  // USED only if explicitly asked OR already in USED flow
+  // USED only via explicit intent or active USED context
   if (
     explicitUsed ||
     engineLock === 'USED' ||
     lastSvc === 'USED'
   ) {
-    const usedRes = await buildUsedCarQuoteFreeText({
-      query: msgText,
-      from
-    });
+    const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
 
-    await waSendText(from, usedRes.text || 'Used car quote failed.');
-
-    if (usedRes.picLink) {
-      await waSendText(from, `Photos: ${usedRes.picLink}`);
+    if (usedRes) {
+      await waSendText(from, usedRes.text || 'Used car quote failed.');
+      if (usedRes.picLink) await waSendText(from, `Photos: ${usedRes.picLink}`);
+      await sendUsedCarButtons(from);
+      setLastService(from, 'USED');
+      setEngineLock(from, 'USED');
     }
-
-    await sendUsedCarButtons(from);
-
-    setLastService(from, 'USED');
-    setEngineLock(from, 'USED');
-
-    return; // ⛔ HARD STOP
+    return;
   }
+
+  // ❌ NO implicit USED fallback anymore
 }
 
   // NEW CAR quick quote (only if NOT advisory-style)
