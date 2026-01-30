@@ -3599,11 +3599,31 @@ if ((score <= 0 || score < ABS_MIN_SCORE) && !variantRescue) continue;
 // 🔒 FINAL HARD MODEL LOCK (compact models only)
 if (resolvedModel) {
   const rm = normalizeCompactModel(resolvedModel);
-  allMatches = allMatches.filter(m => {
+  const filtered = allMatches.filter(m => {
     const mdl = normalizeCompactModel(m.row[m.idxModel] || '');
     return mdl.includes(rm);
   });
+
+  // ⛔ MODEL DETECTED BUT NOT IN NEW PRICING
+  if (!filtered.length) {
+    setLastService(from, 'NEW');
+    setEngineLock(from, 'NEW'); // 🔒 CLAIM NEW OWNERSHIP
+
+    await waSendText(
+      from,
+      `🚗 *${resolvedModel}*\n\n` +
+      `This model is currently not available in our *new car pricing* database.\n\n` +
+      `You can:\n` +
+      `• check *used car options*, or\n` +
+      `• try another new car model.`
+    );
+
+    return true; // ⛔ STOP — DO NOT FALL INTO USED
+  }
+
+  allMatches = filtered;
 }
+
 // ================= HARD DRIVETRAIN LOCK (SAFE & FINAL) =================
 const wants4x4 = /\b(4x4|4wd|awd)\b/i.test(userNorm);
 const wants4x2 = /\b(4\/2|4x2)\b/i.test(userNorm);
