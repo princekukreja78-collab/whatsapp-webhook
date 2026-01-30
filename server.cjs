@@ -1594,6 +1594,7 @@ async function buildSingleUsedCarQuote(row, from) {
 }
 // ---------------- Build used car quote ----------------
 async function buildUsedCarQuoteFreeText({ query, from, skipBudget = false }) {
+throw new Error("USED_BUILDER_REACHED");
 
   const engineLock = getEngineLock(from);
 const lastSvc = (getLastService(from) || '').toUpperCase();
