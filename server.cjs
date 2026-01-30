@@ -1595,15 +1595,29 @@ async function buildSingleUsedCarQuote(row, from) {
 // ---------------- Build used car quote ----------------
 async function buildUsedCarQuoteFreeText({ query, from, skipBudget = false }) {
 
-  const engineLock = getEngineLock(from);
-  const lastSvc = (getLastService(from) || '').toUpperCase();
+ const engineLock = getEngineLock(from);
+const lastSvc = (getLastService(from) || '').toUpperCase();
+const usedSerialActive =
+  global.lastUsedCarList && global.lastUsedCarList.has(from);
 
-  // ⛔ FINAL & CORRECT RULE:
-  // USED quotes ONLY when explicitly in USED flow
-  if (engineLock !== 'USED' && lastSvc !== 'USED') {
-    return null; // silently ignore
-  }
+// ⛔ BLOCK USED ONLY IF NEW ENGINE IS EXPLICITLY ACTIVE
+if (engineLock === 'NEW') {
+  return null;
+}
 
+// ✅ ALLOW USED IF:
+// - engine already USED
+// - serial continuation
+// - explicit USED service
+if (
+  engineLock === 'USED' ||
+  lastSvc === 'USED' ||
+  usedSerialActive
+) {
+  // proceed normally
+} else {
+  return null;
+}
   const rows = await loadUsedSheetRows();
   if (!rows || !rows.length) {
     return { text: 'Used car pricing not configured.' };
