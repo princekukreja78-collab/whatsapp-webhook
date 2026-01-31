@@ -4781,6 +4781,8 @@ if (incomingPhoneId) {
 
           /* AUTO-INGEST using actual WhatsApp message fields + photo forward + AI vision */
     try {
+   console.log('🔍 Webhook value keys:', Object.keys(value || {}));
+
       const msg     = value.messages?.[0];
       const contact = value.contacts?.[0];
 
