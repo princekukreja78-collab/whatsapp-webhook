@@ -254,12 +254,12 @@ let baseModel = null;
 if (parts.length === 1) {
   baseModel = parts[0];
 }
-// Allow two-word alphabetic base models for luxury brands (E CLASS, C CLASS, S CLASS)
+// Allow controlled 2-word luxury base models
 if (
   parts.length === 2 &&
   /^[a-z]+$/.test(parts[0]) &&
   /^[a-z]+$/.test(parts[1]) &&
-  BRAND === 'MERCEDES'
+  ['MERCEDES', 'LAND ROVER'].includes(BRAND)
 ) {
   baseModel = parts.join(' ');
 }
@@ -379,7 +379,7 @@ Your goals:
 5) If the user text mentions "problem", "noise", "check engine", "warning light", etc., treat that as a service concern and first address that.
 
 Output format (very important):
-1) *Quick Summary* – 2–3 lines.
+1) *Quick Summary* – 3–4 lines.
 2) *Visible Issues / Faults* – bullet points (or "None clearly visible").
 3) *Repaint / Bodywork Opinion* – explain if any panel looks possibly repainted and WHY, with low/medium/high confidence.
 4) *PPF / Protection Advice* – what you recommend (eg. "frontal kit PPF", "only touch-ups and polish", etc.).
@@ -1283,24 +1283,140 @@ function normForMatch(s) {
 
 // ============================================================================
 // MODEL ALIASES (SINGLE SOURCE OF TRUTH)
-// MUST BE DEFINED BEFORE ANY USAGE
+// ⚠️ Canonical models ONLY — no fuzzy guesses
 // ============================================================================
 
 const MODEL_ALIASES_RAW = {
-  'thar roxx':   ['tharroxx', 'thar roxx', 'roxx'],
-  'scorpio n':   ['scorpio n', 'scorpion'],
-  'scorpio classic': ['scorpio classic', 'classic scorpio'],
-  'xuv 700':     ['xuv700', 'xuv 700'],
-  'xuv 400':     ['xuv400', 'xuv 400', 'xuv 400 ev'],
-  'be 6':        ['be6', 'be 6e', 'be 6 ev'],
-  'bmw x5':      ['bmw x5', 'x5'],
-  'bmw x7':      ['bmw x7', 'x7'],
-  'wagon r':     ['wagonr', 'wagon r'],
-  's presso':    ['spresso', 's presso'],
-  'clavis ev':   ['clavis ev', 'clavis electric']
+
+ // ===== LAND ROVER =====
+  'range rover': [
+    'range rover'
+  ],
+
+  'range rover sport': [
+    'range rover sport'
+  ],
+
+  'range rover velar': [
+    'range rover velar'
+  ],
+
+  'range rover evoque': [
+    'range rover evoque'
+  ],
+
+  // ===================== MAHINDRA =====================
+  'thar roxx': [
+    'tharroxx', 'thar roxx'
+    // ❌ do NOT allow plain "roxx"
+  ],
+
+  'thar': [
+    'mahindra thar'
+  ],
+
+  'scorpio n': [
+    'scorpio n', 'scorpio-n', 'scorpio new'
+  ],
+
+  'scorpio classic': [
+    'scorpio classic', 'classic scorpio'
+  ],
+
+  // ---- XUV 700 (strict) ----
+  'xuv 700': [
+    'xuv700',
+    'xuv 700',
+    'xuv7oo',     // common typo (OO)
+    'xuv 7oo',
+    'xuv7o0',
+    'xuv 7o0'
+    // ❌ DO NOT add: xuv7x0 / 7xo / 700x
+  ],
+
+  // ---- XUV 3XO (strict, NEW model) ----
+  'xuv 3xo': [
+    'xuv3xo',
+    'xuv 3xo',
+    'xuv3x0',     // zero typo
+    'xuv 3x0',
+    'xuv300'      // users type old habit
+  ],
+// ---- XUV 7XO (strict, NEW model) ----
+  'xuv 7xo': [
+    'xuv7xo',
+    'xuv 7xo',
+    'xuv7x0',     // zero typo
+    'xuv 7x0',
+    'xuv70x'      // users type old habit
+  ],
+
+
+  // ---- XUV 400 EV ----
+  'xuv 400': [
+    'xuv400',
+    'xuv 400',
+    'xuv 400 ev',
+    'xuv400 ev'
+  ],
+
+  // ---- BE series ----
+  'be 6': [
+    'be6',
+    'be 6',
+    'be6e',
+    'be 6e',
+    'be 6 ev'
+  ],
+
+  // ===================== BMW =====================
+  'bmw x5': [
+    'bmw x5'
+    // ❌ NEVER allow plain "x5"
+  ],
+
+  'bmw x7': [
+    'bmw x7'
+    // ❌ NEVER allow plain "x7"
+  ],
+
+  // ===================== MARUTI =====================
+  'wagon r': [
+    'wagonr',
+    'wagon r'
+  ],
+
+  's presso': [
+    'spresso',
+    's presso'
+  ],
+
+  // ===================== TOYOTA =====================
+  'land cruiser': [
+    'land cruiser',
+    'landcruiser',
+    'land cruiser 300',
+    'lc300'
+    // ❌ DO NOT allow plain "lc"
+  ],
+
+  // ===================== LAND ROVER =====================
+  'range rover': [
+    'range rover'
+    // ❌ do not add "rover"
+  ],
+
+  // ===================== OTHERS =====================
+  'clavis ev': [
+    'clavis ev',
+    'clavis electric'
+  ]
 };
 
-// aliasNorm → canonicalNorm
+// ============================================================================
+// BUILD NORMALIZED ALIAS MAP
+// ============================================================================
+
 const MODEL_ALIAS_MAP = {};
 for (const [canon, aliases] of Object.entries(MODEL_ALIASES_RAW)) {
   const canonNorm = normForMatch(canon);
@@ -3568,6 +3684,23 @@ if (
     console.log('Mahindra XUV700 hard lock applied');
   }
 }
+// 🔒 LAND ROVER HARD SAFETY
+if (
+  resolvedModel === 'range rover' &&
+  /\b(velar|sport|evoque)\b/i.test(msgText)
+) {
+  // force explicit sub-model
+  await waSendText(
+    from,
+    'Please specify the exact model:\n' +
+    '• `Range Rover`\n' +
+    '• `Range Rover Sport`\n' +
+    '• `Range Rover Velar`\n' +
+    '• `Range Rover Evoque`'
+  );
+  return true;
+}
+
        // ---------- NORMALIZE SPECIAL_WORDS comparison + defensive suffix penalty ----------
 const outerVariantNorm = String(normForMatch(String(variantCell || ''))).toLowerCase();
 const variantNormUpper = outerVariantNorm.toUpperCase();
