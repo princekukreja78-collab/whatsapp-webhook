@@ -948,6 +948,77 @@ async function waSendImage(to, imageUrl, caption = "") {
   if (r && r.messages) return { ok: true };
   return { ok: false, error: r?.error || r };
 }
+
+function buildSalesWaMeLink(from) {
+  const sales = process.env.SALES_WHATSAPP_NUMBER;
+  if (!sales) return null;
+
+  const text =
+    `Hello VehYra Team,%0A` +
+    `I interacted with the bot and would like assistance.%0A%0A` +
+    `Customer number: ${from}`;
+
+  return `https://wa.me/${sales}?text=${text}`;
+}
+function scheduleFeedbackPing(from) {
+  if (!global.__FEEDBACK_TIMERS__) global.__FEEDBACK_TIMERS__ = new Map();
+
+  // Prevent duplicate scheduling
+  if (global.__FEEDBACK_TIMERS__.has(from)) return;
+
+  const timer = setTimeout(async () => {
+    try {
+      const sales = process.env.SALES_WHATSAPP_NUMBER;
+      if (!sales) return;
+
+      const waLink =
+        `https://wa.me/${sales}?text=` +
+        encodeURIComponent(
+          `Hello VehYra Team,\n` +
+          `I interacted with the bot and would like assistance.\n\n` +
+          `Customer number: ${from}`
+        );
+
+      await waSendRaw({
+        messaging_product: 'whatsapp',
+        to: from,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: {
+            text:
+              '🙏 *Thank you for using VehYra*\n\n' +
+              'We’d love your feedback or help you further.'
+          },
+          action: {
+            buttons: [
+              {
+                type: 'url',
+                title: 'Talk to Sales',
+                url: waLink
+              }
+            ]
+          }
+        }
+      });
+
+    } catch (e) {
+      console.warn('Feedback CTA failed:', e?.message || e);
+    } finally {
+      global.__FEEDBACK_TIMERS__.delete(from);
+    }
+  }, 2 * 60 * 60 * 1000); // ⏱ 2 hours
+
+  global.__FEEDBACK_TIMERS__.set(from, timer);
+}
+
+function cancelFeedbackPing(from) {
+  if (global.__FEEDBACK_TIMERS__?.has(from)) {
+    clearTimeout(global.__FEEDBACK_TIMERS__.get(from));
+    global.__FEEDBACK_TIMERS__.delete(from);
+  }
+}
+
 // === ONE SINGLE GREETING (image header + personalised text body) ===
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
@@ -3604,22 +3675,25 @@ if (resolvedModel) {
     return mdl.includes(rm);
   });
 
-  // ⛔ MODEL DETECTED BUT NOT IN NEW PRICING
-  if (!filtered.length) {
-    setLastService(from, 'NEW');
-    setEngineLock(from, 'NEW'); // 🔒 CLAIM NEW OWNERSHIP
+ // ⛔ MODEL DETECTED BUT NOT IN NEW PRICING
+if (!filtered.length) {
+  setLastService(from, 'NEW');
+  setEngineLock(from, 'NEW'); // 🔒 CLAIM NEW OWNERSHIP
 
-    await waSendText(
-      from,
-      `🚗 *${resolvedModel}*\n\n` +
-      `This model is currently not available in our *new car pricing* database.\n\n` +
-      `You can:\n` +
-      `• check *used car options*, or\n` +
-      `• try another new car model.`
-    );
+  await waSendText(
+    from,
+    `🚗 *${resolvedModel}*\n\n` +
+    `This model is currently not available in our *new car pricing* database.\n\n` +
+    `You can:\n` +
+    `• check *used car options*, or\n` +
+    `• try another new car model.`
+  );
 
-    return true; // ⛔ STOP — DO NOT FALL INTO USED
-  }
+  // ⏱ Schedule feedback / contact CTA (safe point)
+  scheduleFeedbackPing(from);
+
+  return true; // ⛔ STOP — DO NOT FALL INTO USED
+}
 
   allMatches = filtered;
 }
@@ -5695,14 +5769,18 @@ if (!Array.isArray(value.messages) || !value.messages[0]) {
 // Greeting first – ONLY service menu (no quick buttons now)
 if (shouldGreetNow(from, msgText)) {
 
-  // --------------------------------------------------
-  // 🔒 GREETING THROTTLE: max once per 24 hours
-  // --------------------------------------------------
-  const lastGreetTs = lastGreeting.get(from);
-  if (lastGreetTs && Date.now() - lastGreetTs < 24 * 60 * 60 * 1000) {
-    return;
-  }
+// --------------------------------------------------
+// 🔒 GREETING THROTTLE (TEXT ONCE / MENU ALWAYS)
+// --------------------------------------------------
+const lastGreetTs = lastGreeting.get(from);
+const within24h = lastGreetTs && (Date.now() - lastGreetTs < 24 * 60 * 60 * 1000);
 
+if (within24h) {
+  // ❌ Skip greeting text
+  // ✅ Still show menu so user can navigate
+  await waSendListMenu(from);
+  return;
+}
   await waSendText(
     from,
     '🔴 *VehYra by MR. CAR* welcomes you!\nNamaste 🙏\n\n' +
@@ -5833,24 +5911,31 @@ if (type === 'text' && msgText) {
     return;
   }
 
-  // ⛔ ABSOLUTE RULE:
-  // USED only via explicit intent or active USED context
-  if (
-    explicitUsed ||
-    engineLock === 'USED' ||
-    lastSvc === 'USED'
-  ) {
-    const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
+ // ⛔ ABSOLUTE RULE:
+// USED only via explicit intent or active USED context
+if (
+  explicitUsed ||
+  engineLock === 'USED' ||
+  lastSvc === 'USED'
+) {
+  const usedRes = await buildUsedCarQuoteFreeText({ query: msgText, from });
 
-    if (usedRes) {
-      await waSendText(from, usedRes.text || 'Used car quote failed.');
-      if (usedRes.picLink) await waSendText(from, `Photos: ${usedRes.picLink}`);
-      await sendUsedCarButtons(from);
-      setLastService(from, 'USED');
-      setEngineLock(from, 'USED');
+  if (usedRes) {
+    await waSendText(from, usedRes.text || 'Used car quote failed.');
+    if (usedRes.picLink) await waSendText(from, `Photos: ${usedRes.picLink}`);
+    await sendUsedCarButtons(from);
+
+    setLastService(from, 'USED');
+    setEngineLock(from, 'USED');
+
+    // ⏱ Schedule feedback ONLY if this is not a serial browsing step
+    if (!global.lastUsedCarList?.has(from)) {
+      scheduleFeedbackPing(from);
     }
-    return;
   }
+
+  return;
+}
 
   // ❌ NO implicit USED fallback anymore
 }
