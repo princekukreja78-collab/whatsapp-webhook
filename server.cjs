@@ -1021,10 +1021,18 @@ function cancelFeedbackPing(from) {
 
 // === ONE SINGLE GREETING (image header + personalised text body) ===
 async function sendSheetWelcomeTemplate(phone, name = "Customer") {
+
+  const META_TOKEN = process.env.META_TOKEN;
+  const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+
+  console.log("TEMPLATE SEND ENV CHECK", {
+    META_TOKEN: !!META_TOKEN,
+    PHONE_NUMBER_ID
+  });
+
   if (!META_TOKEN || !PHONE_NUMBER_ID) {
     throw new Error("META_TOKEN or PHONE_NUMBER_ID not set");
   }
-
   const displayName = name || "Customer";
 
   // Use env URL if set, otherwise fall back to known poster URL
