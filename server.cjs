@@ -21,8 +21,8 @@ const BROADCAST_TEMPLATE_NAME =
 console.log('GREETING_TEMPLATE_NAME =', GREETING_TEMPLATE_NAME);
 console.log('GREETING_MEDIA_TEMPLATE_NAME =', GREETING_MEDIA_TEMPLATE_NAME);
 console.log('BROADCAST_TEMPLATE_NAME =', BROADCAST_TEMPLATE_NAME);
-// --- WhatsApp template language (force English = 'en') ---
-const WA_TEMPLATE_LANG = process.env.WA_TEMPLATE_LANG || 'en';
+// --- WhatsApp template language (force English = 'en_US') ---
+const WA_TEMPLATE_LANG = process.env.WA_TEMPLATE_LANG || 'en_US';
 console.log('WA_TEMPLATE_LANG =', WA_TEMPLATE_LANG);
 
 // --- startup compatibility shim: ensure greeting & CRM helpers exist ---
