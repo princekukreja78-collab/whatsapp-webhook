@@ -6714,6 +6714,13 @@ const targets = contacts.filter(c => {
 });
 
 console.log("🎯 Valid targets:", targets.length);
+
+console.log('BROADCAST ENV CHECK', {
+  META_TOKEN: !!process.env.META_TOKEN,
+  PHONE_NUMBER_ID: process.env.PHONE_NUMBER_ID,
+  WA_TEMPLATE_LANG
+});
+
 if (DEBUG) console.log(`Sheet broadcast: will send to ${targets.length} contacts`);
 
 let sent = 0;
