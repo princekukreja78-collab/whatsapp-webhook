@@ -4332,7 +4332,7 @@ let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience, stateMatch);
 
       if (filteredMatches.length > 0) {
         allMatches = filteredMatches;
-        if (allMatches.length > 1 && !hasVariantLock) {
+        if (allMatches.length > 1 && !hasVariantLock && !userHasExplicitVariant) {
           const out = [];
           out.push(`*Available variants — ${strictModel}*`);
           const displayed = [];
