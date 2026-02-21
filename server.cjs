@@ -712,9 +712,9 @@ const LEADS_FILE              = path.resolve(__dirname, 'crm_leads.json');
 const NEW_CAR_ROI             = Number(process.env.NEW_CAR_ROI || 8.10);
 const USED_CAR_ROI_VISIBLE    = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL   = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
-const REFINANCE_ROI           = Number(process.env.REFINANCE_ROI || 9.5);
-const BT_ROI                  = Number(process.env.BT_ROI || 8.75);
-const TOPUP_ROI               = Number(process.env.TOPUP_ROI || 9.25);
+const REFINANCE_ROI           = Number(process.env.REFINANCE_ROI || 13.5);
+const BT_ROI                  = Number(process.env.BT_ROI || 13.5);
+const TOPUP_ROI               = Number(process.env.TOPUP_ROI || 13.5);
 
 // keep DEBUG false by default unless env enables it explicitly
 const DEBUG = (process.env.DEBUG_VARIANT === 'true') || false;
@@ -5471,9 +5471,9 @@ if (selectedId === 'SRV_LOAN') {
     type: 'interactive',
     interactive: {
       type: 'list',
-      header: { type: 'text', text: 'Loan & Finance' },
-      body: { text: 'Choose a loan product or tool:' },
-      footer: { text: 'MR.CAR Finance Solutions' },
+      header: { type: 'text', text: '💰 Loan & Finance' },
+      body: { text: '🏦 Choose a loan product or tool 👇' },
+      footer: { text: '🚗 MR.CAR Finance Solutions' },
       action: {
         button: 'View Options',
         sections: [
@@ -5937,14 +5937,14 @@ if (selectedId === 'BTN_LOAN_REFINANCE') {
 
   await waSendText(
     from,
-    '🔄 *Refinance Your Car Loan*\n\n' +
-    'Refinance up to *200%* of your original loan amount at competitive rates.\n\n' +
-    'Please share the following details:\n' +
-    '1. *Ex-showroom price* of your car\n' +
-    '2. *Outstanding loan amount*\n' +
-    '3. *Preferred tenure* (1-7 years)\n\n' +
-    'Example:\n`15 lakh car, 8 lakh outstanding, 5 years`\n\n' +
-    `_Current refinance rate: ${REFINANCE_ROI}% p.a._`
+    '🔄 *Refinance Your Car Loan* 🚗💰\n\n' +
+    '✨ Refinance up to *200%* of your original loan amount!\n\n' +
+    '📝 Please share the following:\n' +
+    '1️⃣ *Ex-showroom price* of your car\n' +
+    '2️⃣ *Outstanding loan amount*\n' +
+    '3️⃣ *Preferred tenure* (1-7 years)\n\n' +
+    '💡 Example:\n`15 lakh car, 8 lakh outstanding, 5 years`\n\n' +
+    `📌 _Rate: ${REFINANCE_ROI}% p.a. onwards_`
   );
 
   return;
@@ -5956,14 +5956,14 @@ if (selectedId === 'BTN_LOAN_BT') {
 
   await waSendText(
     from,
-    '💱 *Balance Transfer — Save on Interest*\n\n' +
-    'Transfer your existing car loan to a lower interest rate.\n\n' +
-    'Please share:\n' +
-    '1. *Outstanding loan amount*\n' +
-    '2. *Current interest rate*\n' +
-    '3. *Remaining tenure* (in months)\n\n' +
-    'Example:\n`8 lakh at 12% remaining 36 months`\n\n' +
-    `_Our BT rate starts from ${BT_ROI}% p.a._`
+    '💱 *Balance Transfer* 🔀💸\n\n' +
+    '📉 Transfer your existing car loan to a *better rate* & save!\n\n' +
+    '📝 Please share:\n' +
+    '1️⃣ *Outstanding loan amount*\n' +
+    '2️⃣ *Current interest rate*\n' +
+    '3️⃣ *Remaining tenure* (in months)\n\n' +
+    '💡 Example:\n`8 lakh at 15% remaining 36 months`\n\n' +
+    `📌 _BT rate: ${BT_ROI}% p.a. onwards_`
   );
 
   return;
@@ -5975,14 +5975,14 @@ if (selectedId === 'BTN_LOAN_TOPUP') {
 
   await waSendText(
     from,
-    '➕ *Top-up Loan on Existing Car*\n\n' +
-    'Get additional financing up to *150% LTV* of your original loan.\n\n' +
-    'Please share:\n' +
-    '1. *Original loan amount*\n' +
-    '2. *Outstanding balance*\n' +
-    '3. *Additional amount needed*\n\n' +
-    'Example:\n`Original 12 lakh, outstanding 6 lakh, need 4 lakh more`\n\n' +
-    `_Top-up rate: ${TOPUP_ROI}% p.a._`
+    '➕ *Top-up Loan on Existing Car* 🚘💵\n\n' +
+    '🏦 Get additional financing up to *150% LTV* of your original loan!\n\n' +
+    '📝 Please share:\n' +
+    '1️⃣ *Original loan amount*\n' +
+    '2️⃣ *Outstanding balance*\n' +
+    '3️⃣ *Additional amount needed*\n\n' +
+    '💡 Example:\n`Original 12 lakh, outstanding 6 lakh, need 4 lakh more`\n\n' +
+    `📌 _Top-up rate: ${TOPUP_ROI}% p.a. onwards_`
   );
 
   return;
@@ -5994,13 +5994,13 @@ if (selectedId === 'BTN_LOAN_ELIG') {
 
   await waSendText(
     from,
-    '📊 *Loan Eligibility Calculator*\n\n' +
-    'Check how much car loan you qualify for.\n\n' +
-    'Please share:\n' +
-    '1. *Monthly income*\n' +
-    '2. *Existing EMI obligations* (if any)\n\n' +
-    'Example:\n`Income 80000, existing EMI 15000`\n\n' +
-    '_Based on 50% FOIR (Fixed Obligation to Income Ratio)_'
+    '📊 *Loan Eligibility Calculator* 🏦✅\n\n' +
+    '🔍 Check how much car loan you qualify for!\n\n' +
+    '📝 Please share:\n' +
+    '1️⃣ *Monthly income*\n' +
+    '2️⃣ *Existing EMI obligations* (if any)\n\n' +
+    '💡 Example:\n`Income 80000, existing EMI 15000`\n\n' +
+    '📌 _Based on 50% FOIR (Fixed Obligation to Income Ratio)_'
   );
 
   return;
@@ -6225,20 +6225,20 @@ if (
   const oldEmi = calcEmiSimple(outstandingAmt, 12, months); // assume old rate ~12%
 
   const lines = [
-    '🔄 *Refinance Analysis*',
+    '🔄 *Refinance Analysis* 📊',
     '',
-    `Car Ex-Showroom: ₹ *${fmtMoney(originalPrice)}*`,
-    `Outstanding Loan: ₹ *${fmtMoney(outstandingAmt)}*`,
+    `🚗 Car Ex-Showroom: ₹ *${fmtMoney(originalPrice)}*`,
+    `💳 Outstanding Loan: ₹ *${fmtMoney(outstandingAmt)}*`,
     '',
-    `*Max Refinance Eligible (200%):* ₹ *${fmtMoney(maxEligible)}*`,
-    `*Available Cash-Out:* ₹ *${fmtMoney(availableTopUp)}*`,
+    `🏦 *Max Refinance Eligible (200%):* ₹ *${fmtMoney(maxEligible)}*`,
+    `💰 *Available Cash-Out:* ₹ *${fmtMoney(availableTopUp)}*`,
     '',
-    `*New EMI @ ${REFINANCE_ROI}%:* ₹ *${fmtMoney(newEmi)}* / month`,
-    `Tenure: *${months} months*`,
+    `📌 *New EMI @ ${REFINANCE_ROI}%:* ₹ *${fmtMoney(newEmi)}* / month`,
+    `🗓️ Tenure: *${months} months*`,
     '',
-    '✅ *Loan approval possible in ~30 minutes (T&Cs apply)*',
+    '⚡ *Loan approval possible in ~30 minutes (T&Cs apply)*',
     '',
-    '_Reply "Talk to agent" to connect with our finance advisor._'
+    '👤 _Reply "Talk to agent" to connect with our finance advisor._'
   ];
 
   await waSendText(from, lines.join('\n'));
@@ -6288,20 +6288,20 @@ if (
   const totalSaving = monthlySaving * remainingMonths;
 
   const lines = [
-    '💱 *Balance Transfer Comparison*',
+    '💱 *Balance Transfer Comparison* 📊',
     '',
-    `Outstanding Loan: ₹ *${fmtMoney(outstandingAmt)}*`,
-    `Remaining Tenure: *${remainingMonths} months*`,
+    `💳 Outstanding Loan: ₹ *${fmtMoney(outstandingAmt)}*`,
+    `🗓️ Remaining Tenure: *${remainingMonths} months*`,
     '',
-    `*Current Rate:* ${currentRate}% → EMI: ₹ *${fmtMoney(oldEmi)}*`,
-    `*New BT Rate:* ${BT_ROI}% → EMI: ₹ *${fmtMoney(newEmi)}*`,
+    `🔴 *Current Rate:* ${currentRate}% → EMI: ₹ *${fmtMoney(oldEmi)}*`,
+    `🟢 *New BT Rate:* ${BT_ROI}% → EMI: ₹ *${fmtMoney(newEmi)}*`,
     '',
-    `*Monthly Saving:* ₹ *${fmtMoney(monthlySaving)}*`,
-    `*Total Saving:* ₹ *${fmtMoney(totalSaving)}* over ${remainingMonths} months`,
+    `💸 *Monthly Saving:* ₹ *${fmtMoney(monthlySaving)}*`,
+    `🎉 *Total Saving:* ₹ *${fmtMoney(totalSaving)}* over ${remainingMonths} months`,
     '',
-    '✅ *Balance transfer approval in ~24 hours (T&Cs apply)*',
+    '⚡ *Balance transfer approval in ~24 hours (T&Cs apply)*',
     '',
-    '_Reply "Talk to agent" to connect with our finance advisor._'
+    '👤 _Reply "Talk to agent" to connect with our finance advisor._'
   ];
 
   await waSendText(from, lines.join('\n'));
@@ -6350,11 +6350,11 @@ if (
   if (combinedLoan > maxLTV) {
     await waSendText(
       from,
-      `*Top-up Limit Exceeded*\n\n` +
-      `Original Loan: ₹ ${fmtMoney(originalAmt)}\n` +
-      `Max LTV (150%): ₹ ${fmtMoney(maxLTV)}\n` +
-      `Outstanding + Top-up: ₹ ${fmtMoney(combinedLoan)}\n\n` +
-      `The combined amount exceeds the 150% LTV limit. Maximum additional top-up available: ₹ *${fmtMoney(Math.max(0, maxLTV - outstandingAmt))}*`
+      `⚠️ *Top-up Limit Exceeded*\n\n` +
+      `🚗 Original Loan: ₹ ${fmtMoney(originalAmt)}\n` +
+      `🏦 Max LTV (150%): ₹ ${fmtMoney(maxLTV)}\n` +
+      `💳 Outstanding + Top-up: ₹ ${fmtMoney(combinedLoan)}\n\n` +
+      `❌ The combined amount exceeds the 150% LTV limit.\n✅ Maximum additional top-up available: ₹ *${fmtMoney(Math.max(0, maxLTV - outstandingAmt))}*`
     );
     setLastService(from, 'LOAN');
     return;
@@ -6364,21 +6364,21 @@ if (
   const combinedEmi = calcEmiSimple(combinedLoan, TOPUP_ROI, tenure);
 
   const lines = [
-    '➕ *Top-up Loan Analysis*',
+    '➕ *Top-up Loan Analysis* 📊',
     '',
-    `Original Loan: ₹ *${fmtMoney(originalAmt)}*`,
-    `Outstanding: ₹ *${fmtMoney(outstandingAmt)}*`,
-    `Top-up Amount: ₹ *${fmtMoney(topupAmt)}*`,
+    `🚗 Original Loan: ₹ *${fmtMoney(originalAmt)}*`,
+    `💳 Outstanding: ₹ *${fmtMoney(outstandingAmt)}*`,
+    `💵 Top-up Amount: ₹ *${fmtMoney(topupAmt)}*`,
     '',
-    `*Combined Loan:* ₹ *${fmtMoney(combinedLoan)}*`,
-    `*Max Allowed (150% LTV):* ₹ *${fmtMoney(maxLTV)}*`,
+    `🏦 *Combined Loan:* ₹ *${fmtMoney(combinedLoan)}*`,
+    `📏 *Max Allowed (150% LTV):* ₹ *${fmtMoney(maxLTV)}*`,
     '',
-    `*New EMI @ ${TOPUP_ROI}%:* ₹ *${fmtMoney(combinedEmi)}* / month`,
-    `Tenure: *${tenure} months*`,
+    `📌 *New EMI @ ${TOPUP_ROI}%:* ₹ *${fmtMoney(combinedEmi)}* / month`,
+    `🗓️ Tenure: *${tenure} months*`,
     '',
-    '✅ *Approval possible in ~24 hours (T&Cs apply)*',
+    '⚡ *Approval possible in ~24 hours (T&Cs apply)*',
     '',
-    '_Reply "Talk to agent" to connect with our finance advisor._'
+    '👤 _Reply "Talk to agent" to connect with our finance advisor._'
   ];
 
   await waSendText(from, lines.join('\n'));
@@ -6437,9 +6437,9 @@ if (
     await waSendText(
       from,
       '⚠️ *Eligibility Alert*\n\n' +
-      `Monthly Income: ₹ ${fmtMoney(income)}\n` +
-      `Existing EMIs: ₹ ${fmtMoney(existingEMI)}\n\n` +
-      'Your existing obligations exceed the 50% FOIR limit. Please reduce existing EMIs or increase income to qualify.'
+      `💼 Monthly Income: ₹ ${fmtMoney(income)}\n` +
+      `💳 Existing EMIs: ₹ ${fmtMoney(existingEMI)}\n\n` +
+      '❌ Your existing obligations exceed the 50% FOIR limit.\n💡 Please reduce existing EMIs or increase income to qualify.'
     );
     setLastService(from, 'LOAN');
     return;
@@ -6456,21 +6456,21 @@ if (
   const maxUsedCarLoan = maxLoanFromEMI(maxEmiCapacity, USED_CAR_ROI_INTERNAL, 60); // 5 years
 
   const lines = [
-    '📊 *Loan Eligibility Report*',
+    '📊 *Loan Eligibility Report* 🏦',
     '',
-    `Monthly Income: ₹ *${fmtMoney(income)}*`,
-    `Existing EMIs: ₹ *${fmtMoney(existingEMI)}*`,
-    `Max EMI Capacity (50% FOIR): ₹ *${fmtMoney(Math.round(maxEmiCapacity))}*`,
+    `💼 Monthly Income: ₹ *${fmtMoney(income)}*`,
+    `💳 Existing EMIs: ₹ *${fmtMoney(existingEMI)}*`,
+    `📌 Max EMI Capacity (50% FOIR): ₹ *${fmtMoney(Math.round(maxEmiCapacity))}*`,
     '',
-    `*New Car Loan (@ ${NEW_CAR_ROI}%, 7 yrs):*`,
-    `  Eligible up to ₹ *${fmtMoney(maxNewCarLoan)}*`,
+    `🚗 *New Car Loan (@ ${NEW_CAR_ROI}%, 7 yrs):*`,
+    `  ✅ Eligible up to ₹ *${fmtMoney(maxNewCarLoan)}*`,
     '',
-    `*Used Car Loan (@ ${USED_CAR_ROI_VISIBLE}%, 5 yrs):*`,
-    `  Eligible up to ₹ *${fmtMoney(maxUsedCarLoan)}*`,
+    `🚘 *Used Car Loan (@ ${USED_CAR_ROI_VISIBLE}%, 5 yrs):*`,
+    `  ✅ Eligible up to ₹ *${fmtMoney(maxUsedCarLoan)}*`,
     '',
-    '✅ *Pre-approval available — share documents to proceed.*',
+    '🎉 *Pre-approval available — share documents to proceed!*',
     '',
-    '_Reply "Talk to agent" to connect with our finance advisor._'
+    '👤 _Reply "Talk to agent" to connect with our finance advisor._'
   ];
 
   await waSendText(from, lines.join('\n'));
@@ -6770,9 +6770,9 @@ case 'SRV_LOAN':
     type: 'interactive',
     interactive: {
       type: 'list',
-      header: { type: 'text', text: 'Loan & Finance' },
-      body: { text: 'Choose a loan product or tool:' },
-      footer: { text: 'MR.CAR Finance Solutions' },
+      header: { type: 'text', text: '💰 Loan & Finance' },
+      body: { text: '🏦 Choose a loan product or tool 👇' },
+      footer: { text: '🚗 MR.CAR Finance Solutions' },
       action: {
         button: 'View Options',
         sections: [
@@ -6804,14 +6804,14 @@ case 'BTN_LOAN_REFINANCE':
   setLastService(from, 'LOAN_REFINANCE');
   await waSendText(
     from,
-    '🔄 *Refinance Your Car Loan*\n\n' +
-    'Refinance up to *200%* of your original loan amount at competitive rates.\n\n' +
-    'Please share the following details:\n' +
-    '1. *Ex-showroom price* of your car\n' +
-    '2. *Outstanding loan amount*\n' +
-    '3. *Preferred tenure* (1-7 years)\n\n' +
-    'Example:\n`15 lakh car, 8 lakh outstanding, 5 years`\n\n' +
-    `_Current refinance rate: ${REFINANCE_ROI}% p.a._`
+    '🔄 *Refinance Your Car Loan* 🚗💰\n\n' +
+    '✨ Refinance up to *200%* of your original loan amount!\n\n' +
+    '📝 Please share the following:\n' +
+    '1️⃣ *Ex-showroom price* of your car\n' +
+    '2️⃣ *Outstanding loan amount*\n' +
+    '3️⃣ *Preferred tenure* (1-7 years)\n\n' +
+    '💡 Example:\n`15 lakh car, 8 lakh outstanding, 5 years`\n\n' +
+    `📌 _Rate: ${REFINANCE_ROI}% p.a. onwards_`
   );
   return;
 
@@ -6820,14 +6820,14 @@ case 'BTN_LOAN_BT':
   setLastService(from, 'LOAN_BT');
   await waSendText(
     from,
-    '💱 *Balance Transfer — Save on Interest*\n\n' +
-    'Transfer your existing car loan to a lower interest rate.\n\n' +
-    'Please share:\n' +
-    '1. *Outstanding loan amount*\n' +
-    '2. *Current interest rate*\n' +
-    '3. *Remaining tenure* (in months)\n\n' +
-    'Example:\n`8 lakh at 12% remaining 36 months`\n\n' +
-    `_Our BT rate starts from ${BT_ROI}% p.a._`
+    '💱 *Balance Transfer* 🔀💸\n\n' +
+    '📉 Transfer your existing car loan to a *better rate* & save!\n\n' +
+    '📝 Please share:\n' +
+    '1️⃣ *Outstanding loan amount*\n' +
+    '2️⃣ *Current interest rate*\n' +
+    '3️⃣ *Remaining tenure* (in months)\n\n' +
+    '💡 Example:\n`8 lakh at 15% remaining 36 months`\n\n' +
+    `📌 _BT rate: ${BT_ROI}% p.a. onwards_`
   );
   return;
 
@@ -6836,14 +6836,14 @@ case 'BTN_LOAN_TOPUP':
   setLastService(from, 'LOAN_TOPUP');
   await waSendText(
     from,
-    '➕ *Top-up Loan on Existing Car*\n\n' +
-    'Get additional financing up to *150% LTV* of your original loan.\n\n' +
-    'Please share:\n' +
-    '1. *Original loan amount*\n' +
-    '2. *Outstanding balance*\n' +
-    '3. *Additional amount needed*\n\n' +
-    'Example:\n`Original 12 lakh, outstanding 6 lakh, need 4 lakh more`\n\n' +
-    `_Top-up rate: ${TOPUP_ROI}% p.a._`
+    '➕ *Top-up Loan on Existing Car* 🚘💵\n\n' +
+    '🏦 Get additional financing up to *150% LTV* of your original loan!\n\n' +
+    '📝 Please share:\n' +
+    '1️⃣ *Original loan amount*\n' +
+    '2️⃣ *Outstanding balance*\n' +
+    '3️⃣ *Additional amount needed*\n\n' +
+    '💡 Example:\n`Original 12 lakh, outstanding 6 lakh, need 4 lakh more`\n\n' +
+    `📌 _Top-up rate: ${TOPUP_ROI}% p.a. onwards_`
   );
   return;
 
@@ -6852,13 +6852,13 @@ case 'BTN_LOAN_ELIG':
   setLastService(from, 'LOAN_ELIG');
   await waSendText(
     from,
-    '📊 *Loan Eligibility Calculator*\n\n' +
-    'Check how much car loan you qualify for.\n\n' +
-    'Please share:\n' +
-    '1. *Monthly income*\n' +
-    '2. *Existing EMI obligations* (if any)\n\n' +
-    'Example:\n`Income 80000, existing EMI 15000`\n\n' +
-    '_Based on 50% FOIR (Fixed Obligation to Income Ratio)_'
+    '📊 *Loan Eligibility Calculator* 🏦✅\n\n' +
+    '🔍 Check how much car loan you qualify for!\n\n' +
+    '📝 Please share:\n' +
+    '1️⃣ *Monthly income*\n' +
+    '2️⃣ *Existing EMI obligations* (if any)\n\n' +
+    '💡 Example:\n`Income 80000, existing EMI 15000`\n\n' +
+    '📌 _Based on 50% FOIR (Fixed Obligation to Income Ratio)_'
   );
   return;
 
@@ -6868,15 +6868,15 @@ case 'BTN_LOAN_NEW':
 
   await waSendText(
     from,
-    '🚗 *New Car Loan*\n\n' +
-    'Please share:\n' +
-    '• *Loan amount*\n' +
-    '• *Tenure* (up to 7 years)\n\n' +
-    'You can type naturally, for example:\n' +
+    '🚗 *New Car Loan* 💰\n\n' +
+    '📝 Please share:\n' +
+    '1️⃣ *Loan amount*\n' +
+    '2️⃣ *Tenure* (up to 7 years)\n\n' +
+    '💡 Type naturally, for example:\n' +
     '• `10 lakh 3 years`\n' +
     '• `₹15,00,000 60`\n' +
     '• `1500000 5`\n\n' +
-    '_Interest rate is applied automatically._'
+    '📌 _Interest rate @ 8.1% applied automatically_'
   );
 
   await waSendRaw({
@@ -6885,12 +6885,12 @@ case 'BTN_LOAN_NEW':
     type: 'interactive',
     interactive: {
       type: 'button',
-      body: { text: 'Choose EMI type:' },
+      body: { text: '📋 Choose EMI type 👇' },
       action: {
         buttons: [
-          { type: 'reply', reply: { id: 'BTN_NEW_EMI_NORMAL', title: 'Normal EMI' } },
-          { type: 'reply', reply: { id: 'BTN_NEW_EMI_BULLET', title: 'Bullet EMI' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: 'Loan Documents' } }
+          { type: 'reply', reply: { id: 'BTN_NEW_EMI_NORMAL', title: '✅ Normal EMI' } },
+          { type: 'reply', reply: { id: 'BTN_NEW_EMI_BULLET', title: '🔶 Bullet EMI' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: '📄 Documents' } }
         ]
       }
     }
@@ -6903,13 +6903,13 @@ case 'BTN_LOAN_NEW':
 case 'BTN_NEW_EMI_NORMAL':
   await waSendText(
     from,
-    '✅ *Normal EMI — New Car*\n\n' +
-    'Send *loan amount + tenure* in any format.\n\n' +
-    'Examples:\n' +
+    '✅ *Normal EMI — New Car* 🚗\n\n' +
+    '📝 Send *loan amount + tenure* in any format.\n\n' +
+    '💡 Examples:\n' +
     '• `10 lakh 5 years`\n' +
     '• `₹12,00,000 60`\n' +
     '• `1200000 5`\n\n' +
-    '_EMI will be calculated automatically at 8.1%._'
+    '📌 _EMI calculated automatically @ 8.1%_'
   );
   return;
 
@@ -6918,14 +6918,14 @@ case 'BTN_NEW_EMI_NORMAL':
 case 'BTN_NEW_EMI_BULLET':
   await waSendText(
     from,
-    '🟡 *Bullet EMI — New Car*\n\n' +
-    'Send *loan amount + tenure* in any format.\n\n' +
-    'Examples:\n' +
+    '🔶 *Bullet EMI — New Car* 🚗\n\n' +
+    '📝 Send *loan amount + tenure* in any format.\n\n' +
+    '💡 Examples:\n' +
     '• `10 lakh 3 years`\n' +
     '• `₹10,00,000 36`\n\n' +
     'ℹ️ *Bullet EMI structure:*\n' +
-    '• EMI is paid every month\n' +
-    '• Every *12th EMI* has a higher principal component'
+    '• 💵 EMI is paid every month\n' +
+    '• 📌 Every *12th EMI* has a higher principal component'
   );
   return;
 
@@ -6936,15 +6936,15 @@ case 'BTN_LOAN_USED':
 
   await waSendText(
     from,
-    '🚘 *Used Car Loan*\n\n' +
-    'Please share:\n' +
-    '• *Loan amount*\n' +
-    '• *Tenure* (up to 7 years)\n\n' +
-    'Examples:\n' +
+    '🚘 *Used Car Loan* 💰\n\n' +
+    '📝 Please share:\n' +
+    '1️⃣ *Loan amount*\n' +
+    '2️⃣ *Tenure* (up to 7 years)\n\n' +
+    '💡 Examples:\n' +
     '• `6 lakh 4 years`\n' +
     '• `₹6,00,000 48`\n' +
     '• `600000 4`\n\n' +
-    '_Interest rate is applied automatically._'
+    '📌 _Interest rate @ 9.99% applied automatically_'
   );
 
   await waSendRaw({
@@ -6953,13 +6953,12 @@ case 'BTN_LOAN_USED':
     type: 'interactive',
     interactive: {
       type: 'button',
-      body: { text: 'Choose EMI type:' },
+      body: { text: '📋 Choose EMI type 👇' },
       action: {
         buttons: [
-          { type: 'reply', reply: { id: 'BTN_USED_EMI_NORMAL', title: 'Normal EMI' } },
-          { type: 'reply', reply: { id: 'BTN_USED_EMI_BULLET', title: 'Bullet EMI' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: 'Loan Documents' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_ELIGIBILITY', title: 'Eligibility' } }
+          { type: 'reply', reply: { id: 'BTN_USED_EMI_NORMAL', title: '✅ Normal EMI' } },
+          { type: 'reply', reply: { id: 'BTN_USED_EMI_BULLET', title: '🔶 Bullet EMI' } },
+          { type: 'reply', reply: { id: 'BTN_LOAN_DOCS', title: '📄 Documents' } }
         ]
       }
     }
@@ -6972,12 +6971,12 @@ case 'BTN_LOAN_USED':
 case 'BTN_USED_EMI_NORMAL':
   await waSendText(
     from,
-    '✅ *Normal EMI — Used Car*\n\n' +
-    'Send *loan amount + tenure* in any format.\n\n' +
-    'Examples:\n' +
+    '✅ *Normal EMI — Used Car* 🚘\n\n' +
+    '📝 Send *loan amount + tenure* in any format.\n\n' +
+    '💡 Examples:\n' +
     '• `6 lakh 4 years`\n' +
     '• `₹6,00,000 48`\n\n' +
-    '_EMI will be calculated automatically (shown @ 9.99%)._'
+    '📌 _EMI calculated automatically @ 9.99%_'
   );
   return;
 
@@ -6986,14 +6985,14 @@ case 'BTN_USED_EMI_NORMAL':
 case 'BTN_USED_EMI_BULLET':
   await waSendText(
     from,
-    '🟡 *Bullet EMI — Used Car*\n\n' +
-    'Send *loan amount + tenure* in any format.\n\n' +
-    'Examples:\n' +
+    '🔶 *Bullet EMI — Used Car* 🚘\n\n' +
+    '📝 Send *loan amount + tenure* in any format.\n\n' +
+    '💡 Examples:\n' +
     '• `6 lakh 3 years`\n' +
     '• `₹6,00,000 36`\n\n' +
     'ℹ️ *Bullet EMI structure:*\n' +
-    '• EMI is paid every month\n' +
-    '• Every *12th EMI* has a higher principal component'
+    '• 💵 EMI is paid every month\n' +
+    '• 📌 Every *12th EMI* has a higher principal component'
   );
   return;
 
@@ -7002,12 +7001,12 @@ case 'BTN_USED_EMI_BULLET':
 case 'BTN_LOAN_DOCS':
   await waSendText(
     from,
-    '📄 *Loan Documents*\n\n' +
-    '• PAN & Aadhaar\n' +
-    '• 3–6 months bank statement\n' +
-    '• Salary slips / ITRs\n' +
-    '• Address proof\n\n' +
-    'Share *city + profile (salaried / self-employed)* for an exact checklist.'
+    '📄 *Loan Documents Required* 📋\n\n' +
+    '🪪 PAN & Aadhaar\n' +
+    '🏦 3–6 months bank statement\n' +
+    '💼 Salary slips / ITRs\n' +
+    '🏠 Address proof\n\n' +
+    '💡 Share *city + profile (salaried / self-employed)* for an exact checklist.'
   );
   return;
 
@@ -7133,9 +7132,9 @@ if (/^(loan|emi|finance|car\s*loan|loan\s*options?|emi\s*calculator?|refinance|b
     type: 'interactive',
     interactive: {
       type: 'list',
-      header: { type: 'text', text: 'Loan & Finance' },
-      body: { text: 'Choose a loan product or tool:' },
-      footer: { text: 'MR.CAR Finance Solutions' },
+      header: { type: 'text', text: '💰 Loan & Finance' },
+      body: { text: '🏦 Choose a loan product or tool 👇' },
+      footer: { text: '🚗 MR.CAR Finance Solutions' },
       action: {
         button: 'View Options',
         sections: [
