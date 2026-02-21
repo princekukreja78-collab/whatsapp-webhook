@@ -2584,11 +2584,11 @@ async function trySmartNewCarIntent(msgText, to) {
 
   if (panSvc === 'PAN_INDIA_PROMPT') {
     const reply = String(msgText || '').trim().toLowerCase();
-    const isYes = reply === 'yes' || reply === 'y';
-    const isNo  = reply === 'no'  || reply === 'n';
+    const isYes = reply === 'yes' || reply === 'y' || reply === 'yes, compare';
+    const isNo  = reply === 'no'  || reply === 'n' || reply === 'no, thanks';
 
-    // HARD GUARD: accept ONLY pure YES / NO
-    if (reply.includes(' ') || reply.length > 3) {
+    // HARD GUARD: accept ONLY recognized replies
+    if (!isYes && !isNo) {
       await waSendText(to, 'Please reply with *YES* or *NO* only.');
       return true; // 🔒 HARD STOP
     }
@@ -4736,10 +4736,21 @@ global.panIndiaPrompt.set(to, {
 
 await waSendText(to, lines.join('\n'));
 
-await waSendText(
+await waSendRaw({
+  messaging_product: 'whatsapp',
   to,
-  'Would you like a *Pan-India on-road price comparison* for this variant?\n\nReply *YES* or *NO*.'
-);
+  type: 'interactive',
+  interactive: {
+    type: 'button',
+    body: { text: 'Would you like a *Pan-India on-road price comparison* for this variant?' },
+    action: {
+      buttons: [
+        { type: 'reply', reply: { id: 'BTN_PANIND_YES', title: 'Yes, Compare' } },
+        { type: 'reply', reply: { id: 'BTN_PANIND_NO', title: 'No, Thanks' } }
+      ]
+    }
+  }
+});
 
 setLastService(to, 'PAN_INDIA_PROMPT');
 return true;
@@ -5420,6 +5431,44 @@ if (selectedId === 'SRV_INSURANCE' || (msgText && /^\s*insurance\s*$/i.test(msgT
       }
     }
   });
+  return;
+}
+
+// ================= PAN-INDIA YES / NO BUTTON HANDLERS =================
+if (selectedId === 'BTN_PANIND_YES') {
+  const ctx = global.panIndiaPrompt && global.panIndiaPrompt.get(from);
+  if (!ctx || !ctx.row || !ctx.header) {
+    await waSendText(from, 'Sorry, I could not retrieve the variant again. Please ask for the quote once more.');
+    setLastService(from, 'NEW');
+    return;
+  }
+  const aggregate = extractPanIndiaPricesFromRow(ctx.row, ctx.header);
+  const states = Object.keys(aggregate || {});
+  if (!states.length) {
+    await waSendText(from, 'State-wise pricing is not available for this variant.');
+    global.panIndiaPrompt.delete(from);
+    setLastService(from, 'NEW');
+    return;
+  }
+  states.sort((a, b) => aggregate[a] - aggregate[b]);
+  const out = [];
+  out.push(`*${ctx.title} — Pan-India On-Road Pricing*`);
+  out.push('');
+  out.push(`🔽 *Lowest:* ${states[0]} — ₹ ${fmtMoney(aggregate[states[0]])}`);
+  out.push(`🔼 *Highest:* ${states[states.length - 1]} — ₹ ${fmtMoney(aggregate[states[states.length - 1]])}`);
+  out.push('');
+  out.push('*State-wise prices:*');
+  states.forEach(st => { out.push(`• *${st}* → ₹ ${fmtMoney(aggregate[st])}`); });
+  await waSendText(from, out.join('\n'));
+  global.panIndiaPrompt.delete(from);
+  setLastService(from, 'NEW');
+  return;
+}
+
+if (selectedId === 'BTN_PANIND_NO') {
+  await waSendText(from, 'No problem 👍 Let me know if you want EMI options, specs, or another quote.');
+  if (global.panIndiaPrompt) global.panIndiaPrompt.delete(from);
+  setLastService(from, 'NEW');
   return;
 }
 
