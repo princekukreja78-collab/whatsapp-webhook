@@ -653,7 +653,8 @@ async function autoIngest(enriched = {}) {
   const baseEnv = (process.env.CRM_URL || '').trim();
   const baseUrl = (baseEnv || `http://127.0.0.1:${portEnv}`).replace(/\/+$/, '');
 
-  const url = `${baseUrl}/crm/ingest`;
+  // Guard against CRM_URL already containing /crm/ingest
+  const url = baseUrl.endsWith('/crm/ingest') ? baseUrl : `${baseUrl}/crm/ingest`;
 
   try {
     const res = await fetch(url, {
@@ -4726,6 +4727,7 @@ if (isSingleQuote) {
 }
 
 // ---- PAN-INDIA FOLLOW-UP CONTEXT (SAFE) ----
+if (!global.panIndiaPrompt) global.panIndiaPrompt = new Map();
 global.panIndiaPrompt.set(to, {
   row: best.row,
   header: tables[best.brand]?.header || [],
