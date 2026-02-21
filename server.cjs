@@ -3250,10 +3250,96 @@ return false;
 }
 
 // ---------------- tryQuickNewCarQuote (FULL REWRITE) ----------------
-async function tryQuickNewCarQuote(msgText, to) {
+async function tryQuickNewCarQuote(msgText, to, exactMatch) {
   try {
-console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText);
+console.log('DEBUG_FLOW: ENTER tryQuickNewCarQuote', msgText, exactMatch ? '(EXACT MATCH)' : '');
 if (!global.lastVariantList) global.lastVariantList = new Map();
+
+  // ---------- EXACT MATCH SHORTCUT (from serial selection) ----------
+  if (exactMatch && exactMatch.row) {
+    const best = exactMatch;
+    const loanAmt =
+      Number(String(best.exShow || '').replace(/[,₹\s]/g, '')) ||
+      Number(String(best.onroad || '').replace(/[,₹\s]/g, '')) ||
+      0;
+    const roi = Number(process.env.NEW_CAR_ROI || 8.1);
+    const emi60 = loanAmt ? calcEmiSimple(loanAmt, roi, 60) : 0;
+    const mdl = best.idxModel >= 0 ? String(best.row[best.idxModel] || '').toUpperCase() : '';
+    const varr = best.idxVariant >= 0 ? String(best.row[best.idxVariant] || '').toUpperCase() : '';
+    const fuelStr = best.fuel ? String(best.fuel).toUpperCase() : '';
+    const stateMatch = best.stateMatch || 'DELHI';
+    const profile = best.profile || 'INDIVIDUAL';
+
+    const lines = [];
+    lines.push(`*${best.brand}* ${mdl} ${varr}`);
+    lines.push(`📍 *${String(stateMatch).toUpperCase()}* • *${String(profile).toUpperCase()}*`);
+    if (fuelStr) lines.push(`*Fuel:* ${fuelStr}`);
+    if (best.exShow) lines.push(`*Ex-Showroom:* ₹ ${fmtMoney(best.exShow)}`);
+    if (best.onroad) lines.push(`*Best Offer On-Road:* ₹ *${fmtMoney(best.onroad)}*`);
+
+    if (loanAmt > 0) {
+      lines.push('');
+      lines.push('*🔹 Loan & EMI Options*');
+      lines.push('');
+      lines.push('*OPTION 1 – NORMAL EMI*');
+      lines.push(`Loan Amount: ₹ ${fmtMoney(loanAmt)}`);
+      lines.push(`Tenure: 60 months @ ${roi}% p.a.`);
+      lines.push(`Approx EMI: ₹ *${fmtMoney(emi60)}*`);
+
+      try {
+        const bulletPct = 0.25;
+        const bulletSim = simulateBulletPlan({ amount: loanAmt, rate: roi, months: 60, bulletPct });
+        const bulletEmi = bulletSim?.monthly_emi || bulletSim?.monthlyEmi || bulletSim?.emi || null;
+        const bulletAmt = bulletSim?.bullet_amount || bulletSim?.bulletAmount || Math.round(loanAmt * bulletPct);
+        if (bulletEmi && bulletAmt) {
+          const perBullet = Math.round(bulletAmt / 5);
+          const bulletSchedule = [12, 24, 36, 48, 60].map(m => `₹ ${fmtMoney(perBullet)} at month ${m}`).join('\n');
+          lines.push('');
+          lines.push('*OPTION 2 – BULLET EMI (25%)*');
+          lines.push(`Monthly EMI (approx): ₹ *${fmtMoney(bulletEmi)}*`);
+          lines.push(`Bullet total: ₹ *${fmtMoney(bulletAmt)}*`);
+          lines.push('');
+          lines.push('*Bullets:*');
+          lines.push(bulletSchedule);
+        }
+      } catch (e) { if (DEBUG) console.warn('EXACT MATCH BULLET EMI ERROR:', e?.message); }
+
+      lines.push('');
+      lines.push('_EMI figures are indicative. Final approval subject to bank terms._');
+      lines.push('*Terms & Conditions Apply ✅*');
+    }
+
+    lines.push('\nReply *SPEC model* for features or *EMI* for finance.');
+
+    if (!global.panIndiaPrompt) global.panIndiaPrompt = new Map();
+    let exactHeader = [];
+    try { const t = await loadPricingFromSheets(); exactHeader = t[best.brand]?.header || []; } catch(e) {}
+    global.panIndiaPrompt.set(to, {
+      row: best.row,
+      header: exactHeader,
+      title: `${best.brand} ${mdl} ${varr}`
+    });
+
+    await waSendText(to, lines.join('\n'));
+
+    await waSendRaw({
+      messaging_product: 'whatsapp', to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: 'Would you like a *Pan-India on-road price comparison* for this variant?' },
+        action: {
+          buttons: [
+            { type: 'reply', reply: { id: 'BTN_PANIND_YES', title: 'Yes, Compare' } },
+            { type: 'reply', reply: { id: 'BTN_PANIND_NO', title: 'No, Thanks' } }
+          ]
+        }
+      }
+    });
+
+    setLastService(to, 'PAN_INDIA_PROMPT');
+    return true;
+  }
 
   // ---------- BUILD RESPONSE LINES (MUST BE FIRST) ----------
   const lines = [];
@@ -4342,7 +4428,7 @@ let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience, stateMatch);
             if (strictModel && mdl && !mdl.toUpperCase().startsWith(strictModel)) continue;
             const varr = String(m.row[m.idxVariant] || '').trim();
             const title = `${mdl} ${varr}`.trim();
-            displayed.push({ title, onroad: m.onroad || 0, brand: m.brand, row: m.row, idxModel: m.idxModel, idxVariant: m.idxVariant });
+            displayed.push({ title, onroad: m.onroad || 0, brand: m.brand, row: m.row, idxModel: m.idxModel, idxVariant: m.idxVariant, matchObj: m });
             out.push(`${displayed.length}) *${title}* – On-road ₹ ${fmtMoney(m.onroad)}`);
             if (displayed.length >= VARIANT_LIST_LIMIT) break;
           }
@@ -4393,7 +4479,7 @@ let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience, stateMatch);
   if (seenTitles.has(title)) continue;
 
   seenTitles.add(title);
-  distinct.push({ title, onroad: m.onroad || 0, brand: m.brand, score: m.score || 0 });
+  distinct.push({ title, onroad: m.onroad || 0, brand: m.brand, score: m.score || 0, matchObj: m });
 
   // ❗ DO NOT FILL FROM OTHER MODELS
   if (distinct.length >= VARIANT_LIST_LIMIT) break;
@@ -4604,7 +4690,7 @@ if (
       const varr = String(m.row[m.idxVariant] || '').trim();
       const title = `${mdl} ${varr}`.trim();
       out.push(`${i + 1}) *${title}*`);
-      displayed2.push({ title, onroad: m.onroad || 0, brand: m.brand, row: m.row, idxModel: m.idxModel, idxVariant: m.idxVariant });
+      displayed2.push({ title, onroad: m.onroad || 0, brand: m.brand, row: m.row, idxModel: m.idxModel, idxVariant: m.idxVariant, matchObj: m });
     });
 
     out.push('');
@@ -5231,8 +5317,14 @@ if (numMatch) {
     const chosen = rec.variants[idx];
     global.lastVariantList.delete(from);
 
-    let queryText = '';
+    // Use exact match object if available (bypasses re-search)
+    if (chosen.matchObj) {
+      await tryQuickNewCarQuote(chosen.title || '', from, chosen.matchObj);
+      return;
+    }
 
+    // Fallback: reconstruct query text and re-search
+    let queryText = '';
     if (chosen.row && typeof chosen.idxModel === 'number') {
       const mdl = chosen.row[chosen.idxModel] || '';
       const varr =
