@@ -376,6 +376,10 @@ You are *MR.CAR* – a professional car evaluator, bodyshop and detailing adviso
 You ONLY see 1–2 photos plus a short text from the customer.
 
 Your goals:
+0) *ALWAYS* identify the car first:
+   - Determine the exact *make, model, generation/facelift, and approximate year range* from the body shape, headlights, grille, tail-lights, alloy design, and proportions.
+   - Example: "This appears to be a *Hyundai Creta SX(O) (2020-2023, 2nd gen)*"
+   - Provide 5-6 bullet highlights about this specific generation (engine options, key features, known strengths/weaknesses, India price range when new).
 1) Identify visible issues or risks (mechanical, body, tires, lights, glass, rust, leaks, etc.).
 2) Comment on *paint condition* and *possible repainting*:
    - Look for colour mismatch between panels.
@@ -385,22 +389,45 @@ Your goals:
    - Unusual panel gaps or alignment.
    - Scratches/buff marks indicating heavy polishing.
    You are NOT a lab – clearly state this is a visual opinion, not 100% proof.
-3) Give *PPF / coating / detailing* advice:
+3) *Tyre Condition* (if visible):
+   - Estimate tread depth visually (good / moderate / low / bald).
+   - Check if all visible tyres are the same brand/pattern or mismatched.
+   - Flag uneven wear patterns (inner/outer edge wear = alignment issue, centre wear = over-inflation, both edges = under-inflation).
+   - Note if spare or space-saver is mounted on a main axle.
+   - Suggest rotation, alignment check, or replacement if needed.
+4) *Aftermarket / Modification Detection*:
+   - Spot non-OEM parts: aftermarket alloys (different spoke design from factory), body kits, lip spoilers, aftermarket exhaust tips, tinted/smoked headlamps or tail-lamps, vinyl wraps on individual panels, aftermarket grille, bull bars, roof rails not factory-fitted.
+   - Note if modifications are tasteful/reversible or could affect warranty/insurance.
+   - Flag any structural modifications (cut fenders, welded brackets) that hurt resale.
+   - Important for resale valuation and insurance claim eligibility.
+5) *Accident History Clues*:
+   - Uneven panel gaps (compare driver side vs passenger side).
+   - Misaligned bumper-to-fender fitment, uneven boot/bonnet shut lines.
+   - Replaced headlamps or tail-lamps (different shade, different brand markings, one foggier than the other).
+   - Visible weld marks, seam-sealer irregularities, or underbody repairs if underside is visible.
+   - Mismatched bolt heads (painted-over vs bare) on hinges/brackets.
+   - Fresh undercoating on only specific areas (hiding repair).
+   - Rate accident likelihood: None apparent / Minor (cosmetic only) / Moderate (panel work) / Major (structural).
+6) Give *PPF / coating / detailing* advice:
    - When is PPF advisable? (highway usage, new car, expensive colour, lots of chips risk)
    - Suggest whether full body PPF, frontal kit (bumper+bonnet+mirrors), or only high-contact areas.
    - Mention cheaper alternatives like ceramic/graphene coating, wax, or only repaint+polish if needed.
-4) Give *upgrade suggestions*:
-   - If interior visible: suggest seat cover type (fabric, PU, leather), colour combos (eg. black–tan, black–red) and possible carbon-fibre or piano-black trim areas (steering, central console, door switch panels).
-   - If exterior mainly visible: suggest alloys, dechroming, black roof, mild spoilers, projector/LED headlamp upgrades – BUT keep it classy, not boy-racer.
-5) If the user text mentions "problem", "noise", "check engine", "warning light", etc., treat that as a service concern and first address that.
+7) Give *upgrade suggestions*:
+   - If interior visible: suggest seat cover type (fabric, PU, leather), colour combos (eg. black-tan, black-red) and possible carbon-fibre or piano-black trim areas (steering, central console, door switch panels).
+   - If exterior mainly visible: suggest alloys, dechroming, black roof, mild spoilers, projector/LED headlamp upgrades -- BUT keep it classy, not boy-racer.
+8) If the user text mentions "problem", "noise", "check engine", "warning light", etc., treat that as a service concern and first address that.
 
 Output format (very important):
-1) *Quick Summary* – 3–4 lines.
-2) *Visible Issues / Faults* – bullet points (or "None clearly visible").
-3) *Repaint / Bodywork Opinion* – explain if any panel looks possibly repainted and WHY, with low/medium/high confidence.
-4) *PPF / Protection Advice* – what you recommend (eg. "frontal kit PPF", "only touch-ups and polish", etc.).
-5) *Interior / Exterior Upgrade Ideas* – concise, 3–5 bullets max.
-6) *Disclaimer* – remind that this is based only on photos and is not a physical inspection.
+1) *Car Identified* -- Make, model, generation/facelift, approx year range. Then 5-6 bullet highlights about this generation (engine, features, strengths, weaknesses, new price range in India).
+2) *Quick Summary* -- 3-4 lines on overall condition.
+3) *Visible Issues / Faults* -- bullet points (or "None clearly visible").
+4) *Repaint / Bodywork Opinion* -- explain if any panel looks possibly repainted and WHY, with low/medium/high confidence.
+5) *Tyre Check* -- tread estimate, brand match, wear pattern, recommendation. If tyres not visible say "Tyres not visible in this photo."
+6) *Aftermarket / Mods* -- list any non-OEM parts spotted and impact on resale/insurance. If none say "Appears fully stock."
+7) *Accident Indicators* -- rate None / Minor / Moderate / Major with reasoning. Be factual, not alarmist.
+8) *PPF / Protection Advice* -- what you recommend.
+9) *Interior / Exterior Upgrade Ideas* -- concise, 3-5 bullets max.
+10) *Disclaimer* -- remind that this is based only on photos and is not a physical inspection.
 `.trim();
 
   const userPrompt = `
@@ -492,6 +519,23 @@ const LOAN_KEYWORDS = [
   // Common variants
   'installment', 'instalment'
 ];
+
+// ---- RTO / On-Road Price Breakup constants ----
+const STATE_ROAD_TAX_RATES = {
+  'DELHI': 0.06, 'HARYANA': 0.06, 'UTTAR PRADESH': 0.08,
+  'HIMACHAL PRADESH': 0.05, 'CHANDIGARH': 0.05, 'MAHARASHTRA': 0.11,
+  'KARNATAKA': 0.11, 'TAMIL NADU': 0.10, 'TELANGANA': 0.12,
+  'RAJASTHAN': 0.08, 'PUNJAB': 0.07, 'GUJARAT': 0.06,
+  'KERALA': 0.07, 'WEST BENGAL': 0.07, 'MADHYA PRADESH': 0.08
+};
+const DEFAULT_ROAD_TAX_RATE = 0.08;
+const HANDLING_CHARGES = 22000;
+
+// ---- Exchange / Trade-in constants ----
+const AVG_KM_PER_YEAR = 12000;
+const KM_ADJUST_PER_10K = 0.02;       // +/-2% per 10,000 km deviation
+const OWNER_DISCOUNT = { 1: 0, 2: 0.08, 3: 0.15 }; // ownership penalty
+const EXCHANGE_RANGE_SPREAD = 0.10;    // +/-10% around midpoint for range display
 
 // ---- Delivery status tracking (CRM + console) ----
 const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
@@ -778,8 +822,12 @@ function getLastService(from) {
 // Multi-step flow states that have tighter timeout (15 min)
 const MULTI_STEP_FLOWS = new Set([
   'LOAN_REFINANCE', 'LOAN_BT', 'LOAN_TOPUP', 'LOAN_ELIG',
-  'INS_COMP', 'INS_TP', 'INS_ZERODEP', 'TEST_DRIVE'
+  'INS_COMP', 'INS_TP', 'INS_ZERODEP', 'TEST_DRIVE',
+  'EXCHANGE_ASK_OLD', 'EXCHANGE_ASK_PRICE', 'EXCHANGE_ASK_KM', 'EXCHANGE_ASK_OWNER', 'EXCHANGE_ASK_NEW'
 ]);
+
+// ---- Exchange context (multi-step) ----
+if (typeof global.exchangeContext === 'undefined') global.exchangeContext = new Map();
 const MULTI_STEP_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 function isFlowStale(from) {
@@ -1145,7 +1193,8 @@ async function waSendListMenu(to) {
     { id: 'SRV_SELL_CAR', title: 'Sell My Car',    description: 'Get best quote for your car' },
     { id: 'SRV_LOAN',     title: 'Loan / Finance', description: 'EMI, Refinance & more' },
     { id: 'SRV_INSURANCE', title: 'Insurance',     description: 'Comprehensive, TP & Zero Dep' },
-    { id: 'SRV_TEST_DRIVE', title: 'Book Test Drive', description: 'Schedule a test drive' }
+    { id: 'SRV_TEST_DRIVE', title: 'Book Test Drive', description: 'Schedule a test drive' },
+    { id: 'SRV_EXCHANGE', title: 'Exchange / Trade-in', description: 'Estimate old car value & upgrade' }
   ];
   const interactive = {
     type: 'list',
@@ -1503,6 +1552,157 @@ function calcEmiSimple(p, annualRatePct, months) {
   const pow = Math.pow(1 + r, months);
   const emi = Math.round(P * r * pow / (pow - 1));
   return emi;
+}
+
+// ---- RTO / On-Road Price Breakup ----
+function calculatePriceBreakup(exShowroom, onRoad, state) {
+  let exShow = Number(exShowroom) || 0;
+  const onRoadVal = Number(onRoad) || 0;
+  if (!exShow && onRoadVal) exShow = Math.round(onRoadVal * 0.85);
+  if (!exShow) return null;
+
+  const stateKey = (state || '').toUpperCase().trim();
+  const taxRate = STATE_ROAD_TAX_RATES[stateKey] || DEFAULT_ROAD_TAX_RATE;
+
+  const roadTax = Math.round(exShow * taxRate);
+  const insurance = Math.round(exShow * (exShow > 1000000 ? 0.03 : 0.025));
+  const tcs = exShow > 1000000 ? Math.round(exShow * 0.01) : 0;
+  const registration = exShow > 2000000 ? 5000 : (exShow > 1000000 ? 3000 : 1500);
+  const handling = HANDLING_CHARGES;
+  const knownTotal = exShow + roadTax + insurance + tcs + registration + handling;
+  const otherCharges = onRoadVal > knownTotal ? (onRoadVal - knownTotal) : 0;
+
+  return { exShowroom: exShow, roadTax, insurance, tcs, registration, handling, otherCharges, total: onRoadVal || (knownTotal + otherCharges) };
+}
+
+function formatPriceBreakup(breakup, title, state) {
+  if (!breakup) return 'Price breakup not available.';
+  const lines = [];
+  lines.push('*' + (title || 'Price Breakup') + '*');
+  if (state) lines.push('📍 *State:* ' + state.toUpperCase());
+  lines.push('');
+  lines.push('📋 *Component-wise Breakup:*');
+  lines.push('');
+  lines.push('🏭 Ex-Showroom: ₹ ' + fmtMoney(breakup.exShowroom));
+  lines.push('🛣️ Road Tax (' + Math.round((STATE_ROAD_TAX_RATES[(state || '').toUpperCase()] || DEFAULT_ROAD_TAX_RATE) * 100) + '%): ₹ ' + fmtMoney(breakup.roadTax));
+  lines.push('🛡️ Insurance (est.): ₹ ' + fmtMoney(breakup.insurance));
+  if (breakup.tcs > 0) lines.push('📑 TCS (1%): ₹ ' + fmtMoney(breakup.tcs));
+  lines.push('📝 Registration: ₹ ' + fmtMoney(breakup.registration));
+  lines.push('🔧 Handling / Logistics: ₹ ' + fmtMoney(breakup.handling));
+  if (breakup.otherCharges > 0) lines.push('📦 Other Charges: ₹ ' + fmtMoney(breakup.otherCharges));
+  lines.push('');
+  lines.push('💰 *Total On-Road: ₹ ' + fmtMoney(breakup.total) + '*');
+  lines.push('');
+  lines.push('_Breakup is estimated. Actual components may vary by dealer._');
+  return lines.join('\n');
+}
+
+// ---- Exchange / Trade-in estimator ----
+function estimateOldCarValue(exShowroomPrice, carAge, kmDriven, ownerNumber) {
+  let price = Number(exShowroomPrice) || 0;
+  if (!price) return null;
+  const age = Math.max(0, Number(carAge) || 0);
+  const km = Math.max(0, Number(kmDriven) || 0);
+  const owners = Math.max(1, Math.min(3, Number(ownerNumber) || 1));
+
+  // Depreciation: conservative (slightly below market to close deals)
+  let remaining = price;
+  for (let y = 1; y <= Math.floor(age); y++) {
+    if (y === 1) remaining *= (1 - 0.20);       // Year 1: 20% (steeper than IBB)
+    else if (y <= 3) remaining *= (1 - 0.14);    // Year 2-3: 14%/yr
+    else if (y <= 5) remaining *= (1 - 0.10);    // Year 4-5: 10%/yr
+    else remaining *= (1 - 0.07);                 // Year 6+: 7%/yr
+  }
+  // Fractional year
+  const frac = age - Math.floor(age);
+  if (frac > 0) {
+    const rate = age < 1 ? 0.20 : (age < 3 ? 0.14 : (age < 5 ? 0.10 : 0.07));
+    remaining *= (1 - rate * frac);
+  }
+
+  // KM adjustment: +/-2% per 10k deviation from expected
+  const expectedKm = age * AVG_KM_PER_YEAR;
+  const kmDiff = km - expectedKm;
+  const kmAdj = -(kmDiff / 10000) * KM_ADJUST_PER_10K;
+  remaining *= (1 + kmAdj);
+
+  // Ownership penalty
+  const ownerPenalty = OWNER_DISCOUNT[owners] || OWNER_DISCOUNT[3];
+  remaining *= (1 - ownerPenalty);
+
+  // Floor: 8% of ex-showroom (conservative)
+  const floor = price * 0.08;
+  const midpoint = Math.max(Math.round(remaining), Math.round(floor));
+  const low = Math.round(midpoint * (1 - EXCHANGE_RANGE_SPREAD));
+  const high = Math.round(midpoint * (1 + EXCHANGE_RANGE_SPREAD));
+
+  return { midpoint, low, high };
+}
+
+async function lookupExShowroomForModel(modelQuery) {
+  try {
+    const tables = await loadPricingFromSheets();
+    if (!tables) return null;
+    const norm = normForMatch(modelQuery);
+    let bestMatch = null;
+    let bestScore = Infinity;
+
+    for (const [brand, tbl] of Object.entries(tables)) {
+      if (brand === 'HOT') continue;
+      const { idxMap, data } = tbl;
+      const idxModel = idxMap.model ?? idxMap.MODEL ?? -1;
+      const idxEx = idxMap.exshowroom ?? idxMap['ex-showroom'] ?? idxMap['ex showroom'] ?? idxMap.exShowroom ?? -1;
+      if (idxModel < 0) continue;
+
+      for (const row of data) {
+        const modelStr = normForMatch(String(row[idxModel] || ''));
+        const dist = levenshtein(norm, modelStr);
+        if (dist < bestScore && dist <= Math.max(3, norm.length * 0.3)) {
+          let exShow = 0;
+          if (idxEx >= 0) exShow = Number(String(row[idxEx] || '').replace(/[,\s₹]/g, '')) || 0;
+          bestMatch = { brand, exShowroom: exShow, row, modelStr };
+          bestScore = dist;
+        }
+      }
+    }
+    return bestMatch;
+  } catch (e) {
+    if (DEBUG) console.warn('lookupExShowroomForModel failed:', e?.message);
+    return null;
+  }
+}
+
+function formatExchangeSummary(oldCar, valuation, newCarName, newOnRoad) {
+  const lines = [];
+  lines.push('🔄 *Exchange / Trade-in Summary*');
+  lines.push('');
+  lines.push('*Your Current Car:*');
+  lines.push('🚗 ' + (oldCar.brand || '') + ' ' + (oldCar.model || '') + ' ' + (oldCar.year || ''));
+  lines.push('📅 Age: ' + (oldCar.age || '?') + ' years | 🛣️ KM: ' + fmtMoney(oldCar.km || 0) + ' | 👤 ' + (oldCar.ownerLabel || '1st') + ' Owner');
+  lines.push('');
+  lines.push('💰 *Estimated Value: ₹ ' + fmtMoney(valuation.low) + ' - ₹ ' + fmtMoney(valuation.high) + '*');
+  lines.push('');
+  lines.push('_This is an indicative estimate. Final valuation will be done by our team after physical inspection._');
+
+  if (newCarName && newOnRoad) {
+    const netCost = Math.max(0, newOnRoad - valuation.midpoint);
+    const roi = Number(process.env.NEW_CAR_ROI || 8.1);
+    const emi = calcEmiSimple(Math.round(netCost * 0.9), roi, 60);
+    lines.push('');
+    lines.push('*Upgrade to ' + newCarName + ':*');
+    lines.push('🚘 New Car On-Road: ₹ ' + fmtMoney(newOnRoad));
+    lines.push('➖ Exchange Value (est.): ₹ ' + fmtMoney(valuation.midpoint));
+    lines.push('💵 *Net Upgrade Cost: ₹ ' + fmtMoney(netCost) + '*');
+    if (emi > 0) {
+      lines.push('');
+      lines.push('📊 *EMI on net amount (90% finance, 60 months @ ' + roi + '%):*');
+      lines.push('👉 ₹ *' + fmtMoney(emi) + '* / month');
+    }
+    lines.push('');
+    lines.push('_EMI is indicative. Actual terms subject to bank approval._');
+  }
+
+  return lines.join('\n');
 }
 function extractPanIndiaPricesFromRow(row, header) {
   const out = {};
@@ -3342,7 +3542,10 @@ if (!global.lastVariantList) global.lastVariantList = new Map();
     global.panIndiaPrompt.set(to, {
       row: best.row,
       header: exactHeader,
-      title: `${best.brand} ${mdl} ${varr}`
+      title: `${best.brand} ${mdl} ${varr}`,
+      exShow: best.exShow || 0,
+      onroad: best.onroad || 0,
+      stateMatch: stateMatch || 'DELHI'
     });
 
     await waSendText(to, lines.join('\n'));
@@ -3356,7 +3559,8 @@ if (!global.lastVariantList) global.lastVariantList = new Map();
         action: {
           buttons: [
             { type: 'reply', reply: { id: 'BTN_PANIND_YES', title: 'Yes, Compare' } },
-            { type: 'reply', reply: { id: 'BTN_PANIND_NO', title: 'No, Thanks' } }
+            { type: 'reply', reply: { id: 'BTN_PANIND_NO', title: 'No, Thanks' } },
+            { type: 'reply', reply: { id: 'BTN_PRICE_BREAKUP', title: 'Price Breakup' } }
           ]
         }
       }
@@ -4842,7 +5046,10 @@ if (!global.panIndiaPrompt) global.panIndiaPrompt = new Map();
 global.panIndiaPrompt.set(to, {
   row: best.row,
   header: tables[best.brand]?.header || [],
-  title: `${best.brand} ${mdl} ${varr}`
+  title: `${best.brand} ${mdl} ${varr}`,
+  exShow: best.exShow || 0,
+  onroad: best.onroad || 0,
+  stateMatch: stateMatch || 'DELHI'
 });
 
 await waSendText(to, lines.join('\n'));
@@ -4857,7 +5064,8 @@ await waSendRaw({
     action: {
       buttons: [
         { type: 'reply', reply: { id: 'BTN_PANIND_YES', title: 'Yes, Compare' } },
-        { type: 'reply', reply: { id: 'BTN_PANIND_NO', title: 'No, Thanks' } }
+        { type: 'reply', reply: { id: 'BTN_PANIND_NO', title: 'No, Thanks' } },
+        { type: 'reply', reply: { id: 'BTN_PRICE_BREAKUP', title: 'Price Breakup' } }
       ]
     }
   }
@@ -5303,7 +5511,29 @@ global.__WA_MSG_LOCK__.add(dedupKey);
         } else {
           msgText = (inter.body || inter.header || '') || '';
         }
-      } else if (type === 'image' || type === 'document' || type === 'video' || type === 'audio') {
+      } else if (type === 'audio') {
+        // Voice note: transcribe via Whisper, then process as text
+        const audioMediaId = msg?.audio?.id || null;
+        if (audioMediaId) {
+          try {
+            await waSendText(from, '🎙️ _Processing your voice note..._');
+            const transcribed = await transcribeAudioWhisper(audioMediaId);
+            if (transcribed) {
+              msgText = transcribed;
+              if (DEBUG) console.log('VOICE NOTE TRANSCRIBED:', msgText);
+            } else {
+              await waSendText(from, 'Sorry, I could not understand the voice note. Please type your message instead.');
+              return;
+            }
+          } catch (e) {
+            console.warn('Voice note processing failed:', e?.message || e);
+            await waSendText(from, 'Sorry, I could not process the voice note. Please type your message instead.');
+            return;
+          }
+        } else {
+          msgText = '';
+        }
+      } else if (type === 'image' || type === 'document' || type === 'video') {
         msgText = (msg?.image?.caption || msg?.document?.caption || msg?.video?.caption || '') || '';
       } else {
         msgText = '';
@@ -5449,6 +5679,23 @@ const blockNewEngine  = disableNewEngine  && lastSvcNorm === 'USED';
 // not at the global interceptor level.
 
 // ============================================================
+// EXCHANGE / TRADE-IN INTENT (TEXT TRIGGER)
+// ============================================================
+const inExchangeFlow = ['EXCHANGE_ASK_OLD', 'EXCHANGE_ASK_PRICE', 'EXCHANGE_ASK_KM', 'EXCHANGE_ASK_OWNER', 'EXCHANGE_ASK_NEW'].includes(lastSvcNorm);
+
+if (!selectedId && msgText && !inExchangeFlow && /\b(exchange|trade[\s-]?in|swap\s+car|upgrade\s+car)\b/i.test(msgText)) {
+  setLastService(from, 'EXCHANGE_ASK_OLD');
+  await waSendText(
+    from,
+    '🔄 *Exchange / Trade-in Estimator*\n\n' +
+    'Let me estimate the value of your current car and show the upgrade cost.\n\n' +
+    'Which car do you currently own? Please share *Brand Model Year*\n' +
+    'Example: `Hyundai Creta 2019`'
+  );
+  return;
+}
+
+// ============================================================
 // GLOBAL LOAN INTENT (UNCHANGED)
 // ============================================================
 
@@ -5592,6 +5839,63 @@ if (selectedId === 'BTN_PANIND_NO') {
   await waSendText(from, 'No problem 👍 Let me know if you want EMI options, specs, or another quote.');
   if (global.panIndiaPrompt) global.panIndiaPrompt.delete(from);
   setLastService(from, 'NEW');
+  return;
+}
+
+// ================= PRICE BREAKUP BUTTON HANDLER =================
+if (selectedId === 'BTN_PRICE_BREAKUP') {
+  const ctx = global.panIndiaPrompt && global.panIndiaPrompt.get(from);
+  if (!ctx) {
+    await waSendText(from, 'Sorry, I could not retrieve the variant details. Please ask for the quote once more.');
+    setLastService(from, 'NEW');
+    return;
+  }
+  const breakup = calculatePriceBreakup(ctx.exShow, ctx.onroad, ctx.stateMatch);
+  if (!breakup) {
+    await waSendText(from, 'Price breakup is not available for this variant.');
+    setLastService(from, 'NEW');
+    return;
+  }
+  const text = formatPriceBreakup(breakup, ctx.title, ctx.stateMatch);
+  await waSendText(from, text);
+  setLastService(from, 'NEW');
+  return;
+}
+
+// ================= EXCHANGE OWNERSHIP BUTTON HANDLERS =================
+if (selectedId === 'BTN_OWNER_1ST' || selectedId === 'BTN_OWNER_2ND' || selectedId === 'BTN_OWNER_3RD') {
+  const ctx = global.exchangeContext.get(from);
+  if (!ctx || !ctx.exShowroom) {
+    await waSendText(from, 'Session expired. Please type *exchange* to start again.');
+    setLastService(from, 'NEW');
+    return;
+  }
+  const ownerNum = selectedId === 'BTN_OWNER_1ST' ? 1 : (selectedId === 'BTN_OWNER_2ND' ? 2 : 3);
+  const ownerLabel = ownerNum === 1 ? '1st' : (ownerNum === 2 ? '2nd' : '3rd+');
+  ctx.ownerNumber = ownerNum;
+  ctx.ownerLabel = ownerLabel;
+
+  const valuation = estimateOldCarValue(ctx.exShowroom, ctx.age, ctx.km, ownerNum);
+  if (!valuation) {
+    await waSendText(from, 'Could not estimate value. Please type *exchange* to try again.');
+    global.exchangeContext.delete(from);
+    setLastService(from, 'NEW');
+    return;
+  }
+  ctx.valuation = valuation;
+  global.exchangeContext.set(from, ctx);
+
+  const out = [];
+  out.push('🔄 *Exchange Estimate for your ' + (ctx.brand || '') + ' ' + (ctx.model || '') + ' ' + (ctx.year || '') + '*');
+  out.push('📅 Age: ' + ctx.age + ' years | 🛣️ KM: ' + fmtMoney(ctx.km) + ' | 👤 ' + ownerLabel + ' Owner');
+  out.push('');
+  out.push('💰 *Estimated Value: ₹ ' + fmtMoney(valuation.low) + ' - ₹ ' + fmtMoney(valuation.high) + '*');
+  out.push('');
+  out.push('_This is an indicative estimate. Final valuation will be done by our team after physical inspection._');
+  out.push('');
+  out.push('🚗 Which *new car* are you considering for the upgrade?');
+  await waSendText(from, out.join('\n'));
+  setLastService(from, 'EXCHANGE_ASK_NEW');
   return;
 }
 
@@ -6218,6 +6522,283 @@ if (
 }
 // ================= END AUTO EMI =================
 
+// ================= EXCHANGE MULTI-STEP FREE-TEXT HANDLERS =================
+
+// Step 1: User sends "Brand Model Year" for their old car
+if (svc === 'EXCHANGE_ASK_OLD' && msgText && !selectedId) {
+  // Parse brand + model + year from free-text like "Hyundai Creta 2019"
+  const yearMatch = msgText.match(/\b(20\d{2})\b/);
+  const year = yearMatch ? Number(yearMatch[1]) : null;
+  const currentYear = new Date().getFullYear();
+
+  // Remove year from text to isolate brand + model
+  let carText = msgText.replace(/\b20\d{2}\b/, '').trim();
+
+  // Try to find brand from GLOBAL_BRAND_SET
+  let brand = null;
+  let model = carText;
+  if (typeof GLOBAL_BRAND_SET !== 'undefined') {
+    for (const b of GLOBAL_BRAND_SET) {
+      if (carText.toUpperCase().includes(b)) {
+        brand = b;
+        model = carText.toUpperCase().replace(b, '').trim();
+        break;
+      }
+    }
+  }
+
+  if (!model && !brand) {
+    await waSendText(from, 'Could not understand the car details. Please share *Brand Model Year*\nExample: `Hyundai Creta 2019`');
+    return;
+  }
+
+  const age = year ? (currentYear - year) : null;
+
+  // Lookup ex-showroom reference price from sheets
+  const lookup = await lookupExShowroomForModel(model || carText);
+  let exShowroom = lookup?.exShowroom || 0;
+  if (!brand && lookup?.brand) brand = lookup.brand;
+
+  // Store context
+  const ctx = {
+    brand: brand || '',
+    model: model || carText,
+    year: year || '',
+    age: age || 0,
+    exShowroom,
+    km: 0,
+    ownerNumber: 1,
+    ownerLabel: '1st'
+  };
+  global.exchangeContext.set(from, ctx);
+
+  if (!exShowroom) {
+    // Ask user for approximate purchase price
+    await waSendText(
+      from,
+      'I could not find the exact price for *' + (brand || '') + ' ' + (model || carText) + '*.\n\n' +
+      'What was the approximate *ex-showroom price* when you bought it?\n' +
+      'Example: `12 lakh` or `1200000`'
+    );
+    setLastService(from, 'EXCHANGE_ASK_PRICE');
+    return;
+  }
+
+  await waSendText(from, '🛣️ How many *kilometers* has the car driven?\nExample: `45000` or `45k km`');
+  setLastService(from, 'EXCHANGE_ASK_KM');
+  return;
+}
+
+// Step 1b: User provides purchase price (fallback when lookup fails)
+if (svc === 'EXCHANGE_ASK_PRICE' && msgText && !selectedId) {
+  const ctx = global.exchangeContext.get(from);
+  if (!ctx) {
+    await waSendText(from, 'Session expired. Please type *exchange* to start again.');
+    setLastService(from, 'NEW');
+    return;
+  }
+  // Parse price
+  const lakhMatch = msgText.match(/(\d+(?:\.\d+)?)\s*(lakh|lac|l)\b/i);
+  let price = 0;
+  if (lakhMatch) price = Number(lakhMatch[1]) * 100000;
+  else {
+    const numMatch = msgText.replace(/[,₹\s]/g, '').match(/\b(\d{5,})\b/);
+    if (numMatch) price = Number(numMatch[0]);
+  }
+  if (!price || price < 100000) {
+    await waSendText(from, 'Please share a valid price.\nExample: `12 lakh` or `1200000`');
+    return;
+  }
+  ctx.exShowroom = price;
+  global.exchangeContext.set(from, ctx);
+  await waSendText(from, '🛣️ How many *kilometers* has the car driven?\nExample: `45000` or `45k km`');
+  setLastService(from, 'EXCHANGE_ASK_KM');
+  return;
+}
+
+// Step 2: User sends km driven
+if (svc === 'EXCHANGE_ASK_KM' && msgText && !selectedId) {
+  const ctx = global.exchangeContext.get(from);
+  if (!ctx) {
+    await waSendText(from, 'Session expired. Please type *exchange* to start again.');
+    setLastService(from, 'NEW');
+    return;
+  }
+  // Parse km: "45000", "45k km", "45,000 km"
+  let km = 0;
+  const kMatch = msgText.match(/(\d+(?:\.\d+)?)\s*k\b/i);
+  if (kMatch) km = Number(kMatch[1]) * 1000;
+  else {
+    const numMatch = msgText.replace(/[,\s]/g, '').match(/\b(\d{3,})\b/);
+    if (numMatch) km = Number(numMatch[0]);
+  }
+  if (!km || km < 100) {
+    await waSendText(from, 'Please share valid km driven.\nExample: `45000` or `45k km`');
+    return;
+  }
+  ctx.km = km;
+  global.exchangeContext.set(from, ctx);
+
+  // Ask ownership with buttons
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: '👤 Is this your *1st, 2nd, or 3rd+ owner* car?' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_OWNER_1ST', title: '1st Owner' } },
+          { type: 'reply', reply: { id: 'BTN_OWNER_2ND', title: '2nd Owner' } },
+          { type: 'reply', reply: { id: 'BTN_OWNER_3RD', title: '3rd+ Owner' } }
+        ]
+      }
+    }
+  });
+  setLastService(from, 'EXCHANGE_ASK_OWNER');
+  return;
+}
+
+// Step 3: Owner text fallback (if user types instead of tapping button)
+if (svc === 'EXCHANGE_ASK_OWNER' && msgText && !selectedId) {
+  const ctx = global.exchangeContext.get(from);
+  if (!ctx || !ctx.exShowroom) {
+    await waSendText(from, 'Session expired. Please type *exchange* to start again.');
+    setLastService(from, 'NEW');
+    return;
+  }
+  const normText = msgText.toLowerCase();
+  let ownerNum = 1;
+  if (/3|third|3rd/.test(normText)) ownerNum = 3;
+  else if (/2|second|2nd/.test(normText)) ownerNum = 2;
+  const ownerLabel = ownerNum === 1 ? '1st' : (ownerNum === 2 ? '2nd' : '3rd+');
+  ctx.ownerNumber = ownerNum;
+  ctx.ownerLabel = ownerLabel;
+
+  const valuation = estimateOldCarValue(ctx.exShowroom, ctx.age, ctx.km, ownerNum);
+  if (!valuation) {
+    await waSendText(from, 'Could not estimate value. Please type *exchange* to try again.');
+    global.exchangeContext.delete(from);
+    setLastService(from, 'NEW');
+    return;
+  }
+  ctx.valuation = valuation;
+  global.exchangeContext.set(from, ctx);
+
+  const out = [];
+  out.push('🔄 *Exchange Estimate for your ' + (ctx.brand || '') + ' ' + (ctx.model || '') + ' ' + (ctx.year || '') + '*');
+  out.push('📅 Age: ' + ctx.age + ' years | 🛣️ KM: ' + fmtMoney(ctx.km) + ' | 👤 ' + ownerLabel + ' Owner');
+  out.push('');
+  out.push('💰 *Estimated Value: ₹ ' + fmtMoney(valuation.low) + ' - ₹ ' + fmtMoney(valuation.high) + '*');
+  out.push('');
+  out.push('_This is an indicative estimate. Final valuation will be done by our team after physical inspection._');
+  out.push('');
+  out.push('🚗 Which *new car* are you considering for the upgrade?');
+  await waSendText(from, out.join('\n'));
+  setLastService(from, 'EXCHANGE_ASK_NEW');
+  return;
+}
+
+// Step 4: User names a new car for upgrade
+if (svc === 'EXCHANGE_ASK_NEW' && msgText && !selectedId) {
+  const ctx = global.exchangeContext.get(from);
+  if (!ctx || !ctx.valuation) {
+    await waSendText(from, 'Session expired. Please type *exchange* to start again.');
+    setLastService(from, 'NEW');
+    return;
+  }
+
+  // Look up new car price from sheets
+  let newCarName = msgText.trim();
+  let newOnRoad = 0;
+  let newExShow = 0;
+  try {
+    const tables = await loadPricingFromSheets();
+    if (tables) {
+      const norm = normForMatch(newCarName);
+      let bestMatch = null;
+      let bestScore = Infinity;
+      for (const [brand, tbl] of Object.entries(tables)) {
+        if (brand === 'HOT') continue;
+        const { idxMap, data } = tbl;
+        const idxModel = idxMap.model ?? idxMap.MODEL ?? -1;
+        const idxOnRoad = idxMap.onroad ?? idxMap['on-road'] ?? idxMap['on road price'] ?? -1;
+        const idxEx = idxMap.exshowroom ?? idxMap['ex-showroom'] ?? idxMap['ex showroom'] ?? -1;
+        if (idxModel < 0) continue;
+        for (const row of data) {
+          const modelStr = normForMatch(String(row[idxModel] || ''));
+          const dist = levenshtein(norm, modelStr);
+          if (dist < bestScore && dist <= Math.max(3, norm.length * 0.3)) {
+            let onRd = 0;
+            if (idxOnRoad >= 0) onRd = Number(String(row[idxOnRoad] || '').replace(/[,\s₹]/g, '')) || 0;
+            let exSh = 0;
+            if (idxEx >= 0) exSh = Number(String(row[idxEx] || '').replace(/[,\s₹]/g, '')) || 0;
+            bestMatch = { brand, onRoad: onRd, exShowroom: exSh, model: String(row[idxModel] || '') };
+            bestScore = dist;
+          }
+        }
+      }
+      if (bestMatch) {
+        newOnRoad = bestMatch.onRoad || Math.round((bestMatch.exShowroom || 0) * 1.15);
+        newExShow = bestMatch.exShowroom || 0;
+        newCarName = bestMatch.brand + ' ' + bestMatch.model;
+      }
+    }
+  } catch (e) {
+    if (DEBUG) console.warn('Exchange new car lookup failed:', e?.message);
+  }
+
+  if (!newOnRoad) {
+    await waSendText(
+      from,
+      'I could not find pricing for *' + newCarName + '* in our database.\n\n' +
+      'Please share the *on-road price* you were quoted, or try a different model.\n' +
+      'Example: `25 lakh`'
+    );
+    return;
+  }
+
+  const oldCar = {
+    brand: ctx.brand,
+    model: ctx.model,
+    year: ctx.year,
+    age: ctx.age,
+    km: ctx.km,
+    ownerLabel: ctx.ownerLabel
+  };
+  const summary = formatExchangeSummary(oldCar, ctx.valuation, newCarName, newOnRoad);
+  await waSendText(from, summary);
+
+  // Post lead to CRM
+  try {
+    postLeadToCRM({
+      bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name,
+      lastMessage: 'EXCHANGE: ' + (ctx.brand || '') + ' ' + (ctx.model || '') + ' ' + (ctx.year || '') + ' -> ' + newCarName,
+      service: 'EXCHANGE',
+      tags: ['EXCHANGE', 'TRADE_IN'],
+      meta: {
+        oldCar: ctx.brand + ' ' + ctx.model + ' ' + ctx.year,
+        oldCarKm: ctx.km,
+        ownerNumber: ctx.ownerNumber,
+        estimatedValueLow: ctx.valuation.low,
+        estimatedValueHigh: ctx.valuation.high,
+        estimatedValueMid: ctx.valuation.midpoint,
+        newCar: newCarName,
+        newCarOnRoad: newOnRoad
+      }
+    });
+  } catch (e) {
+    if (DEBUG) console.warn('Exchange CRM lead failed:', e?.message);
+  }
+
+  global.exchangeContext.delete(from);
+  setLastService(from, 'NEW');
+  return;
+}
+
+// ================= END EXCHANGE HANDLERS =================
+
 // ================= REFINANCE FREE-TEXT HANDLER =================
 if (
   svc === 'LOAN_REFINANCE' &&
@@ -6789,6 +7370,17 @@ case 'BTN_BOOK_TEST':
     '2. *Preferred date and time*\n' +
     '3. *Your city/location*\n\n' +
     'Example:\n`Fortuner, Saturday 3 PM, Delhi`'
+  );
+  return;
+
+case 'SRV_EXCHANGE':
+  setLastService(from, 'EXCHANGE_ASK_OLD');
+  await waSendText(
+    from,
+    '🔄 *Exchange / Trade-in Estimator*\n\n' +
+    'Let me estimate the value of your current car and show the upgrade cost.\n\n' +
+    'Which car do you currently own? Please share *Brand Model Year*\n' +
+    'Example: `Hyundai Creta 2019`'
   );
   return;
 
@@ -7768,6 +8360,55 @@ async function getMediaUrl(mediaId) {
     return publicUrl;
   } catch (err) {
     console.warn("getMediaUrl failed:", err?.message || err);
+    return null;
+  }
+}
+
+// === Transcribe WhatsApp voice note via OpenAI Whisper ===
+async function transcribeAudioWhisper(mediaId) {
+  try {
+    if (!mediaId) return null;
+    if (!META_TOKEN) { console.warn('transcribeAudioWhisper: META_TOKEN missing'); return null; }
+
+    const GRAPH_API_BASE = process.env.GRAPH_API_BASE || 'https://graph.facebook.com/v21.0';
+
+    // 1) Fetch media metadata
+    const metaResp = await fetch(`${GRAPH_API_BASE}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${META_TOKEN}` }
+    });
+    if (!metaResp.ok) { console.warn('transcribeAudio: meta fetch failed', metaResp.status); return null; }
+    const metaJson = await metaResp.json();
+    const waUrl = metaJson.url;
+    if (!waUrl) return null;
+
+    // 2) Download audio binary
+    const fileResp = await fetch(waUrl, {
+      headers: { Authorization: `Bearer ${META_TOKEN}` }
+    });
+    if (!fileResp.ok) { console.warn('transcribeAudio: download failed', fileResp.status); return null; }
+    const arrayBuf = await fileResp.arrayBuffer();
+    const buf = Buffer.from(arrayBuf);
+
+    // 3) Save temp file
+    const uploadsDir = path.join(__dirname, 'public', 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    const tempFile = path.join(uploadsDir, `wa_audio_${mediaId}.ogg`);
+    await fs.promises.writeFile(tempFile, buf);
+
+    // 4) Transcribe via OpenAI Whisper
+    const transcription = await openai.audio.transcriptions.create({
+      model: 'whisper-1',
+      file: fs.createReadStream(tempFile)
+    });
+
+    // 5) Cleanup temp file
+    try { fs.unlinkSync(tempFile); } catch (_) {}
+
+    const text = (transcription?.text || '').trim();
+    if (DEBUG) console.log('WHISPER TRANSCRIPTION:', text);
+    return text || null;
+  } catch (e) {
+    console.warn('transcribeAudioWhisper failed:', e?.message || e);
     return null;
   }
 }
