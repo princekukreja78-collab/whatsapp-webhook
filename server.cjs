@@ -301,6 +301,22 @@ if (baseModel && baseModel.length >= 3) {
     );
   }
 }
+
+// BRAND_HINTS: auto-populated from GLOBAL_MODEL_BRAND after CSV load
+// Structure: { BRAND: [model1, model2, ...] } — used for brand inference
+const BRAND_HINTS = {};
+function rebuildBrandHints() {
+  for (const k of Object.keys(BRAND_HINTS)) delete BRAND_HINTS[k];
+  for (const [model, brand] of Object.entries(GLOBAL_MODEL_BRAND)) {
+    const b = String(brand).toUpperCase();
+    if (!BRAND_HINTS[b]) BRAND_HINTS[b] = [];
+    BRAND_HINTS[b].push(model);
+  }
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    console.log(`[BRAND_HINTS] Rebuilt: ${Object.keys(BRAND_HINTS).length} brands`);
+  }
+}
+
 function normalizeCompactModel(s) {
   return String(s || '')
     .toLowerCase()
@@ -695,6 +711,9 @@ const LEADS_FILE              = path.resolve(__dirname, 'crm_leads.json');
 const NEW_CAR_ROI             = Number(process.env.NEW_CAR_ROI || 8.10);
 const USED_CAR_ROI_VISIBLE    = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL   = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
+const REFINANCE_ROI           = Number(process.env.REFINANCE_ROI || 9.5);
+const BT_ROI                  = Number(process.env.BT_ROI || 8.75);
+const TOPUP_ROI               = Number(process.env.TOPUP_ROI || 9.25);
 
 // keep DEBUG false by default unless env enables it explicitly
 const DEBUG = (process.env.DEBUG_VARIANT === 'true') || false;
@@ -753,6 +772,23 @@ function getLastService(from) {
     if (DEBUG) console.warn('getLastService failed', e && e.message ? e.message : e);
     return null;
   }
+}
+
+// Multi-step flow states that have tighter timeout (15 min)
+const MULTI_STEP_FLOWS = new Set([
+  'LOAN_REFINANCE', 'LOAN_BT', 'LOAN_TOPUP', 'LOAN_ELIG',
+  'INS_COMP', 'INS_TP', 'INS_ZERODEP', 'TEST_DRIVE'
+]);
+const MULTI_STEP_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+function isFlowStale(from) {
+  try {
+    const rec = sessionService.get(from);
+    if (!rec) return false;
+    const svc = (rec.svc || '').toUpperCase();
+    if (!MULTI_STEP_FLOWS.has(svc)) return false;
+    return (Date.now() - rec.ts) > MULTI_STEP_TTL_MS;
+  } catch (_) { return false; }
 }
 
 // ================= ENGINE LOCK (NEW / USED) =================
@@ -988,7 +1024,7 @@ function scheduleFeedbackPing(from) {
           body: {
             text:
               '🙏 *Thank you for using VehYra*\n\n' +
-              'We’d love your feedback or help you further.'
+              'We\'d love your feedback or help you further.'
           },
           action: {
             buttons: [
@@ -1081,7 +1117,7 @@ async function sendSheetWelcomeTemplate(phone, name = "Customer") {
   return true;
 }
 
-// small delay helper so we don’t spam WhatsApp too fast
+// small delay helper so we don't spam WhatsApp too fast
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -1106,7 +1142,9 @@ async function waSendListMenu(to) {
     { id: 'SRV_NEW_CAR',  title: 'New Car Deals',  description: 'On-road prices & offers' },
     { id: 'SRV_USED_CAR', title: 'Pre-Owned Cars', description: 'Certified used inventory' },
     { id: 'SRV_SELL_CAR', title: 'Sell My Car',    description: 'Get best quote for your car' },
-    { id: 'SRV_LOAN',     title: 'Loan / Finance', description: 'EMI & Bullet options' }
+    { id: 'SRV_LOAN',     title: 'Loan / Finance', description: 'EMI, Refinance & more' },
+    { id: 'SRV_INSURANCE', title: 'Insurance',     description: 'Comprehensive, TP & Zero Dep' },
+    { id: 'SRV_TEST_DRIVE', title: 'Book Test Drive', description: 'Schedule a test drive' }
   ];
   const interactive = {
     type: 'list',
@@ -1273,6 +1311,22 @@ function resolveStateFromRow(row, idxMap) {
     }
   }
   return 'UNKNOWN';
+}
+
+// ---------------- Levenshtein distance (for fuzzy model matching) ----------------
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
 }
 
 // ---------------- normalization & helpers ----------------
@@ -2012,8 +2066,8 @@ global.lastUsedCarList.set(from, {
   if (!matches.length) {
     return {
       text:
-        `Sorry, I couldn’t find an exact match for "${query}".\n` +
-        `Please share brand and model (e.g., "Audi A6 2018") or give a budget and I’ll suggest options.`
+        `Sorry, I couldn't find an exact match for "${query}".\n` +
+        `Please share brand and model (e.g., "Audi A6 2018") or give a budget and I'll suggest options.`
     };
   }
 
@@ -2444,13 +2498,50 @@ async function callSignatureBrain({ from, name, msgText, lastService, ragHits = 
   try {
     if (!msgText) return null;
 
-    const sys = `You are SIGNATURE SAVINGS — a crisp dealership advisory assistant for MR.CAR.
-Answer concisely, with dealership-level accuracy.
-Always end with: "Reply 'Talk to agent' to request a human."`;
+    // Detect if this is a comparison query
+    const isComparison = /\bvs\b|\bversus\b|\bcompare\b|\bcomparison\b|\bor\b.*\bbetter\b|\bwhich.*better\b/i.test(msgText);
+    const isRecommendation = /\brecommend\b|\bsuggest\b|\bbest\b|\btop\s*\d|\bwhich.*should\b|\badvice\b/i.test(msgText);
+
+    // Try to load brochure data for detected models
+    let brochureContext = '';
+    try {
+      const detectedModels = (typeof detectModelsFromText === 'function') ? detectModelsFromText(msgText) : [];
+      if (detectedModels.length > 0) {
+        const brochureIndex = require('./brochures/index.json');
+        for (const model of detectedModels) {
+          const brochure = brochureIndex.find(b =>
+            b.id && b.id.toLowerCase().includes(model) ||
+            b.title && b.title.toLowerCase().includes(model)
+          );
+          if (brochure) {
+            brochureContext += `\n\nBrochure (${brochure.title}): ${brochure.summary || ''}`;
+            if (brochure.variants) brochureContext += `\nVariants: ${brochure.variants.join(', ')}`;
+          }
+        }
+      }
+    } catch (_) {}
+
+    const sys = `You are SIGNATURE SAVINGS — a crisp dealership advisory assistant for MR.CAR / VehYra.
+Answer concisely, with dealership-level accuracy. Use WhatsApp-compatible formatting (*bold*, _italic_).
+
+RESPONSE GUIDELINES:
+${isComparison ? `- This is a COMPARISON query. Present a formatted side-by-side comparison table using WhatsApp monospace.
+- Include key specs: Price, Engine, Power, Mileage, Safety, Boot Space, Key Features.
+- End with a clear recommendation based on use-case.` : ''}
+${isRecommendation ? `- This is a RECOMMENDATION query. Ask about budget and use-case if not provided.
+- Suggest top 3 options with brief pros/cons for each.
+- Consider: budget, family size, city/highway use, fuel preference.` : ''}
+- For feature queries: pull specific details from brochure data if available.
+- Keep answers under 300 words. Use bullet points for clarity.
+- Always mention on-road price range when discussing specific models.
+- Always end with: "Reply 'Talk to agent' to speak with our advisor."`;
 
     let context = "";
     if (Array.isArray(ragHits) && ragHits.length > 0) {
       context = ragHits.map(x => x.text).join("\n\n---\n\n");
+    }
+    if (brochureContext) {
+      context += '\n\n--- Brochure Data ---\n' + brochureContext;
     }
 
     const promptMessages = [
@@ -3227,7 +3318,7 @@ if (explicitUsed) {
     }
 
     if (!canSendQuote(to)) {
-      await waSendText('You’ve reached today’s assistance limit for quotes. Please try again tomorrow or provide your details for a personalised quote.');
+      await waSendText('You\'ve reached today\'s assistance limit for quotes. Please try again tomorrow or provide your details for a personalised quote.');
       return true;
     }
 
@@ -3255,6 +3346,7 @@ if (!tables || typeof tables !== 'object') return false;
 // ✅ BUILD GLOBAL BRAND / MODEL REGISTRY FROM SHEETS (ONCE PER CALL)
 if (tables && Object.keys(tables).length) {
   buildGlobalRegistryFromSheets(tables);
+  rebuildBrandHints();
 }
 
     const tRaw = String(msgText || '');
@@ -3266,6 +3358,26 @@ const wantsAllStatesLocal =
 
     // --- unified brand detection (uses global helper) ---
     let brandGuess = (typeof detectBrandFromText === 'function') ? detectBrandFromText(t) : null;
+
+    // --- FUZZY BRAND MATCHING: correct misspelled brand names ---
+    if (!brandGuess && GLOBAL_BRAND_SET.size > 0) {
+      const words = t.split(/\s+/).filter(w => w.length >= 4);
+      const allBrands = Array.from(GLOBAL_BRAND_SET).map(b => b.toLowerCase());
+      for (const word of words) {
+        if (GLOBAL_MODEL_SET.has(word)) continue; // skip model names
+        for (const brand of allBrands) {
+          if (brand.includes(' ')) continue; // skip multi-word brands for now
+          if (Math.abs(brand.length - word.length) > 2) continue;
+          const dist = levenshtein(word, brand);
+          if (dist <= 2 && dist > 0) {
+            brandGuess = brand.toUpperCase();
+            if (DEBUG) console.log('FUZZY_BRAND: corrected', word, '->', brandGuess, '(distance:', dist, ')');
+            break;
+          }
+        }
+        if (brandGuess) break;
+      }
+    }
 
   // ---------------- CITY DETECTION (REAL CITIES ONLY) ----------------
 let cityMatch =
@@ -3454,8 +3566,80 @@ const coreTokensArr = canonicalUserNorm
   .filter(tk => tk && !genericWords.has(tk));
 
 // Explicit variant intent: model + variant token present
-const userHasExplicitVariant =
+let userHasExplicitVariant =
   Array.isArray(coreTokensArr) && coreTokensArr.length >= 2;
+
+// --- BRAND+MODEL FIX: Strip brand token from coreTokensArr ---
+// e.g. "toyota fortuner" → coreTokensArr becomes ["fortuner"] instead of ["toyota","fortuner"]
+if (brandGuess && coreTokensArr.length >= 2) {
+  const brandLower = String(brandGuess).toLowerCase();
+  const brandAliases = new Set([normForMatch(brandLower)]);
+  // Add individual brand words (e.g. "maruti suzuki" → "maruti", "suzuki")
+  brandLower.split(/[\s\-]+/).forEach(w => { if (w.length >= 3) brandAliases.add(normForMatch(w)); });
+  // Common brand aliases
+  if (brandLower.includes('mercedes')) brandAliases.add('mercedes');
+  if (brandLower.includes('land rover')) { brandAliases.add('land'); brandAliases.add('rover'); }
+  if (brandLower.includes('maruti')) { brandAliases.add('maruti'); brandAliases.add('suzuki'); }
+  if (brandLower.includes('morris') || brandLower.includes('mg')) { brandAliases.add('mg'); brandAliases.add('morris'); }
+
+  const filtered = coreTokensArr.filter(tk => !brandAliases.has(normForMatch(tk)));
+  if (filtered.length >= 1) {
+    coreTokensArr.length = 0;
+    filtered.forEach(t => coreTokensArr.push(t));
+  }
+  // Recompute after filtering
+  userHasExplicitVariant = Array.isArray(coreTokensArr) && coreTokensArr.length >= 2;
+  if (DEBUG) {
+    console.log('BRAND_STRIP: brandGuess=', brandGuess, 'coreTokensArr after strip=', coreTokensArr, 'userHasExplicitVariant=', userHasExplicitVariant);
+  }
+}
+
+// --- FUZZY MATCHING: correct misspelled model names ---
+let fuzzyCorrection = null;
+if (coreTokensArr.length >= 1 && GLOBAL_MODEL_SET.size > 0) {
+  const allModelNames = Array.from(GLOBAL_MODEL_SET);
+  for (let i = 0; i < coreTokensArr.length; i++) {
+    const tok = coreTokensArr[i];
+    if (tok.length < 4) continue; // skip short tokens
+    if (GLOBAL_MODEL_SET.has(tok)) continue; // already a known model
+    // Check if token is a substring of a known model (partial match)
+    let isPartial = false;
+    for (const m of allModelNames) {
+      if (m.includes(tok) || tok.includes(m)) { isPartial = true; break; }
+    }
+    if (isPartial) continue;
+
+    let bestMatch = null;
+    let bestDist = Infinity;
+    for (const model of allModelNames) {
+      if (model.includes(' ')) continue; // only match single-word models
+      if (Math.abs(model.length - tok.length) > 2) continue;
+      const dist = levenshtein(tok, model);
+      if (dist <= 2 && dist < bestDist) {
+        bestDist = dist;
+        bestMatch = model;
+      }
+    }
+    if (bestMatch) {
+      fuzzyCorrection = { original: tok, corrected: bestMatch };
+      coreTokensArr[i] = bestMatch;
+      canonicalUserNorm = canonicalUserNorm.replace(
+        new RegExp(tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), bestMatch
+      );
+      userNorm = userNorm.replace(
+        new RegExp(tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), bestMatch
+      );
+      // Re-derive tokens and modelGuess
+      tokens.length = 0;
+      canonicalUserNorm.split(' ').filter(Boolean).forEach(t => tokens.push(t));
+      modelGuess = canonicalUserNorm.split(' ').slice(0, 4).join(' ');
+      if (DEBUG) {
+        console.log('FUZZY_MATCH: corrected', tok, '→', bestMatch, '(distance:', bestDist, ')');
+      }
+      break; // only correct one token
+    }
+  }
+}
 
 // -------- NORMALIZE XUV700 TOKEN (SAFE) --------
 if (
@@ -3976,7 +4160,7 @@ if (
   // ❌ fallback only if model list not requested
   await waSendText(
     to,
-    "I couldn’t find an exact match for that query.\n" +
+    "I couldn't find an exact match for that query.\n" +
     "Please try:\n" +
     "• Model + Variant (e.g. *Hycross ZX(O)*)\n" +
     "• Or add city (e.g. *Delhi*, *HR*)"
@@ -4222,6 +4406,10 @@ if (
         }
 
         const lines = [];
+        if (fuzzyCorrection) {
+          lines.push(`_Showing results for *${fuzzyCorrection.corrected}* (did you mean this?)_`);
+          lines.push('');
+        }
         lines.push(`*Available variants (${distinct.length}) — ${coreTokensArr[0].toUpperCase()}*`);
         if (userBudget) {
           lines.push(`*Budget:* ₹ ${fmtMoney(userBudget)}  (Showing ~ ${Math.round((budgetMin||userBudget)/100000)/10}L - ${Math.round((budgetMax||userBudget)/100000)/10}L)`);
@@ -4402,6 +4590,10 @@ if (
 
   if (variants.length >= 2) {
     const out = [];
+    if (fuzzyCorrection) {
+      out.push(`_Showing results for *${fuzzyCorrection.corrected}* (did you mean this?)_`);
+      out.push('');
+    }
     out.push(`*Available Variants — ${resolvedModel || 'Model'}*`);
 
     variants.forEach((m, i) => {
@@ -5166,13 +5358,30 @@ if (selectedId === 'SRV_LOAN') {
     to: from,
     type: 'interactive',
     interactive: {
-      type: 'button',
-      body: { text: 'Choose loan option:' },
+      type: 'list',
+      header: { type: 'text', text: 'Loan & Finance' },
+      body: { text: 'Choose a loan product or tool:' },
+      footer: { text: 'MR.CAR Finance Solutions' },
       action: {
-        buttons: [
-          { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI' } }
+        button: 'View Options',
+        sections: [
+          {
+            title: 'Loan Products',
+            rows: [
+              { id: 'BTN_LOAN_NEW', title: 'New Car Loan', description: 'Calculate EMI for new cars' },
+              { id: 'BTN_LOAN_USED', title: 'Used Car Loan', description: 'Calculate EMI for pre-owned' },
+              { id: 'BTN_LOAN_REFINANCE', title: 'Refinance', description: 'Refinance existing car loan' },
+              { id: 'BTN_LOAN_BT', title: 'Balance Transfer', description: 'Transfer loan to lower rate' }
+            ]
+          },
+          {
+            title: 'Tools',
+            rows: [
+              { id: 'BTN_LOAN_TOPUP', title: 'Top-up Loan', description: 'Additional loan on existing car' },
+              { id: 'BTN_LOAN_ELIG', title: 'Loan Eligibility', description: 'Check your loan eligibility' },
+              { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI', description: 'Custom EMI calculation' }
+            ]
+          }
         ]
       }
     }
@@ -5180,6 +5389,329 @@ if (selectedId === 'SRV_LOAN') {
 
   return; // 🔒 stop before intent engine
 }
+
+// ================= INSURANCE PRIORITY HANDLER =================
+if (selectedId === 'SRV_INSURANCE' || (msgText && /^\s*insurance\s*$/i.test(msgText))) {
+  console.log('PRIORITY HIT: SRV_INSURANCE');
+  setLastService(from, 'INSURANCE');
+
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: '🛡️ *Car Insurance*\n\nChoose the type of insurance cover:' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_INS_COMP', title: 'Comprehensive' } },
+          { type: 'reply', reply: { id: 'BTN_INS_TP', title: 'Third-Party' } },
+          { type: 'reply', reply: { id: 'BTN_INS_ZERODEP', title: 'Zero Dep' } }
+        ]
+      }
+    }
+  });
+  return;
+}
+
+// ================= INSURANCE SUB-TYPE HANDLERS =================
+if (selectedId === 'BTN_INS_COMP') {
+  setLastService(from, 'INS_COMP');
+  await waSendText(
+    from,
+    '🛡️ *Comprehensive Insurance*\n\n' +
+    'Full coverage — own damage + third-party liability.\n\n' +
+    'To get a premium estimate, please share:\n' +
+    '1. *Car model and year*\n' +
+    '2. *Current IDV* (or we\'ll estimate)\n\n' +
+    'Example:\n`Fortuner 2023, IDV 35 lakh`\n\n' +
+    '_Typical premium: ~2.5-3% of IDV_'
+  );
+  return;
+}
+
+if (selectedId === 'BTN_INS_TP') {
+  setLastService(from, 'INS_TP');
+  await waSendText(
+    from,
+    '📋 *Third-Party Insurance*\n\n' +
+    'Liability-only cover (mandatory by law).\n\n' +
+    'Premium is fixed by IRDAI based on engine capacity:\n' +
+    '• Up to 1000cc: ~₹2,094/year\n' +
+    '• 1000-1500cc: ~₹3,416/year\n' +
+    '• Above 1500cc: ~₹7,897/year\n\n' +
+    'Please share your *car model* to get the exact premium.\n\n' +
+    '_Reply "Talk to agent" to connect with our insurance advisor._'
+  );
+  return;
+}
+
+if (selectedId === 'BTN_INS_ZERODEP') {
+  setLastService(from, 'INS_ZERODEP');
+  await waSendText(
+    from,
+    '✨ *Zero Depreciation Add-on*\n\n' +
+    'Get full claim value without depreciation deductions on parts.\n\n' +
+    'To get a quote, please share:\n' +
+    '1. *Car model and year*\n' +
+    '2. *Current IDV* (or we\'ll estimate)\n\n' +
+    'Example:\n`Hycross 2024, IDV 28 lakh`\n\n' +
+    '_Zero Dep add-on: ~15-20% of OD premium_\n\n' +
+    '_Reply "Talk to agent" to connect with our insurance advisor._'
+  );
+  return;
+}
+
+// ================= TEST DRIVE BOOKING HANDLER =================
+if (selectedId === 'SRV_TEST_DRIVE' || selectedId === 'BTN_BOOK_TEST') {
+  console.log('PRIORITY HIT: TEST_DRIVE');
+  setLastService(from, 'TEST_DRIVE');
+
+  await waSendText(
+    from,
+    '🚗 *Book a Test Drive*\n\n' +
+    'To schedule your test drive, please share:\n' +
+    '1. *Which car* would you like to test drive?\n' +
+    '2. *Preferred date and time*\n' +
+    '3. *Your city/location*\n\n' +
+    'Example:\n`Fortuner, Saturday 3 PM, Delhi`'
+  );
+  return;
+}
+
+// ================= CONTACT SALES HANDLER =================
+if (selectedId === 'BTN_CONTACT_SALES') {
+  const salesNum = process.env.SALES_WHATSAPP_NUMBER;
+  if (salesNum) {
+    const waLink = `https://wa.me/${salesNum}?text=${encodeURIComponent(
+      'Hello VehYra Team,\nI interacted with the bot and would like personal assistance.\n\nCustomer: ' + (name || from)
+    )}`;
+    await waSendRaw({
+      messaging_product: 'whatsapp',
+      to: from,
+      type: 'interactive',
+      interactive: {
+        type: 'cta_url',
+        body: { text: '🤝 *Connect with our Sales Team*\n\nTap below to chat directly:' },
+        action: {
+          name: 'cta_url',
+          parameters: { display_text: 'Chat with Sales', url: waLink }
+        }
+      }
+    });
+  } else {
+    await waSendText(
+      from,
+      '🤝 *Our team will contact you shortly!*\n\n' +
+      'In the meantime, you can call us at the number on our profile.'
+    );
+  }
+  try {
+    postLeadToCRM({
+      bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name,
+      lastMessage: 'CONTACT_SALES_CLICKED', service: 'SALES',
+      tags: ['CONTACT_SALES'], meta: { type: 'contact_sales' }
+    });
+  } catch (_) {}
+  return;
+}
+
+// ================= TEST DRIVE FREE-TEXT HANDLER =================
+if (
+  (lastSvc || '').toUpperCase() === 'TEST_DRIVE' &&
+  msgText &&
+  msgText.trim().length > 3
+) {
+  const tdRaw = msgText.trim();
+
+  // Smart parsing: extract car model, date/time, city
+  let tdCar = null;
+  let tdDate = null;
+  let tdCity = null;
+
+  // Try comma-separated parts first (e.g. "Fortuner, Saturday 3 PM, Delhi")
+  const parts = tdRaw.split(/[,;]+/).map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 3) {
+    tdCar = parts[0];
+    tdDate = parts[1];
+    tdCity = parts[2];
+  } else if (parts.length === 2) {
+    tdCar = parts[0];
+    tdDate = parts[1];
+  } else {
+    tdCar = tdRaw;
+  }
+
+  // Try to detect city from known list
+  if (!tdCity) {
+    const cityMatch = tdRaw.match(/\b(delhi|gurgaon|gurugram|noida|mumbai|bangalore|bengaluru|chennai|kolkata|pune|hyderabad|chandigarh|jaipur|lucknow|ahmedabad|shimla)\b/i);
+    if (cityMatch) tdCity = cityMatch[1];
+  }
+
+  // Try to detect date/time patterns
+  if (!tdDate) {
+    const dateMatch = tdRaw.match(/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|\d{1,2}[\/-]\d{1,2})\b.*?(\d{1,2}\s*(am|pm|:\d{2}))?/i);
+    if (dateMatch) tdDate = dateMatch[0].trim();
+  }
+
+  // Try to detect car model from GLOBAL_MODEL_SET
+  if (tdCar && typeof detectModelsFromText === 'function') {
+    const detected = detectModelsFromText(tdRaw);
+    if (detected.length > 0) tdCar = detected[0];
+  }
+
+  const confirmLines = [
+    '✅ *Test Drive Request Submitted!*',
+    ''
+  ];
+  if (tdCar) confirmLines.push(`*Car:* ${tdCar}`);
+  if (tdDate) confirmLines.push(`*Date/Time:* ${tdDate}`);
+  if (tdCity) confirmLines.push(`*City:* ${tdCity}`);
+  if (!tdCar && !tdDate && !tdCity) confirmLines.push(`Details: _${tdRaw}_`);
+  confirmLines.push('');
+  confirmLines.push('Our team will confirm your test drive within *2 hours*.');
+  confirmLines.push('');
+  confirmLines.push('_You\'ll receive a confirmation message with the dealership address and contact._');
+
+  await waSendText(from, confirmLines.join('\n'));
+
+  try {
+    postLeadToCRM({
+      bot: 'MR_CAR_AUTO',
+      channel: 'whatsapp',
+      from,
+      name,
+      lastMessage: `TEST_DRIVE: ${tdRaw}`,
+      service: 'TEST_DRIVE',
+      tags: ['TEST_DRIVE'],
+      meta: { type: 'test_drive', car: tdCar, date: tdDate, city: tdCity, raw: tdRaw }
+    });
+  } catch (_) {}
+
+  setLastService(from, '');
+  return;
+}
+
+// ================= THIRD-PARTY INSURANCE FREE-TEXT HANDLER =================
+if (
+  (lastSvc || '').toUpperCase() === 'INS_TP' &&
+  msgText &&
+  msgText.trim().length > 2
+) {
+  const carModel = msgText.trim();
+  // Determine engine class from known data
+  let engineClass = 'above 1500cc';
+  let tpPremium = 7897;
+  const modelLower = carModel.toLowerCase();
+  // Small cars
+  if (/\b(alto|kwid|spresso|s-?presso|wagon\s*r|celerio|ignis|swift|baleno|i10|i20|tiago|punch|micro)\b/i.test(modelLower)) {
+    if (/\b(alto|kwid|spresso|s-?presso)\b/i.test(modelLower)) {
+      engineClass = 'up to 1000cc';
+      tpPremium = 2094;
+    } else {
+      engineClass = '1000-1500cc';
+      tpPremium = 3416;
+    }
+  } else if (/\b(city|ciaz|verna|rapid|virtus|slavia|amaze)\b/i.test(modelLower)) {
+    engineClass = '1000-1500cc';
+    tpPremium = 3416;
+  }
+
+  await waSendText(
+    from,
+    '📋 *Third-Party Insurance — ' + carModel + '*\n\n' +
+    `Engine Class: *${engineClass}*\n` +
+    `Annual TP Premium: ₹ *${fmtMoney(tpPremium)}*/year\n\n` +
+    '_This is the IRDAI-mandated third-party premium. Actual may vary slightly by insurer._\n\n' +
+    '_Reply "Talk to agent" to connect with our insurance advisor._'
+  );
+
+  try {
+    postLeadToCRM({
+      bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name,
+      lastMessage: `INSURANCE_TP: ${carModel}`, service: 'INSURANCE',
+      tags: ['INSURANCE', 'THIRD_PARTY'], meta: { type: 'third_party', car: carModel }
+    });
+  } catch (_) {}
+  setLastService(from, 'INSURANCE');
+  return;
+}
+
+// ================= INSURANCE FREE-TEXT HANDLERS =================
+if (
+  ((lastSvc || '').toUpperCase() === 'INS_COMP' || (lastSvc || '').toUpperCase() === 'INS_ZERODEP') &&
+  msgText &&
+  msgText.trim().length > 3
+) {
+  const insType = (lastSvc || '').toUpperCase() === 'INS_COMP' ? 'Comprehensive' : 'Zero Depreciation';
+  const insDetails = msgText.trim();
+
+  // Try to parse IDV
+  let idv = null;
+  const idvMatch = msgText.match(/(\d+(?:\.\d+)?)\s*(lakh|lac|l)\b/i);
+  if (idvMatch) idv = Number(idvMatch[1]) * 100000;
+  else {
+    const numMatch = msgText.replace(/[,₹]/g, '').match(/\b(\d{5,})\b/);
+    if (numMatch) idv = Number(numMatch[0]);
+  }
+
+  if (idv && idv > 100000) {
+    const odPremium = Math.round(idv * 0.0275); // ~2.75% of IDV for comprehensive
+    const zeroDepAddon = Math.round(odPremium * 0.175); // ~17.5% of OD
+    const tpPremium = 7897; // assume > 1500cc for estimation
+
+    const lines = [
+      `🛡️ *${insType} Insurance Estimate*`,
+      '',
+      `Car: _${insDetails}_`,
+      `Estimated IDV: ₹ *${fmtMoney(idv)}*`,
+      ''
+    ];
+
+    if (insType === 'Comprehensive') {
+      lines.push(`*OD Premium:* ₹ *${fmtMoney(odPremium)}*`);
+      lines.push(`*TP Premium:* ₹ *${fmtMoney(tpPremium)}*`);
+      lines.push(`*Total (approx):* ₹ *${fmtMoney(odPremium + tpPremium)}*`);
+    } else {
+      lines.push(`*OD Premium:* ₹ *${fmtMoney(odPremium)}*`);
+      lines.push(`*Zero Dep Add-on:* ₹ *${fmtMoney(zeroDepAddon)}*`);
+      lines.push(`*TP Premium:* ₹ *${fmtMoney(tpPremium)}*`);
+      lines.push(`*Total (approx):* ₹ *${fmtMoney(odPremium + zeroDepAddon + tpPremium)}*`);
+    }
+
+    lines.push('');
+    lines.push('_This is an estimate. Actual premium may vary based on NCB, city, and insurer._');
+    lines.push('');
+    lines.push('_Reply "Talk to agent" to connect with our insurance advisor._');
+
+    await waSendText(from, lines.join('\n'));
+  } else {
+    await waSendText(
+      from,
+      `🛡️ *${insType} Insurance*\n\n` +
+      `Your details: _${insDetails}_\n\n` +
+      'Our insurance team will review and share the best quotes.\n\n' +
+      '_Reply "Talk to agent" to connect with our insurance advisor._'
+    );
+  }
+
+  try {
+    postLeadToCRM({
+      bot: 'MR_CAR_AUTO',
+      channel: 'whatsapp',
+      from,
+      name,
+      lastMessage: `INSURANCE_${insType.toUpperCase()}: ${insDetails}`,
+      service: 'INSURANCE',
+      tags: ['INSURANCE', insType.toUpperCase()],
+      meta: { type: insType, details: insDetails, idv }
+    });
+  } catch (_) {}
+
+  setLastService(from, 'INSURANCE');
+  return;
+}
+
 // ================= LOAN TYPE BUTTON HANDLING =================
 if (selectedId === 'BTN_LOAN_NEW') {
   setLastService(from, 'LOAN_NEW');
@@ -5249,41 +5781,95 @@ if (selectedId === 'BTN_EMI_BULLET') {
 }
 // ================= END MANUAL EMI MODE HANDLING =================
 
-// ================= LOAN TYPE BUTTON HANDLING =================
-if (selectedId === 'BTN_LOAN_NEW') {
-  setLastService(from, 'LOAN_NEW');
+// ================= REFINANCE HANDLER =================
+if (selectedId === 'BTN_LOAN_REFINANCE') {
+  setLastService(from, 'LOAN_REFINANCE');
 
   await waSendText(
     from,
-    '🆕 *New Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`10 lakh 5 years`'
+    '🔄 *Refinance Your Car Loan*\n\n' +
+    'Refinance up to *200%* of your original loan amount at competitive rates.\n\n' +
+    'Please share the following details:\n' +
+    '1. *Ex-showroom price* of your car\n' +
+    '2. *Outstanding loan amount*\n' +
+    '3. *Preferred tenure* (1-7 years)\n\n' +
+    'Example:\n`15 lakh car, 8 lakh outstanding, 5 years`\n\n' +
+    `_Current refinance rate: ${REFINANCE_ROI}% p.a._`
   );
 
   return;
 }
 
-if (selectedId === 'BTN_LOAN_USED') {
-  setLastService(from, 'LOAN_USED');
+// ================= BALANCE TRANSFER HANDLER =================
+if (selectedId === 'BTN_LOAN_BT') {
+  setLastService(from, 'LOAN_BT');
 
   await waSendText(
     from,
-    '🚗 *Used Car Loan*\n\nPlease share *loan amount + tenure*.\nExample:\n`5 lakh 4 years`'
+    '💱 *Balance Transfer — Save on Interest*\n\n' +
+    'Transfer your existing car loan to a lower interest rate.\n\n' +
+    'Please share:\n' +
+    '1. *Outstanding loan amount*\n' +
+    '2. *Current interest rate*\n' +
+    '3. *Remaining tenure* (in months)\n\n' +
+    'Example:\n`8 lakh at 12% remaining 36 months`\n\n' +
+    `_Our BT rate starts from ${BT_ROI}% p.a._`
   );
 
   return;
 }
 
-if (selectedId === 'BTN_LOAN_CUSTOM') {
-  setLastService(from, 'LOAN');
+// ================= TOP-UP LOAN HANDLER =================
+if (selectedId === 'BTN_LOAN_TOPUP') {
+  setLastService(from, 'LOAN_TOPUP');
 
   await waSendText(
     from,
-    '📊 *Manual EMI*\n\nPlease share *loan amount + tenure*.\nExample:\n`7 lakh 60 months`'
+    '➕ *Top-up Loan on Existing Car*\n\n' +
+    'Get additional financing up to *150% LTV* of your original loan.\n\n' +
+    'Please share:\n' +
+    '1. *Original loan amount*\n' +
+    '2. *Outstanding balance*\n' +
+    '3. *Additional amount needed*\n\n' +
+    'Example:\n`Original 12 lakh, outstanding 6 lakh, need 4 lakh more`\n\n' +
+    `_Top-up rate: ${TOPUP_ROI}% p.a._`
   );
 
   return;
 }
-// ================= END LOAN TYPE HANDLING =================
 
+// ================= LOAN ELIGIBILITY HANDLER =================
+if (selectedId === 'BTN_LOAN_ELIG') {
+  setLastService(from, 'LOAN_ELIG');
+
+  await waSendText(
+    from,
+    '📊 *Loan Eligibility Calculator*\n\n' +
+    'Check how much car loan you qualify for.\n\n' +
+    'Please share:\n' +
+    '1. *Monthly income*\n' +
+    '2. *Existing EMI obligations* (if any)\n\n' +
+    'Example:\n`Income 80000, existing EMI 15000`\n\n' +
+    '_Based on 50% FOIR (Fixed Obligation to Income Ratio)_'
+  );
+
+  return;
+}
+
+
+// ================= STALE FLOW GUARD =================
+// If user returns to a multi-step flow after 15 min, reset and show menu
+if (isFlowStale(from) && msgText && !selectedId) {
+  const staleSvc = (lastSvc || '').toUpperCase();
+  if (DEBUG) console.log('STALE_FLOW: resetting', staleSvc, 'for', from);
+  setLastService(from, '');
+  await waSendText(
+    from,
+    'Your previous session has expired. Let\'s start fresh!'
+  );
+  await waSendListMenu(from);
+  return;
+}
 
 // ================= LOAN EMI FREE-TEXT HANDLER (SAFE) =================
 const svc = (lastSvc || '').toUpperCase();
@@ -5451,6 +6037,300 @@ if (
 }
 // ================= END AUTO EMI =================
 
+// ================= REFINANCE FREE-TEXT HANDLER =================
+if (
+  svc === 'LOAN_REFINANCE' &&
+  msgText &&
+  /\d/.test(msgText)
+) {
+  // Parse: ex-showroom price, outstanding, tenure
+  const amounts = [];
+  const lakhMatches = [...msgText.matchAll(/(\d+(?:\.\d+)?)\s*(lakh|lac|l)\b/gi)];
+  for (const m of lakhMatches) amounts.push(Number(m[1]) * 100000);
+  if (amounts.length < 2) {
+    const numMatches = [...msgText.replace(/[,₹]/g, '').matchAll(/\b(\d{5,})\b/g)];
+    for (const m of numMatches) amounts.push(Number(m[1]));
+  }
+
+  const yearMatch = msgText.match(/(\d+)\s*(year|yr)/i);
+  const monthMatch = msgText.match(/(\d+)\s*(month)/i);
+  let months = yearMatch ? Number(yearMatch[1]) * 12 : (monthMatch ? Number(monthMatch[1]) : 60);
+  months = Math.min(months, 84);
+
+  if (amounts.length < 2) {
+    await waSendText(
+      from,
+      'Please share *car ex-showroom price* and *outstanding amount*.\n' +
+      'Example: `15 lakh car, 8 lakh outstanding, 5 years`'
+    );
+    setLastService(from, 'LOAN_REFINANCE');
+    return;
+  }
+
+  const originalPrice = Math.max(amounts[0], amounts[1]);
+  const outstandingAmt = Math.min(amounts[0], amounts[1]);
+  const maxEligible = originalPrice * 2.0; // 200% refinance
+  const availableTopUp = maxEligible - outstandingAmt;
+  const newEmi = calcEmiSimple(maxEligible, REFINANCE_ROI, months);
+  const oldEmi = calcEmiSimple(outstandingAmt, 12, months); // assume old rate ~12%
+
+  const lines = [
+    '🔄 *Refinance Analysis*',
+    '',
+    `Car Ex-Showroom: ₹ *${fmtMoney(originalPrice)}*`,
+    `Outstanding Loan: ₹ *${fmtMoney(outstandingAmt)}*`,
+    '',
+    `*Max Refinance Eligible (200%):* ₹ *${fmtMoney(maxEligible)}*`,
+    `*Available Cash-Out:* ₹ *${fmtMoney(availableTopUp)}*`,
+    '',
+    `*New EMI @ ${REFINANCE_ROI}%:* ₹ *${fmtMoney(newEmi)}* / month`,
+    `Tenure: *${months} months*`,
+    '',
+    '✅ *Loan approval possible in ~30 minutes (T&Cs apply)*',
+    '',
+    '_Reply "Talk to agent" to connect with our finance advisor._'
+  ];
+
+  await waSendText(from, lines.join('\n'));
+  try {
+    postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `REFINANCE ${originalPrice} outstanding=${outstandingAmt}`, service: 'LOAN', tags: ['REFINANCE'], meta: {} });
+  } catch (_) {}
+  setLastService(from, 'LOAN');
+  return;
+}
+
+// ================= BALANCE TRANSFER FREE-TEXT HANDLER =================
+if (
+  svc === 'LOAN_BT' &&
+  msgText &&
+  /\d/.test(msgText)
+) {
+  // Parse: outstanding, current rate, remaining tenure
+  let outstandingAmt = null;
+  const lakhMatch = msgText.match(/(\d+(?:\.\d+)?)\s*(lakh|lac|l)\b/i);
+  if (lakhMatch) outstandingAmt = Number(lakhMatch[1]) * 100000;
+  else {
+    const numMatch = msgText.replace(/[,₹]/g, '').match(/\b(\d{5,})\b/);
+    if (numMatch) outstandingAmt = Number(numMatch[0]);
+  }
+
+  const rateMatch = msgText.match(/(\d+(?:\.\d+)?)\s*%/);
+  const currentRate = rateMatch ? Number(rateMatch[1]) : 12; // default 12% if not specified
+
+  const yearMatch = msgText.match(/(\d+)\s*(year|yr)/i);
+  const monthMatch = msgText.match(/(\d+)\s*(month)/i);
+  let remainingMonths = yearMatch ? Number(yearMatch[1]) * 12 : (monthMatch ? Number(monthMatch[1]) : 48);
+  remainingMonths = Math.min(remainingMonths, 84);
+
+  if (!outstandingAmt) {
+    await waSendText(
+      from,
+      'Please share *outstanding amount*, *current rate*, and *remaining tenure*.\n' +
+      'Example: `8 lakh at 12% remaining 36 months`'
+    );
+    setLastService(from, 'LOAN_BT');
+    return;
+  }
+
+  const oldEmi = calcEmiSimple(outstandingAmt, currentRate, remainingMonths);
+  const newEmi = calcEmiSimple(outstandingAmt, BT_ROI, remainingMonths);
+  const monthlySaving = oldEmi - newEmi;
+  const totalSaving = monthlySaving * remainingMonths;
+
+  const lines = [
+    '💱 *Balance Transfer Comparison*',
+    '',
+    `Outstanding Loan: ₹ *${fmtMoney(outstandingAmt)}*`,
+    `Remaining Tenure: *${remainingMonths} months*`,
+    '',
+    `*Current Rate:* ${currentRate}% → EMI: ₹ *${fmtMoney(oldEmi)}*`,
+    `*New BT Rate:* ${BT_ROI}% → EMI: ₹ *${fmtMoney(newEmi)}*`,
+    '',
+    `*Monthly Saving:* ₹ *${fmtMoney(monthlySaving)}*`,
+    `*Total Saving:* ₹ *${fmtMoney(totalSaving)}* over ${remainingMonths} months`,
+    '',
+    '✅ *Balance transfer approval in ~24 hours (T&Cs apply)*',
+    '',
+    '_Reply "Talk to agent" to connect with our finance advisor._'
+  ];
+
+  await waSendText(from, lines.join('\n'));
+  try {
+    postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `BT ${outstandingAmt} from ${currentRate}% to ${BT_ROI}%`, service: 'LOAN', tags: ['BALANCE_TRANSFER'], meta: {} });
+  } catch (_) {}
+  setLastService(from, 'LOAN');
+  return;
+}
+
+// ================= TOP-UP LOAN FREE-TEXT HANDLER =================
+if (
+  svc === 'LOAN_TOPUP' &&
+  msgText &&
+  /\d/.test(msgText)
+) {
+  const amounts = [];
+  const lakhMatches = [...msgText.matchAll(/(\d+(?:\.\d+)?)\s*(lakh|lac|l)\b/gi)];
+  for (const m of lakhMatches) amounts.push(Number(m[1]) * 100000);
+  if (amounts.length < 3) {
+    const numMatches = [...msgText.replace(/[,₹]/g, '').matchAll(/\b(\d{5,})\b/g)];
+    for (const m of numMatches) {
+      if (!amounts.includes(Number(m[1]))) amounts.push(Number(m[1]));
+    }
+  }
+
+  if (amounts.length < 3) {
+    await waSendText(
+      from,
+      'Please share *original loan*, *outstanding balance*, and *additional amount needed*.\n' +
+      'Example: `Original 12 lakh, outstanding 6 lakh, need 4 lakh more`'
+    );
+    setLastService(from, 'LOAN_TOPUP');
+    return;
+  }
+
+  // Sort to identify: original (largest), outstanding (middle), top-up (smallest likely)
+  amounts.sort((a, b) => b - a);
+  const originalAmt = amounts[0];
+  const outstandingAmt = amounts[1];
+  const topupAmt = amounts[2];
+
+  const maxLTV = originalAmt * 1.5; // 150% LTV
+  const combinedLoan = outstandingAmt + topupAmt;
+
+  if (combinedLoan > maxLTV) {
+    await waSendText(
+      from,
+      `*Top-up Limit Exceeded*\n\n` +
+      `Original Loan: ₹ ${fmtMoney(originalAmt)}\n` +
+      `Max LTV (150%): ₹ ${fmtMoney(maxLTV)}\n` +
+      `Outstanding + Top-up: ₹ ${fmtMoney(combinedLoan)}\n\n` +
+      `The combined amount exceeds the 150% LTV limit. Maximum additional top-up available: ₹ *${fmtMoney(Math.max(0, maxLTV - outstandingAmt))}*`
+    );
+    setLastService(from, 'LOAN');
+    return;
+  }
+
+  const tenure = 60; // default 5 years
+  const combinedEmi = calcEmiSimple(combinedLoan, TOPUP_ROI, tenure);
+
+  const lines = [
+    '➕ *Top-up Loan Analysis*',
+    '',
+    `Original Loan: ₹ *${fmtMoney(originalAmt)}*`,
+    `Outstanding: ₹ *${fmtMoney(outstandingAmt)}*`,
+    `Top-up Amount: ₹ *${fmtMoney(topupAmt)}*`,
+    '',
+    `*Combined Loan:* ₹ *${fmtMoney(combinedLoan)}*`,
+    `*Max Allowed (150% LTV):* ₹ *${fmtMoney(maxLTV)}*`,
+    '',
+    `*New EMI @ ${TOPUP_ROI}%:* ₹ *${fmtMoney(combinedEmi)}* / month`,
+    `Tenure: *${tenure} months*`,
+    '',
+    '✅ *Approval possible in ~24 hours (T&Cs apply)*',
+    '',
+    '_Reply "Talk to agent" to connect with our finance advisor._'
+  ];
+
+  await waSendText(from, lines.join('\n'));
+  try {
+    postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `TOPUP original=${originalAmt} outstanding=${outstandingAmt} topup=${topupAmt}`, service: 'LOAN', tags: ['TOPUP_LOAN'], meta: {} });
+  } catch (_) {}
+  setLastService(from, 'LOAN');
+  return;
+}
+
+// ================= LOAN ELIGIBILITY FREE-TEXT HANDLER =================
+if (
+  svc === 'LOAN_ELIG' &&
+  msgText &&
+  /\d/.test(msgText)
+) {
+  // Parse income and existing EMI
+  let income = null;
+  let existingEMI = 0;
+
+  // Try to find two amounts
+  const allAmounts = [];
+  const lakhMatches = [...msgText.matchAll(/(\d+(?:\.\d+)?)\s*(lakh|lac|l)\b/gi)];
+  for (const m of lakhMatches) allAmounts.push(Number(m[1]) * 100000);
+
+  const kMatches = [...msgText.matchAll(/(\d+(?:\.\d+)?)\s*k\b/gi)];
+  for (const m of kMatches) allAmounts.push(Number(m[1]) * 1000);
+
+  // Plain numbers (likely monthly figures)
+  const plainNums = [...msgText.replace(/[,₹]/g, '').matchAll(/\b(\d{4,})\b/g)];
+  for (const m of plainNums) {
+    const v = Number(m[1]);
+    if (v >= 5000 && !allAmounts.includes(v)) allAmounts.push(v);
+  }
+
+  if (allAmounts.length >= 2) {
+    income = Math.max(...allAmounts);
+    existingEMI = Math.min(...allAmounts);
+  } else if (allAmounts.length === 1) {
+    income = allAmounts[0];
+    existingEMI = 0;
+  }
+
+  if (!income || income < 10000) {
+    await waSendText(
+      from,
+      'Please share *monthly income* and *existing EMI* (if any).\n' +
+      'Example: `Income 80000, existing EMI 15000`'
+    );
+    setLastService(from, 'LOAN_ELIG');
+    return;
+  }
+
+  const maxEmiCapacity = (income * 0.5) - existingEMI; // 50% FOIR
+  if (maxEmiCapacity <= 0) {
+    await waSendText(
+      from,
+      '⚠️ *Eligibility Alert*\n\n' +
+      `Monthly Income: ₹ ${fmtMoney(income)}\n` +
+      `Existing EMIs: ₹ ${fmtMoney(existingEMI)}\n\n` +
+      'Your existing obligations exceed the 50% FOIR limit. Please reduce existing EMIs or increase income to qualify.'
+    );
+    setLastService(from, 'LOAN');
+    return;
+  }
+
+  // Reverse-calculate max loan from max EMI capacity
+  function maxLoanFromEMI(maxEmi, rate, months) {
+    const r = rate / 12 / 100;
+    const pow = Math.pow(1 + r, months);
+    return Math.round(maxEmi * (pow - 1) / (r * pow));
+  }
+
+  const maxNewCarLoan = maxLoanFromEMI(maxEmiCapacity, NEW_CAR_ROI, 84); // 7 years
+  const maxUsedCarLoan = maxLoanFromEMI(maxEmiCapacity, USED_CAR_ROI_INTERNAL, 60); // 5 years
+
+  const lines = [
+    '📊 *Loan Eligibility Report*',
+    '',
+    `Monthly Income: ₹ *${fmtMoney(income)}*`,
+    `Existing EMIs: ₹ *${fmtMoney(existingEMI)}*`,
+    `Max EMI Capacity (50% FOIR): ₹ *${fmtMoney(Math.round(maxEmiCapacity))}*`,
+    '',
+    `*New Car Loan (@ ${NEW_CAR_ROI}%, 7 yrs):*`,
+    `  Eligible up to ₹ *${fmtMoney(maxNewCarLoan)}*`,
+    '',
+    `*Used Car Loan (@ ${USED_CAR_ROI_VISIBLE}%, 5 yrs):*`,
+    `  Eligible up to ₹ *${fmtMoney(maxUsedCarLoan)}*`,
+    '',
+    '✅ *Pre-approval available — share documents to proceed.*',
+    '',
+    '_Reply "Talk to agent" to connect with our finance advisor._'
+  ];
+
+  await waSendText(from, lines.join('\n'));
+  try {
+    postLeadToCRM({ bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name, lastMessage: `ELIGIBILITY income=${income} existingEMI=${existingEMI}`, service: 'LOAN', tags: ['LOAN_ELIGIBILITY'], meta: {} });
+  } catch (_) {}
+  setLastService(from, 'LOAN');
+  return;
+}
+
 // ================= END LOAN EMI HANDLER =================
 
    // ------------------------------------------------------------------
@@ -5501,7 +6381,7 @@ try {
 
     // ---- Admin alert for real incoming messages ----
     try {
-      // Only if ADMIN_WA is set, we have a sender, and it’s not the admin number itself
+      // Only if ADMIN_WA is set, we have a sender, and it's not the admin number itself
       if (ADMIN_WA && from && from !== ADMIN_WA) {
         // Basic filters: if you want alerts only for text/interactive, uncomment next line:
         // if (!(type === 'text' || type === 'interactive')) { /* skip */ } else {
@@ -5693,10 +6573,44 @@ return;
           setLastService(from, 'SELL');
           await waSendText(
             from,
-            'Please share *car make/model, year, km, city* and a few photos. We’ll get you the best quote.'
+            'Please share *car make/model, year, km, city* and a few photos. We\'ll get you the best quote.'
           );
           return;
-  
+
+case 'SRV_INSURANCE':
+  setLastService(from, 'INSURANCE');
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: '🛡️ *Car Insurance*\n\nChoose the type of insurance cover:' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_INS_COMP', title: 'Comprehensive' } },
+          { type: 'reply', reply: { id: 'BTN_INS_TP', title: 'Third-Party' } },
+          { type: 'reply', reply: { id: 'BTN_INS_ZERODEP', title: 'Zero Dep' } }
+        ]
+      }
+    }
+  });
+  return;
+
+case 'SRV_TEST_DRIVE':
+case 'BTN_BOOK_TEST':
+  setLastService(from, 'TEST_DRIVE');
+  await waSendText(
+    from,
+    '🚗 *Book a Test Drive*\n\n' +
+    'To schedule your test drive, please share:\n' +
+    '1. *Which car* would you like to test drive?\n' +
+    '2. *Preferred date and time*\n' +
+    '3. *Your city/location*\n\n' +
+    'Example:\n`Fortuner, Saturday 3 PM, Delhi`'
+  );
+  return;
+
 case 'SRV_LOAN':
   console.log('HIT: SRV_LOAN');
   setLastService(from, 'LOAN');
@@ -5705,18 +6619,98 @@ case 'SRV_LOAN':
     to: from,
     type: 'interactive',
     interactive: {
-      type: 'button',
-      body: { text: 'Choose loan option:' },
+      type: 'list',
+      header: { type: 'text', text: 'Loan & Finance' },
+      body: { text: 'Choose a loan product or tool:' },
+      footer: { text: 'MR.CAR Finance Solutions' },
       action: {
-        buttons: [
-          { type: 'reply', reply: { id: 'BTN_LOAN_NEW',  title: 'New Car Loan' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_USED', title: 'Used Car Loan' } },
-          { type: 'reply', reply: { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI' } }
+        button: 'View Options',
+        sections: [
+          {
+            title: 'Loan Products',
+            rows: [
+              { id: 'BTN_LOAN_NEW', title: 'New Car Loan', description: 'Calculate EMI for new cars' },
+              { id: 'BTN_LOAN_USED', title: 'Used Car Loan', description: 'Calculate EMI for pre-owned' },
+              { id: 'BTN_LOAN_REFINANCE', title: 'Refinance', description: 'Refinance existing car loan' },
+              { id: 'BTN_LOAN_BT', title: 'Balance Transfer', description: 'Transfer loan to lower rate' }
+            ]
+          },
+          {
+            title: 'Tools',
+            rows: [
+              { id: 'BTN_LOAN_TOPUP', title: 'Top-up Loan', description: 'Additional loan on existing car' },
+              { id: 'BTN_LOAN_ELIG', title: 'Loan Eligibility', description: 'Check your loan eligibility' },
+              { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI', description: 'Custom EMI calculation' }
+            ]
+          }
         ]
       }
     }
   });
-  return; // ⬅ THIS LINE IS THE FIX
+  return;
+
+// ================= REFINANCE (SWITCH CASE) =================
+case 'BTN_LOAN_REFINANCE':
+  setLastService(from, 'LOAN_REFINANCE');
+  await waSendText(
+    from,
+    '🔄 *Refinance Your Car Loan*\n\n' +
+    'Refinance up to *200%* of your original loan amount at competitive rates.\n\n' +
+    'Please share the following details:\n' +
+    '1. *Ex-showroom price* of your car\n' +
+    '2. *Outstanding loan amount*\n' +
+    '3. *Preferred tenure* (1-7 years)\n\n' +
+    'Example:\n`15 lakh car, 8 lakh outstanding, 5 years`\n\n' +
+    `_Current refinance rate: ${REFINANCE_ROI}% p.a._`
+  );
+  return;
+
+// ================= BALANCE TRANSFER (SWITCH CASE) =================
+case 'BTN_LOAN_BT':
+  setLastService(from, 'LOAN_BT');
+  await waSendText(
+    from,
+    '💱 *Balance Transfer — Save on Interest*\n\n' +
+    'Transfer your existing car loan to a lower interest rate.\n\n' +
+    'Please share:\n' +
+    '1. *Outstanding loan amount*\n' +
+    '2. *Current interest rate*\n' +
+    '3. *Remaining tenure* (in months)\n\n' +
+    'Example:\n`8 lakh at 12% remaining 36 months`\n\n' +
+    `_Our BT rate starts from ${BT_ROI}% p.a._`
+  );
+  return;
+
+// ================= TOP-UP LOAN (SWITCH CASE) =================
+case 'BTN_LOAN_TOPUP':
+  setLastService(from, 'LOAN_TOPUP');
+  await waSendText(
+    from,
+    '➕ *Top-up Loan on Existing Car*\n\n' +
+    'Get additional financing up to *150% LTV* of your original loan.\n\n' +
+    'Please share:\n' +
+    '1. *Original loan amount*\n' +
+    '2. *Outstanding balance*\n' +
+    '3. *Additional amount needed*\n\n' +
+    'Example:\n`Original 12 lakh, outstanding 6 lakh, need 4 lakh more`\n\n' +
+    `_Top-up rate: ${TOPUP_ROI}% p.a._`
+  );
+  return;
+
+// ================= LOAN ELIGIBILITY (SWITCH CASE) =================
+case 'BTN_LOAN_ELIG':
+  setLastService(from, 'LOAN_ELIG');
+  await waSendText(
+    from,
+    '📊 *Loan Eligibility Calculator*\n\n' +
+    'Check how much car loan you qualify for.\n\n' +
+    'Please share:\n' +
+    '1. *Monthly income*\n' +
+    '2. *Existing EMI obligations* (if any)\n\n' +
+    'Example:\n`Income 80000, existing EMI 15000`\n\n' +
+    '_Based on 50% FOIR (Fixed Obligation to Income Ratio)_'
+  );
+  return;
 
 // ================= NEW CAR LOAN (AUTO ROI @ 8.1%) =================
 case 'BTN_LOAN_NEW':
@@ -5938,6 +6932,132 @@ if (within24h) {
 
   return;
 }
+
+// ================= TEXT-BASED TRIGGERS (NATURAL LANGUAGE → SERVICE MENUS) =================
+const msgLower = (msgText || '').trim().toLowerCase();
+
+// --- "Talk to agent" / "talk to human" / "agent" ---
+if (/^(talk\s*to\s*(agent|human|advisor|person|executive)|agent|human|speak\s*to\s*(agent|someone)|connect\s*(me|agent)|real\s*person)\s*$/i.test(msgLower)) {
+  const salesNum = process.env.SALES_WHATSAPP_NUMBER;
+  if (salesNum) {
+    const waLink = `https://wa.me/${salesNum}?text=${encodeURIComponent(
+      'Hello VehYra Team,\nI interacted with the bot and would like personal assistance.\n\nCustomer: ' + (name || from)
+    )}`;
+    await waSendRaw({
+      messaging_product: 'whatsapp',
+      to: from,
+      type: 'interactive',
+      interactive: {
+        type: 'cta_url',
+        body: { text: '🤝 *Connecting you with our team!*\n\nTap below to chat directly with our advisor.' },
+        action: {
+          name: 'cta_url',
+          parameters: { display_text: 'Chat with Advisor', url: waLink }
+        }
+      }
+    });
+  } else {
+    await waSendText(
+      from,
+      '🤝 *We\'re here to help!*\n\n' +
+      'Our advisor will reach out to you shortly.\n' +
+      'You can also call us at the number on our profile.'
+    );
+  }
+  try {
+    postLeadToCRM({
+      bot: 'MR_CAR_AUTO', channel: 'whatsapp', from, name,
+      lastMessage: 'AGENT_REQUEST', service: 'AGENT',
+      tags: ['AGENT_REQUEST'], meta: { type: 'agent_request' }
+    });
+  } catch (_) {}
+  return;
+}
+
+// --- "Loan" / "EMI" / "Finance" text triggers ---
+if (/^(loan|emi|finance|car\s*loan|loan\s*options?|emi\s*calculator?|refinance|balance\s*transfer)\s*$/i.test(msgLower)) {
+  setLastService(from, 'LOAN');
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      header: { type: 'text', text: 'Loan & Finance' },
+      body: { text: 'Choose a loan product or tool:' },
+      footer: { text: 'MR.CAR Finance Solutions' },
+      action: {
+        button: 'View Options',
+        sections: [
+          {
+            title: 'Loan Products',
+            rows: [
+              { id: 'BTN_LOAN_NEW', title: 'New Car Loan', description: 'Calculate EMI for new cars' },
+              { id: 'BTN_LOAN_USED', title: 'Used Car Loan', description: 'Calculate EMI for pre-owned' },
+              { id: 'BTN_LOAN_REFINANCE', title: 'Refinance', description: 'Refinance existing car loan' },
+              { id: 'BTN_LOAN_BT', title: 'Balance Transfer', description: 'Transfer loan to lower rate' }
+            ]
+          },
+          {
+            title: 'Tools',
+            rows: [
+              { id: 'BTN_LOAN_TOPUP', title: 'Top-up Loan', description: 'Additional loan on existing car' },
+              { id: 'BTN_LOAN_ELIG', title: 'Loan Eligibility', description: 'Check your loan eligibility' },
+              { id: 'BTN_LOAN_CUSTOM', title: 'Manual EMI', description: 'Custom EMI calculation' }
+            ]
+          }
+        ]
+      }
+    }
+  });
+  return;
+}
+
+// --- "Insurance" text trigger ---
+if (/^(insurance|car\s*insurance|insure|zero\s*dep|comprehensive\s*insurance|third\s*party)\s*$/i.test(msgLower)) {
+  setLastService(from, 'INSURANCE');
+  await waSendRaw({
+    messaging_product: 'whatsapp',
+    to: from,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: '🛡️ *Car Insurance*\n\nChoose the type of insurance cover:' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'BTN_INS_COMP', title: 'Comprehensive' } },
+          { type: 'reply', reply: { id: 'BTN_INS_TP', title: 'Third-Party' } },
+          { type: 'reply', reply: { id: 'BTN_INS_ZERODEP', title: 'Zero Dep' } }
+        ]
+      }
+    }
+  });
+  return;
+}
+
+// --- "Test drive" text trigger ---
+if (/^(test\s*drive|book\s*test\s*drive|td|drive\s*test)\s*$/i.test(msgLower)) {
+  setLastService(from, 'TEST_DRIVE');
+  await waSendText(
+    from,
+    '🚗 *Book a Test Drive*\n\n' +
+    'To schedule your test drive, please share:\n' +
+    '1. *Which car* would you like to test drive?\n' +
+    '2. *Preferred date and time*\n' +
+    '3. *Your city/location*\n\n' +
+    'Example:\n`Fortuner, Saturday 3 PM, Delhi`'
+  );
+  return;
+}
+
+// --- "Menu" / "Options" / "Help" (show main menu) ---
+if (/^(menu|options|services|main\s*menu|show\s*menu|back)\s*$/i.test(msgLower)) {
+  await waSendListMenu(from);
+  return;
+}
+
+// ================= END TEXT-BASED TRIGGERS =================
+
     // bullet command
     const bulletCmd = (msgText || '').trim().match(/^bullet\s+([\d,]+)\s*([\d\.]+)?\s*(\d+)?/i);
     if (bulletCmd) {
@@ -6755,7 +7875,7 @@ for (const c of targets) {
         phone,
         err && err.message ? err.message : err
       );
-      // we don’t mark as failed here, text template send will still try
+      // we don't mark as failed here, text template send will still try
     }
   }
 
