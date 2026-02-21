@@ -4335,24 +4335,25 @@ let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience, stateMatch);
         if (allMatches.length > 1 && !hasVariantLock) {
           const out = [];
           out.push(`*Available variants — ${strictModel}*`);
-          allMatches.forEach((m, i) => {
+          const displayed = [];
+          for (const m of allMatches) {
             const mdl = String(m.row[m.idxModel] || '').trim();
-
-// ---- HARD FILTER: STRICT MODEL ONLY ----
-if (
-  strictModel &&
-  mdl &&
-  !mdl.toUpperCase().startsWith(strictModel)
-) {
-  return; // skip this row only
-}
-
+            if (strictModel && mdl && !mdl.toUpperCase().startsWith(strictModel)) continue;
             const varr = String(m.row[m.idxVariant] || '').trim();
-            out.push(`${i+1}) *${mdl} ${varr}* – On-road ₹ ${fmtMoney(m.onroad)}`);
-          });
-          await waSendText(to, out.join("\n"));
-          setLastService(to, 'NEW');
-          return true;
+            const title = `${mdl} ${varr}`.trim();
+            displayed.push({ title, onroad: m.onroad || 0, brand: m.brand, row: m.row, idxModel: m.idxModel, idxVariant: m.idxVariant });
+            out.push(`${displayed.length}) *${title}* – On-road ₹ ${fmtMoney(m.onroad)}`);
+            if (displayed.length >= VARIANT_LIST_LIMIT) break;
+          }
+          if (displayed.length >= 2) {
+            out.push('');
+            out.push('Reply with the *number* (1–' + displayed.length + ') to get detailed on-road price & offers.');
+            if (!global.lastVariantList) global.lastVariantList = new Map();
+            global.lastVariantList.set(to, { ts: Date.now(), variants: displayed });
+            await waSendText(to, out.join('\n'));
+            setLastService(to, 'NEW');
+            return true;
+          }
         }
       } else {
         strictModel = null;
@@ -4596,16 +4597,22 @@ if (
     }
     out.push(`*Available Variants — ${resolvedModel || 'Model'}*`);
 
+    const displayed2 = [];
     variants.forEach((m, i) => {
       const mdl = String(m.row[m.idxModel] || '').trim();
       const varr = String(m.row[m.idxVariant] || '').trim();
-      out.push(`${i + 1}) *${mdl} ${varr}*`);
+      const title = `${mdl} ${varr}`.trim();
+      out.push(`${i + 1}) *${title}*`);
+      displayed2.push({ title, onroad: m.onroad || 0, brand: m.brand, row: m.row, idxModel: m.idxModel, idxVariant: m.idxVariant });
     });
 
     out.push('');
-    out.push('Reply with the *variant name* to get on-road price.');
+    out.push('Reply with the *number* (1–' + displayed2.length + ') to get detailed on-road price & offers.');
 
+    if (!global.lastVariantList) global.lastVariantList = new Map();
+    global.lastVariantList.set(to, { ts: Date.now(), variants: displayed2 });
     await waSendText(to, out.join('\n'));
+    setLastService(to, 'NEW');
     return true; // ⛔ STOP — do NOT fall into single-quote
   }
 }
