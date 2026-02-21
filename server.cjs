@@ -1914,16 +1914,27 @@ if (
     if (ei >= 0) expectedIdx = ei;
   }
 
+  // Detect image columns: single PICTURE/IMAGE column OR multiple IMAGE_1..IMAGE_5
   const pictureIdx = (() => {
     const keys = Object.keys(idxMap);
     for (const k of keys) {
       const u = k.toUpperCase();
-      if (u.includes('PICTURE') || u.includes('PHOTO') || u.includes('IMAGE') || u.includes('LINK')) {
+      if ((u.includes('PICTURE') || u.includes('PHOTO') || u.includes('IMAGE') || u.includes('LINK')) && !/[_\s]\d/.test(u)) {
         return idxMap[k];
       }
     }
     return -1;
   })();
+
+  // Detect multiple image columns (IMAGE_1, IMAGE_2, PICTURE_1, PHOTO_1, etc.)
+  const multiPicIdxs = [];
+  for (let ci = 0; ci < header.length; ci++) {
+    const h = String(header[ci] || '').toUpperCase().trim();
+    if (/^(IMAGE|PICTURE|PHOTO|PIC)[_\s]?\d+$/.test(h)) {
+      multiPicIdxs.push(ci);
+    }
+  }
+  multiPicIdxs.sort((a, b) => a - b);
 
   const qLower = (query || '').toLowerCase();
   const tokens = qLower.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
@@ -2170,19 +2181,33 @@ const bulletSim = simulateBulletPlan({
   bulletPct: 0.25                  // ✔ 25% bullet
 });
 
-  let picLink = null;
-  if (pictureIdx >= 0 && selRow[pictureIdx]) {
-    const cellVal = String(selRow[pictureIdx] || '');
-    if (cellVal.includes('http')) picLink = cellVal.trim();
-  } else {
-    for (const c of selRow) {
-      const s = String(c || '');
-      if (s.includes('http')) {
-        picLink = s.trim();
-        break;
-      }
+  // Collect all image URLs for this car
+  const picLinks = [];
+
+  // 1) Multi-column images (IMAGE_1, IMAGE_2, etc.)
+  if (multiPicIdxs.length > 0) {
+    for (const ci of multiPicIdxs) {
+      const v = String(selRow[ci] || '').trim();
+      if (v.includes('http')) picLinks.push(v);
     }
   }
+
+  // 2) Single PICTURE column (may have comma/pipe-separated URLs)
+  if (picLinks.length === 0 && pictureIdx >= 0 && selRow[pictureIdx]) {
+    const cellVal = String(selRow[pictureIdx] || '').trim();
+    const urls = cellVal.split(/[,|;\n]+/).map(u => u.trim()).filter(u => u.includes('http'));
+    picLinks.push(...urls);
+  }
+
+  // 3) Fallback: scan entire row for any URL
+  if (picLinks.length === 0) {
+    for (const c of selRow) {
+      const s = String(c || '').trim();
+      if (s.includes('http')) { picLinks.push(s); break; }
+    }
+  }
+
+  const picLink = picLinks.length > 0 ? picLinks[0] : null;
 
   const lines = [];
   lines.push('*PRE-OWNED CAR QUOTE*');
@@ -2212,7 +2237,7 @@ const bulletSim = simulateBulletPlan({
   lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*');
   lines.push('\n*Terms & Conditions Apply ✅*');
 
-  return { text: lines.join('\n'), picLink };
+  return { text: lines.join('\n'), picLink, picLinks };
 }
 
 // ---------------- Greeting helper ----------------
@@ -5374,10 +5399,16 @@ if (type === 'text' && msgText) {
     // 🔒 mark serial response
     global.__USED_SERIAL_ACTIVE__ = true;
 
-    const { text, picLink } = await buildSingleUsedCarQuote(row, from);
+    const { text, picLink, picLinks } = await buildSingleUsedCarQuote(row, from);
+    const images = (picLinks && picLinks.length > 0) ? picLinks : (picLink ? [picLink] : []);
 
-    if (picLink) {
-      await waSendImage(from, picLink, text);
+    if (images.length > 0) {
+      // Send first image with full quote as caption
+      await waSendImage(from, images[0], text);
+      // Send remaining images with short captions
+      for (let pi = 1; pi < Math.min(images.length, 5); pi++) {
+        await waSendImage(from, images[pi], `📸 Photo ${pi + 1}/${images.length}`);
+      }
     } else {
       await waSendText(from, text);
     }
