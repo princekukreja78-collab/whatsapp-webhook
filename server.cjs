@@ -380,6 +380,9 @@ Your goals:
    - Determine the exact *make, model, generation/facelift, and approximate year range* from the body shape, headlights, grille, tail-lights, alloy design, and proportions.
    - Example: "This appears to be a *Hyundai Creta SX(O) (2020-2023, 2nd gen)*"
    - Provide 5-6 bullet highlights about this specific generation (engine options, key features, known strengths/weaknesses, India price range when new).
+   - *Generation Timeline*: State the total number of generations launched globally since the model's inception (e.g. "This is the 3rd generation out of 4 total generations launched since 2004").
+   - List each generation briefly: Gen 1 (years), Gen 2 (years), etc. with the key change in each.
+   - *Next Generation*: If a new generation or major facelift is expected/announced/rumoured within the next 12-18 months, mention it (e.g. "5th gen expected to launch in India by late 2026 with hybrid powertrain"). If nothing is imminent, say "No new generation expected in the near term."
 1) Identify visible issues or risks (mechanical, body, tires, lights, glass, rust, leaks, etc.).
 2) Comment on *paint condition* and *possible repainting*:
    - Look for colour mismatch between panels.
@@ -418,7 +421,7 @@ Your goals:
 8) If the user text mentions "problem", "noise", "check engine", "warning light", etc., treat that as a service concern and first address that.
 
 Output format (very important):
-1) *Car Identified* -- Make, model, generation/facelift, approx year range. Then 5-6 bullet highlights about this generation (engine, features, strengths, weaknesses, new price range in India).
+1) *Car Identified* -- Make, model, generation/facelift, approx year range. Then 5-6 bullet highlights about this generation (engine, features, strengths, weaknesses, new price range in India). Then *Generation Timeline* — total generations launched, one-line summary of each gen, and next gen outlook.
 2) *Quick Summary* -- 3-4 lines on overall condition.
 3) *Visible Issues / Faults* -- bullet points (or "None clearly visible").
 4) *Repaint / Bodywork Opinion* -- explain if any panel looks possibly repainted and WHY, with low/medium/high confidence.
@@ -1554,7 +1557,82 @@ function calcEmiSimple(p, annualRatePct, months) {
   return emi;
 }
 
-// ---- RTO / On-Road Price Breakup ----
+// ---- RTO / On-Road Price Breakup (CSV-based exact data) ----
+
+// Extract exact breakup from CSV row (auto-detects columns)
+function extractBreakupFromCSV(row, header, stateMatch) {
+  if (!row || !header || !header.length) return null;
+  const idxMap = toHeaderIndexMap(header);
+  const keys = Object.keys(idxMap);
+
+  function parseVal(idx) {
+    if (idx < 0 || !row || idx >= row.length) return 0;
+    return Number(String(row[idx] || '0').replace(/[^0-9.\-]/g, '')) || 0;
+  }
+
+  // Ex-Showroom
+  const exShowIdx = detectExShowIdx(idxMap);
+  if (exShowIdx < 0) return null;
+
+  // TCS
+  let tcsIdx = -1;
+  for (const k of keys) { if (/\bTCS\b/.test(k)) { tcsIdx = idxMap[k]; break; } }
+
+  // Green Cess
+  let greenCessIdx = -1;
+  for (const k of keys) { if (k.includes('GREEN') && k.includes('CESS')) { greenCessIdx = idxMap[k]; break; } }
+
+  // Insurance (All Coverage)
+  let insAllIdx = -1;
+  for (const k of keys) {
+    if (k.includes('INSURANCE') && k.includes('ALL') && k.includes('COVERAGE')) { insAllIdx = idxMap[k]; break; }
+  }
+
+  // Customer Benefit
+  let benefitIdx = -1;
+  for (const k of keys) {
+    if (k.includes('CUSTOMER') && k.includes('BENEFIT')) { benefitIdx = idxMap[k]; break; }
+  }
+
+  // Road Tax — dynamic state match (auto-detects any state column)
+  const normState = String(stateMatch || 'DELHI').toLowerCase().replace(/[^a-z]/g, '');
+  let roadTaxIdx = -1;
+  const excludePatterns = ['onroad', 'insurance', 'exshowroom', 'showroom', 'specialpricing', 'customerbenefit', 'model', 'variant', 'colour', 'color', 'fuel', 'suffix', 'keyword', 're0'];
+  for (const k of keys) {
+    const normKey = k.toLowerCase().replace(/[^a-z]/g, '');
+    if (excludePatterns.some(p => normKey.includes(p))) continue;
+    if (!normKey.includes(normState)) continue;
+    // For Delhi, prefer individual over corporate
+    if (normState === 'delhi' && (normKey.includes('corporate') || normKey.includes('company') || normKey.includes('firm'))) continue;
+    roadTaxIdx = idxMap[k];
+    break;
+  }
+
+  // On-road price for matched state
+  const onRoadIdx = pickOnRoadPriceIndex(idxMap, stateMatch, 'individual', stateMatch);
+
+  const exShowroom = parseVal(exShowIdx);
+  if (!exShowroom) return null;
+
+  const tcs = parseVal(tcsIdx);
+  const greenCess = parseVal(greenCessIdx);
+  const roadTax = parseVal(roadTaxIdx);
+  const insuranceAll = parseVal(insAllIdx);
+  const customerBenefit = parseVal(benefitIdx);
+  const onRoad = parseVal(onRoadIdx);
+
+  // Compute residual charges (HSRP/Fastag/misc) — auto-adjusts per state
+  const knownSum = exShowroom + tcs + greenCess + roadTax + insuranceAll - customerBenefit;
+  const otherCharges = onRoad > knownSum ? (onRoad - knownSum) : 0;
+
+  return {
+    exShowroom, tcs, greenCess, roadTax, insuranceAll,
+    customerBenefit, otherCharges, total: onRoad,
+    hasExactData: roadTaxIdx >= 0 && insAllIdx >= 0
+  };
+}
+
+// Fallback: estimated breakup when CSV row data is not available
 function calculatePriceBreakup(exShowroom, onRoad, state) {
   let exShow = Number(exShowroom) || 0;
   const onRoadVal = Number(onRoad) || 0;
@@ -1565,14 +1643,19 @@ function calculatePriceBreakup(exShowroom, onRoad, state) {
   const taxRate = STATE_ROAD_TAX_RATES[stateKey] || DEFAULT_ROAD_TAX_RATE;
 
   const roadTax = Math.round(exShow * taxRate);
-  const insurance = Math.round(exShow * (exShow > 1000000 ? 0.03 : 0.025));
+  const insuranceAll = Math.round(exShow * (exShow > 1000000 ? 0.03 : 0.025) * 0.70);
   const tcs = exShow > 1000000 ? Math.round(exShow * 0.01) : 0;
-  const registration = exShow > 2000000 ? 5000 : (exShow > 1000000 ? 3000 : 1500);
-  const handling = HANDLING_CHARGES;
-  const knownTotal = exShow + roadTax + insurance + tcs + registration + handling;
+  const greenCess = 0;
+  const customerBenefit = 0;
+  const knownTotal = exShow + roadTax + insuranceAll + tcs + greenCess;
   const otherCharges = onRoadVal > knownTotal ? (onRoadVal - knownTotal) : 0;
 
-  return { exShowroom: exShow, roadTax, insurance, tcs, registration, handling, otherCharges, total: onRoadVal || (knownTotal + otherCharges) };
+  return {
+    exShowroom: exShow, tcs, greenCess, roadTax, insuranceAll,
+    customerBenefit, otherCharges,
+    total: onRoadVal || (knownTotal + otherCharges),
+    hasExactData: false
+  };
 }
 
 function formatPriceBreakup(breakup, title, state) {
@@ -1584,16 +1667,17 @@ function formatPriceBreakup(breakup, title, state) {
   lines.push('📋 *Component-wise Breakup:*');
   lines.push('');
   lines.push('🏭 Ex-Showroom: ₹ ' + fmtMoney(breakup.exShowroom));
-  lines.push('🛣️ Road Tax (' + Math.round((STATE_ROAD_TAX_RATES[(state || '').toUpperCase()] || DEFAULT_ROAD_TAX_RATE) * 100) + '%): ₹ ' + fmtMoney(breakup.roadTax));
-  lines.push('🛡️ Insurance (est.): ₹ ' + fmtMoney(breakup.insurance));
-  if (breakup.tcs > 0) lines.push('📑 TCS (1%): ₹ ' + fmtMoney(breakup.tcs));
-  lines.push('📝 Registration: ₹ ' + fmtMoney(breakup.registration));
-  lines.push('🔧 Handling / Logistics: ₹ ' + fmtMoney(breakup.handling));
+  lines.push('📑 TCS: ₹ ' + fmtMoney(breakup.tcs));
+  if (breakup.greenCess > 0) lines.push('🌿 Green Cess: ₹ ' + fmtMoney(breakup.greenCess));
+  lines.push('🛣️ Road Tax (incl. RTO/Reg/HSRP): ₹ ' + fmtMoney(breakup.roadTax));
+  lines.push('🛡️ Insurance (All Coverage): ₹ ' + fmtMoney(breakup.insuranceAll));
   if (breakup.otherCharges > 0) lines.push('📦 Other Charges: ₹ ' + fmtMoney(breakup.otherCharges));
+  if (breakup.customerBenefit > 0) lines.push('🎁 Customer Benefit: - ₹ ' + fmtMoney(breakup.customerBenefit));
   lines.push('');
-  lines.push('💰 *Total On-Road: ₹ ' + fmtMoney(breakup.total) + '*');
+  lines.push('💰 *On-Road Price: ₹ ' + fmtMoney(breakup.total) + '*');
   lines.push('');
-  lines.push('_Breakup is estimated. Actual components may vary by dealer._');
+  lines.push('_Insurance includes 0-dep + consumables at best rates (~30% less vs showroom)._');
+  if (!breakup.hasExactData) lines.push('_Breakup is estimated. Actual may vary._');
   return lines.join('\n');
 }
 
@@ -2435,7 +2519,6 @@ const bulletSim = simulateBulletPlan({
   }
   lines.push('');
   lines.push('✅ *Loan approval possible in ~30 minutes (T&Cs apply)*');
-  lines.push('\n*Terms & Conditions Apply ✅*');
 
   return { text: lines.join('\n'), picLink, picLinks };
 }
@@ -3531,7 +3614,6 @@ if (!global.lastVariantList) global.lastVariantList = new Map();
 
       lines.push('');
       lines.push('_EMI figures are indicative. Final approval subject to bank terms._');
-      lines.push('*Terms & Conditions Apply ✅*');
     }
 
     lines.push('\nReply *SPEC model* for features or *EMI* for finance.');
@@ -5033,7 +5115,6 @@ if (best.onroad) {
 
     lines.push('');
     lines.push('_EMI figures are indicative. Final approval subject to bank terms._');
-    lines.push('*Terms & Conditions Apply ✅*');
   }
 
  // ---------- CTA ----------
@@ -5850,7 +5931,14 @@ if (selectedId === 'BTN_PRICE_BREAKUP') {
     setLastService(from, 'NEW');
     return;
   }
-  const breakup = calculatePriceBreakup(ctx.exShow, ctx.onroad, ctx.stateMatch);
+  // Try exact CSV breakup first, fallback to estimation
+  let breakup = null;
+  if (ctx.row && ctx.header && ctx.header.length) {
+    breakup = extractBreakupFromCSV(ctx.row, ctx.header, ctx.stateMatch);
+  }
+  if (!breakup) {
+    breakup = calculatePriceBreakup(ctx.exShow, ctx.onroad, ctx.stateMatch);
+  }
   if (!breakup) {
     await waSendText(from, 'Price breakup is not available for this variant.');
     setLastService(from, 'NEW');
@@ -6445,8 +6533,7 @@ const bulletAmt =
     `Monthly EMI (approx): ₹ *${fmtMoney(bulletEmi)}*\n` +
     `Bullet total (25% of loan): ₹ *${fmtMoney(bulletAmt)}*\n\n` +
     `Bullets:\n${bulletSchedule}\n\n` +
-    `✅ Loan approval possible in ~30 minutes (T&Cs apply)\n\n` +
-    `Terms & Conditions Apply ✅`
+    `✅ Loan approval possible in ~30 minutes (T&Cs apply)`
   );
 
   setLastService(from, lastSvc);
@@ -7901,8 +7988,7 @@ if (/^(menu|options|services|main\s*menu|show\s*menu|back)\s*$/i.test(msgLower))
         `📊 Total Payable: ₹ *${fmtMoney(total)}*`,
         `💰 Total Interest: ₹ *${fmtMoney(interest)}*`,
         '',
-        '✅ *Loan approval possible in ~30 minutes (T&Cs apply)*',
-        '\n*Terms & Conditions Apply ✅*'
+        '✅ *Loan approval possible in ~30 minutes (T&Cs apply)*'
       ];
       await waSendText(from, lines.join('\n'));
       return;
