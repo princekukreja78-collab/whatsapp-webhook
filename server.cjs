@@ -1596,12 +1596,18 @@ function extractBreakupFromCSV(row, header, stateMatch) {
 
   // Road Tax — dynamic state match (auto-detects any state column)
   const normState = String(stateMatch || 'DELHI').toLowerCase().replace(/[^a-z]/g, '');
+  // Build search tokens: full name, first word, and common abbreviation
+  const STATE_ABBREV = { 'himachalpradesh':'hp', 'uttarpradesh':'up', 'haryana':'hr', 'maharashtra':'mh', 'madhyapradesh':'mp', 'tamilnadu':'tn', 'karnataka':'ka', 'telangana':'ts', 'rajasthan':'rj', 'punjab':'pb', 'gujarat':'gj', 'kerala':'kl', 'westbengal':'wb', 'andhrapradesh':'ap', 'chandigarh':'ch' };
+  const stateFirstWord = normState.match(/^[a-z]+/)?.[0] || normState;
+  const stateAbbr = STATE_ABBREV[normState] || '';
+  const stateTokens = [normState, stateFirstWord, stateAbbr].filter(Boolean);
+
   let roadTaxIdx = -1;
   const excludePatterns = ['onroad', 'insurance', 'exshowroom', 'showroom', 'specialpricing', 'customerbenefit', 'model', 'variant', 'colour', 'color', 'fuel', 'suffix', 'keyword', 're0'];
   for (const k of keys) {
     const normKey = k.toLowerCase().replace(/[^a-z]/g, '');
     if (excludePatterns.some(p => normKey.includes(p))) continue;
-    if (!normKey.includes(normState)) continue;
+    if (!stateTokens.some(tok => normKey.includes(tok))) continue;
     // For Delhi, prefer individual over corporate
     if (normState === 'delhi' && (normKey.includes('corporate') || normKey.includes('company') || normKey.includes('firm'))) continue;
     roadTaxIdx = idxMap[k];
