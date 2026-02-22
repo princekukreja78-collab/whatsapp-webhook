@@ -642,6 +642,210 @@ app.post('/crm/ingest', async (req, res) => {
   }
 });
 
+// ================================================================
+// VEHYRA WEB API — serves search, breakup, EMI for the website
+// ================================================================
+app.post('/api/vehyra/search', async (req, res) => {
+  try {
+    const { query, city, budget, type, from, channel, msgText } = req.body || {};
+    if (!query) return res.json({ ok: false, error: 'Query missing' });
+
+    const tables = await loadPricingFromSheets();
+    if (!tables) return res.json({ ok: false, cars: [], error: 'Pricing data unavailable' });
+
+    const raw = String(msgText || query || '').trim();
+    const userNorm = normForMatch(raw);
+    const tokens = userNorm.split(/\s+/).filter(Boolean);
+
+    // Detect state from query
+    const STATE_NAMES = ['DELHI','HARYANA','UTTAR PRADESH','HIMACHAL PRADESH','CHANDIGARH','MAHARASHTRA','KARNATAKA','TAMIL NADU','TELANGANA','RAJASTHAN','PUNJAB','GUJARAT','KERALA','WEST BENGAL','MADHYA PRADESH'];
+    let stateMatch = String(city || 'DELHI').toUpperCase();
+    for (const sn of STATE_NAMES) {
+      if (raw.toUpperCase().includes(sn) || raw.toUpperCase().includes(sn.split(' ')[0])) {
+        stateMatch = sn; break;
+      }
+    }
+
+    // Detect brand from query
+    let brandLock = null;
+    if (typeof BRAND_HINTS !== 'undefined') {
+      for (const [brand, hints] of Object.entries(BRAND_HINTS)) {
+        for (const h of hints) {
+          const pat = new RegExp('\\b' + h.replace(/\s+/g, '\\s*') + '\\b', 'i');
+          if (pat.test(raw)) { brandLock = String(brand).toUpperCase(); break; }
+        }
+        if (brandLock) break;
+      }
+    }
+
+    // Resolve model aliases
+    let resolvedModel = null;
+    if (typeof MODEL_ALIASES !== 'undefined') {
+      for (const [canon, syns] of Object.entries(MODEL_ALIASES)) {
+        const canonNorm = normForMatch(canon);
+        if (userNorm.includes(canonNorm)) { resolvedModel = canonNorm; break; }
+        if (Array.isArray(syns)) {
+          for (const s of syns) {
+            if (userNorm.includes(normForMatch(s))) { resolvedModel = canonNorm; break; }
+          }
+        }
+        if (resolvedModel) break;
+      }
+    }
+
+    const roi = Number(process.env.NEW_CAR_ROI) || 8.10;
+    const allMatches = [];
+
+    for (const [brand, tab] of Object.entries(tables)) {
+      if (!tab || !tab.data) continue;
+      const brandKey = String(brand || '').toUpperCase();
+      if (brandKey === 'USED' || brandKey === 'HOT' || brandKey === 'HOT_DEALS') continue;
+      if (brandLock && brandKey !== brandLock) continue;
+
+      const header = (Array.isArray(tab.header) ? tab.header : []).map(h => String(h || '').toUpperCase());
+      const idxMap = tab.idxMap || toHeaderIndexMap(header);
+      const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+      const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+      const fuelIdx = pickFuelIndex(idxMap);
+      const exIdx = detectExShowIdx(idxMap);
+      const priceIdx = pickOnRoadPriceIndex(idxMap, stateMatch, 'individual', stateMatch);
+
+      for (const row of tab.data) {
+        const modelCell = idxModel >= 0 ? String(row[idxModel] || '') : '';
+        const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '') : '';
+        const modelNorm = normForMatch(modelCell);
+        const variantNorm = normForMatch(variantCell);
+        const combined = modelNorm + ' ' + variantNorm;
+
+        let score = 0;
+        for (const tok of tokens) {
+          if (!tok) continue;
+          if (modelNorm.includes(tok)) score += 10;
+          if (variantNorm.includes(tok)) score += 12;
+        }
+        if (resolvedModel && combined.includes(resolvedModel)) score += 40;
+        if (userNorm && combined.includes(userNorm)) score += 30;
+
+        if (score < 8) continue;
+
+        const onroadStr = priceIdx >= 0 ? String(row[priceIdx] || '') : '';
+        const onroad = Number(onroadStr.replace(/[,\u20B9\s]/g, '')) || 0;
+        if (!onroad) continue;
+
+        const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,\u20B9\s]/g, '')) || 0 : 0;
+        const fuelCell = fuelIdx >= 0 ? String(row[fuelIdx] || '') : '';
+
+        // Budget filter
+        if (budget) {
+          const bud = Number(budget);
+          if (bud > 0 && onroad > bud * 1.35) continue;
+        }
+
+        allMatches.push({
+          brand: brandKey, model: modelCell.trim(), variant: variantCell.trim(),
+          fuel: fuelCell.trim(), exShowroom: exShow, onRoad: onroad, score,
+          row, header: tab.header, idxMap, stateMatch
+        });
+      }
+    }
+
+    // Sort by score desc, then price asc
+    allMatches.sort((a, b) => b.score - a.score || a.onRoad - b.onRoad);
+
+    // Deduplicate by model+variant
+    const seen = new Set();
+    const unique = [];
+    for (const m of allMatches) {
+      const key = (m.model + '|' + m.variant).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(m);
+      if (unique.length >= 25) break;
+    }
+
+    // Build response
+    const cars = unique.map(m => {
+      const emi = calcEmiSimple(m.onRoad * 0.85, roi, 60);
+      const breakup = extractBreakupFromCSV(m.row, m.header, m.stateMatch)
+        || calculatePriceBreakup(m.exShowroom, m.onRoad, m.stateMatch);
+      return {
+        brand: m.brand, model: m.model, variant: m.variant,
+        fuel: m.fuel, exShowroom: m.exShowroom,
+        price: m.onRoad, emi,
+        state: m.stateMatch,
+        breakup: breakup ? {
+          exShowroom: breakup.exShowroom, tcs: breakup.tcs,
+          greenCess: breakup.greenCess, roadTax: breakup.roadTax,
+          insuranceAll: breakup.insuranceAll, customerBenefit: breakup.customerBenefit,
+          otherCharges: breakup.otherCharges, total: breakup.total,
+          hasExactData: breakup.hasExactData
+        } : null
+      };
+    });
+
+    return res.json({ ok: true, cars, state: stateMatch, query: raw });
+  } catch (err) {
+    console.error('VehYra search error:', err);
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.post('/api/vehyra/emi', (req, res) => {
+  try {
+    const { principal, rate, months } = req.body || {};
+    const p = Number(principal) || 0;
+    const r = Number(rate) || Number(process.env.NEW_CAR_ROI) || 8.10;
+    const m = Number(months) || 60;
+    if (!p) return res.json({ ok: false, error: 'Principal required' });
+    const emi = calcEmiSimple(p, r, m);
+    const totalPayable = emi * m;
+    const totalInterest = totalPayable - p;
+    return res.json({ ok: true, emi, totalPayable, totalInterest, principal: p, rate: r, months: m });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.post('/api/vehyra/exchange', async (req, res) => {
+  try {
+    const { oldCar, exShowroom, age, km, ownerNumber, newCar } = req.body || {};
+    if (!exShowroom && !oldCar) return res.json({ ok: false, error: 'Ex-showroom price or old car name required' });
+
+    let exShow = Number(exShowroom) || 0;
+    if (!exShow && oldCar) {
+      const lookup = await lookupExShowroomForModel(oldCar);
+      if (lookup) exShow = lookup;
+    }
+    if (!exShow) return res.json({ ok: false, error: 'Could not determine ex-showroom price' });
+
+    const valuation = estimateOldCarValue(exShow, age || 3, km || 36000, ownerNumber || 1);
+    if (!valuation) return res.json({ ok: false, error: 'Valuation failed' });
+
+    return res.json({
+      ok: true, oldCar: oldCar || '',
+      exShowroom: exShow,
+      valuation: { low: valuation.low, mid: valuation.midpoint, high: valuation.high },
+      age, km, ownerNumber
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.get('/api/vehyra/brands', async (req, res) => {
+  try {
+    const tables = await loadPricingFromSheets();
+    if (!tables) return res.json({ ok: false, brands: [] });
+    const brands = Object.keys(tables)
+      .filter(b => !['USED','HOT','HOT_DEALS'].includes(b.toUpperCase()))
+      .sort();
+    return res.json({ ok: true, brands });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+// ================================================================
+
 app.use(express.static(path.join(__dirname, "public")));
 
 const leadsRouter = require('./routes/leads.cjs');
