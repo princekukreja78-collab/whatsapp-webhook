@@ -768,11 +768,21 @@ app.post('/api/vehyra/search', async (req, res) => {
       const emi = calcEmiSimple(m.onRoad * 0.85, roi, 60);
       const breakup = extractBreakupFromCSV(m.row, m.header, m.stateMatch)
         || calculatePriceBreakup(m.exShowroom, m.onRoad, m.stateMatch);
+
+      // Extract MAX NEGOTIATION column if present
+      let maxNegotiation = 0;
+      const hdr = (Array.isArray(m.header) ? m.header : []).map(h => String(h || '').toUpperCase());
+      const negIdx = hdr.findIndex(h => h.includes('MAX') && h.includes('NEGOTI'));
+      if (negIdx >= 0 && m.row[negIdx]) {
+        maxNegotiation = Number(String(m.row[negIdx]).replace(/[,\u20B9\s%]/g, '')) || 0;
+      }
+
       return {
         brand: m.brand, model: m.model, variant: m.variant,
         fuel: m.fuel, exShowroom: m.exShowroom,
         price: m.onRoad, emi,
         state: m.stateMatch,
+        maxNegotiation: maxNegotiation || undefined,
         breakup: breakup ? {
           exShowroom: breakup.exShowroom, tcs: breakup.tcs,
           greenCess: breakup.greenCess, roadTax: breakup.roadTax,
@@ -1116,6 +1126,9 @@ app.post('/api/vehyra/negotiate', async (req, res) => {
       console.warn('Negotiate competitor/margin lookup failed:', e?.message || e);
     }
 
+    // Max negotiation from sheet (per-variant figure set by user)
+    const maxNeg = Number(car.maxNegotiation) || 0;
+
     const carInfo = [
       `Car: ${car.brand || ''} ${car.model || ''} ${car.variant || ''}`.trim(),
       car.fuel ? `Fuel: ${car.fuel}` : '',
@@ -1129,7 +1142,16 @@ app.post('/api/vehyra/negotiate', async (req, res) => {
 
     // Build dealer margin section
     let marginSection = '';
-    if (dealerMarginInfo) {
+    if (maxNeg > 0) {
+      marginSection = `\nNEGOTIATION INTELLIGENCE (from verified dealer data):
+- MAX NEGOTIATION ROOM for this exact variant: Rs ${fmtMoney(maxNeg)}
+- This is the verified maximum discount possible on this car
+- Target price: Rs ${fmtMoney((Number(car.price) || 0) - maxNeg)} on-road
+- Realistically aim for 70-90% of this max negotiation room`;
+      if (dealerMarginInfo) {
+        marginSection += `\n- ${car.brand} dealers typically earn ${dealerMarginInfo.min}-${dealerMarginInfo.max}% margin on ex-showroom (Rs ${dealerMarginInfo.profitRange})`;
+      }
+    } else if (dealerMarginInfo) {
       marginSection = `\nDEALER MARGIN INTELLIGENCE:
 - ${car.brand} dealers typically earn ${dealerMarginInfo.min}-${dealerMarginInfo.max}% margin on ex-showroom price
 - Estimated dealer profit on this car: Rs ${dealerMarginInfo.profitRange}
