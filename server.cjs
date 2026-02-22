@@ -916,6 +916,314 @@ app.post('/api/vehyra/used', async (req, res) => {
     return res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
+
+// ─── NEGOTIATE HELPERS: Segment Classification, Dealer Margins, Competitor Finder ───
+
+const DEALER_MARGIN_PCT = {
+  MARUTI:     { min: 5, max: 6 },
+  HYUNDAI:    { min: 6, max: 8 },
+  TOYOTA:     { min: 4, max: 6 },
+  KIA:        { min: 6, max: 8 },
+  TATA:       { min: 5, max: 7 },
+  MAHINDRA:   { min: 6, max: 8 },
+  HONDA:      { min: 5, max: 7 },
+  MG:         { min: 7, max: 9 },
+  BMW:        { min: 8, max: 12 },
+  MERCEDES:   { min: 8, max: 12 },
+  AUDI:       { min: 8, max: 12 },
+  VOLKSWAGEN: { min: 6, max: 8 },
+  SKODA:      { min: 7, max: 9 },
+  JEEP:       { min: 8, max: 10 },
+  LEXUS:      { min: 8, max: 12 },
+  VOLVO:      { min: 8, max: 12 },
+  PORSCHE:    { min: 10, max: 15 },
+  CITROEN:    { min: 7, max: 9 },
+  RENAULT:    { min: 6, max: 8 },
+  NISSAN:     { min: 6, max: 8 },
+  DEFAULT:    { min: 6, max: 6 },
+};
+
+function classifySegment(brand, model, fuel, exShowroom) {
+  const text = ((brand || '') + ' ' + (model || '')).toLowerCase();
+  // SUV
+  if (/\b(xuv|scorpio|thar|jimny|fortuner|legender|gloster|endeavour|creta|seltos|sonet|venue|taigun|kushaq|hector|astor|harrier|safari|compass|meridian|kodiaq|tucson|grand vitara|invicto|fronx|brezza|nexon|punch|exter|kiger|magnite)\b/.test(text)) {
+    if (exShowroom && exShowroom >= 3000000) return 'FULL_SUV';
+    if (exShowroom && exShowroom >= 1500000) return 'MID_SUV';
+    if (/\b(fortuner|legender|gloster|endeavour|kodiaq|meridian|tucson|harrier|safari|xuv700|scorpio)\b/.test(text)) return 'MID_SUV';
+    return 'COMPACT_SUV';
+  }
+  // Sedan
+  if (/\b(city|verna|ciaz|slavia|virtus|civic|accord|camry|octavia|superb|amaze|dzire|tigor|aura)\b/.test(text)) {
+    if (exShowroom && exShowroom >= 1500000) return 'SEDAN';
+    return 'SEDAN';
+  }
+  // Hatchback
+  if (/\b(swift|baleno|glanza|i10|i20|alto|wagonr|wagon r|celerio|tiago|altroz|polo|kwid|ignis|s-presso)\b/.test(text)) {
+    return 'HATCHBACK';
+  }
+  // MPV
+  if (/\b(innova|hycross|crysta|ertiga|xl6|carens|marazzo|carnival|vellfire)\b/.test(text)) {
+    return 'MPV';
+  }
+  // Pickup
+  if (/\b(hilux|isuzu|v-cross|d-max)\b/.test(text)) {
+    return 'PICKUP';
+  }
+  // Luxury brand fallback
+  if (/\b(mercedes|bmw|audi|lexus|volvo|porsche|land rover|range rover|jaguar)\b/.test(text)) {
+    return 'LUXURY';
+  }
+  // Price-based fallback
+  if (exShowroom) {
+    if (exShowroom >= 3000000) return 'LUXURY';
+    if (exShowroom >= 1500000) return 'MID_SUV';
+    if (exShowroom >= 800000) return 'COMPACT_SUV';
+    return 'HATCHBACK';
+  }
+  return 'COMPACT_SUV';
+}
+
+// Segments that compete with each other
+const COMPETING_SEGMENTS = {
+  HATCHBACK:   ['HATCHBACK'],
+  SEDAN:       ['SEDAN'],
+  COMPACT_SUV: ['COMPACT_SUV'],
+  MID_SUV:     ['MID_SUV', 'FULL_SUV'],
+  FULL_SUV:    ['FULL_SUV', 'MID_SUV'],
+  LUXURY:      ['LUXURY'],
+  MPV:         ['MPV'],
+  PICKUP:      ['PICKUP'],
+};
+
+function findCompetitors(car, tables, stateMatch) {
+  const targetBrand = String(car.brand || '').toUpperCase();
+  const targetEx = Number(car.exShowroom) || Number(car.price) * 0.85 || 0;
+  if (!targetEx) return [];
+
+  const segment = classifySegment(car.brand, car.model, car.fuel, targetEx);
+  const validSegments = COMPETING_SEGMENTS[segment] || [segment];
+  const priceLo = targetEx * 0.70;
+  const priceHi = targetEx * 1.30;
+  const targetFuel = String(car.fuel || '').toLowerCase();
+
+  const candidates = [];
+
+  for (const [brand, tab] of Object.entries(tables)) {
+    const brandKey = String(brand || '').toUpperCase();
+    if (brandKey === targetBrand) continue; // must be from OTHER brands
+    if (brandKey === 'USED' || brandKey === 'HOT' || brandKey === 'HOT_DEALS') continue;
+    if (!tab || !tab.data || !tab.header) continue;
+
+    const header = (Array.isArray(tab.header) ? tab.header : []).map(h => String(h || '').toUpperCase());
+    const idxMap = tab.idxMap || toHeaderIndexMap(header);
+    const idxModel = header.findIndex(h => h.includes('MODEL') || h.includes('VEHICLE'));
+    const idxVariant = header.findIndex(h => h.includes('VARIANT') || h.includes('SUFFIX'));
+    const fuelIdx = pickFuelIndex(idxMap);
+    const exIdx = detectExShowIdx(idxMap);
+    const priceIdx = pickOnRoadPriceIndex(idxMap, stateMatch || 'DELHI', 'individual', stateMatch || 'DELHI');
+
+    for (const row of tab.data) {
+      const modelCell = idxModel >= 0 ? String(row[idxModel] || '').trim() : '';
+      const variantCell = idxVariant >= 0 ? String(row[idxVariant] || '').trim() : '';
+      if (!modelCell) continue;
+
+      const exShow = exIdx >= 0 ? Number(String(row[exIdx] || '').replace(/[,\u20B9\s]/g, '')) || 0 : 0;
+      if (!exShow || exShow < priceLo || exShow > priceHi) continue;
+
+      const fuelCell = fuelIdx >= 0 ? String(row[fuelIdx] || '').trim() : '';
+      const rowSegment = classifySegment(brandKey, modelCell, fuelCell, exShow);
+      if (!validSegments.includes(rowSegment)) continue;
+
+      const onRoad = priceIdx >= 0 ? Number(String(row[priceIdx] || '').replace(/[,\u20B9\s]/g, '')) || 0 : 0;
+
+      // Extract customer benefit
+      const breakup = extractBreakupFromCSV(row, tab.header, stateMatch || 'DELHI');
+      const customerBenefit = breakup ? breakup.customerBenefit || 0 : 0;
+
+      const priceDiff = Math.abs(exShow - targetEx);
+      const fuelMatch = targetFuel && fuelCell.toLowerCase().includes(targetFuel) ? 1 : 0;
+
+      candidates.push({
+        brand: brandKey,
+        model: modelCell,
+        variant: variantCell,
+        fuel: fuelCell,
+        exShowroom: exShow,
+        onRoad: onRoad || exShow,
+        customerBenefit,
+        priceDiff,
+        fuelMatch,
+        segment: rowSegment,
+      });
+    }
+  }
+
+  // Sort: prefer same fuel, then closest price
+  candidates.sort((a, b) => b.fuelMatch - a.fuelMatch || a.priceDiff - b.priceDiff);
+
+  // Pick best match per competing brand (max 5 competitors)
+  const perBrand = {};
+  const result = [];
+  for (const c of candidates) {
+    if (perBrand[c.brand]) continue;
+    perBrand[c.brand] = true;
+    result.push({
+      brand: c.brand,
+      model: c.model,
+      variant: c.variant,
+      fuel: c.fuel,
+      exShowroom: c.exShowroom,
+      onRoad: c.onRoad,
+      customerBenefit: c.customerBenefit,
+    });
+    if (result.length >= 5) break;
+  }
+
+  return result;
+}
+
+app.post('/api/vehyra/negotiate', async (req, res) => {
+  try {
+    const { car, dealerQuote, context, messages } = req.body || {};
+    if (!car) return res.json({ ok: false, error: 'Car details required' });
+
+    const OPENAI_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_KEY) return res.json({ ok: false, error: 'OpenAI not configured' });
+
+    // --- Competitor & Margin Intelligence ---
+    let competitors = [];
+    let dealerMarginInfo = null;
+    try {
+      const tables = await loadPricingFromSheets();
+      competitors = findCompetitors(car, tables, car.state);
+
+      const brandKey = String(car.brand || '').toUpperCase();
+      const margin = DEALER_MARGIN_PCT[brandKey] || DEALER_MARGIN_PCT.DEFAULT;
+      const exShow = Number(car.exShowroom) || Number(car.price) * 0.85 || 0;
+      if (exShow && margin) {
+        const profitMin = Math.round(exShow * margin.min / 100);
+        const profitMax = Math.round(exShow * margin.max / 100);
+        dealerMarginInfo = {
+          min: margin.min,
+          max: margin.max,
+          profitMin,
+          profitMax,
+          profitRange: fmtMoney(profitMin) + ' - ' + fmtMoney(profitMax),
+          floorPrice: (Number(car.price) || 0) - profitMax,
+        };
+      }
+    } catch (e) {
+      console.warn('Negotiate competitor/margin lookup failed:', e?.message || e);
+    }
+
+    const carInfo = [
+      `Car: ${car.brand || ''} ${car.model || ''} ${car.variant || ''}`.trim(),
+      car.fuel ? `Fuel: ${car.fuel}` : '',
+      car.exShowroom ? `Ex-Showroom: Rs ${fmtMoney(car.exShowroom)}` : '',
+      car.price ? `On-Road (listed): Rs ${fmtMoney(car.price)}` : '',
+      car.breakup ? `Customer Benefit in sheet: Rs ${fmtMoney(car.breakup.customerBenefit || 0)}` : '',
+      car.breakup ? `Insurance (All Coverage): Rs ${fmtMoney(car.breakup.insuranceAll || 0)}` : '',
+      car.breakup ? `Road Tax: Rs ${fmtMoney(car.breakup.roadTax || 0)}` : '',
+      car.state ? `State: ${car.state}` : '',
+    ].filter(Boolean).join('\n');
+
+    // Build dealer margin section
+    let marginSection = '';
+    if (dealerMarginInfo) {
+      marginSection = `\nDEALER MARGIN INTELLIGENCE:
+- ${car.brand} dealers typically earn ${dealerMarginInfo.min}-${dealerMarginInfo.max}% margin on ex-showroom price
+- Estimated dealer profit on this car: Rs ${dealerMarginInfo.profitRange}
+- Theoretical floor price (on-road minus max dealer profit): Rs ${fmtMoney(dealerMarginInfo.floorPrice)}
+- This is the absolute minimum — realistically aim for 40-60% of the dealer margin as your discount`;
+    }
+
+    // Build competitor section
+    let competitorSection = '';
+    if (competitors.length > 0) {
+      const compLines = competitors.map(c =>
+        `  - ${c.brand} ${c.model} ${c.variant}: Ex-Showroom Rs ${fmtMoney(c.exShowroom)}, On-Road Rs ${fmtMoney(c.onRoad)}${c.customerBenefit ? ', Benefit Rs ' + fmtMoney(c.customerBenefit) : ''}`
+      );
+      competitorSection = `\nCOMPETITOR PRICING (same segment, real sheet data):
+${compLines.join('\n')}
+- USE these specific competitor prices as leverage during negotiation
+- Mention that you are cross-shopping these models and have quotes from their dealers`;
+    }
+
+    const systemPrompt = `You are VehYra's expert car deal negotiation strategist for the Indian market. You have access to real dealer-level pricing data AND competitor intelligence.
+
+VEHICLE DATA:
+${carInfo}
+${dealerQuote ? `\nDEALER'S QUOTED PRICE: Rs ${fmtMoney(Number(dealerQuote))}` : ''}
+${context ? `\nADDITIONAL CONTEXT: ${context}` : ''}
+${marginSection}
+${competitorSection}
+
+YOUR ROLE:
+- Provide specific, actionable negotiation advice with EXACT rupee amounts
+- You know the real ex-showroom and on-road pricing from manufacturer sheets
+- You have real competitor pricing data — cite specific models and prices when advising
+- Customer Benefit is the official discount/scheme — dealers sometimes pocket part of it
+- Use the dealer margin data to calculate realistic discount targets
+- Insurance via dealer is marked up ~30-40%, VehYra offers All Coverage at ~30% less
+- Accessories are typically marked up 2-3x at showrooms
+- Month-end, quarter-end (Mar/Jun/Sep/Dec), and year-end are best times to negotiate
+- Registration charges are fixed by RTO, not negotiable
+- Extended warranty and RSA (road side assistance) are negotiable
+
+RESPONSE FORMAT:
+Always structure your response with these sections:
+1. FAIR PRICE ANALYSIS — What the car should actually cost, factoring in dealer margin and schemes
+2. NEGOTIATION STRATEGY — Step-by-step approach with exact amounts, referencing dealer margin room
+3. KEY LEVERAGE POINTS — Cite specific competitor models and their prices, timing, cash readiness
+4. EXTRAS TO DEMAND — Free accessories, insurance discount, extended warranty, etc.
+5. WALK-AWAY PRICE — The maximum you should pay, calculated from dealer floor price
+6. RED FLAGS — What dealers might try and how to counter it
+
+Be direct, confident, and give specific numbers. Reference competitor prices by name. Use Indian market context. Format with bullet points and use ** for bold headings. Keep it practical, not generic.`;
+
+    const chatMessages = [{ role: 'system', content: systemPrompt }];
+
+    if (Array.isArray(messages) && messages.length) {
+      for (const m of messages) {
+        chatMessages.push({ role: m.role, content: m.content });
+      }
+    } else {
+      chatMessages.push({
+        role: 'user',
+        content: dealerQuote
+          ? `The dealer has quoted Rs ${fmtMoney(Number(dealerQuote))} for this car. Help me negotiate a better deal.`
+          : 'I want to buy this car. Give me a complete negotiation strategy to get the best deal.'
+      });
+    }
+
+    const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_KEY}`
+      },
+      body: JSON.stringify({
+        model: SIGNATURE_MODEL || 'gpt-4o-mini',
+        messages: chatMessages,
+        temperature: 0.4,
+        max_tokens: 2000
+      })
+    });
+
+    const aiData = await aiResp.json();
+    const reply = aiData.choices?.[0]?.message?.content || 'Unable to generate advice.';
+
+    return res.json({
+      ok: true,
+      advice: reply,
+      competitors: competitors.length ? competitors : undefined,
+      dealerMargin: dealerMarginInfo || undefined,
+    });
+  } catch (err) {
+    console.error('VehYra negotiate error:', err);
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
 // ================================================================
 
 app.use(express.static(path.join(__dirname, "public")));
