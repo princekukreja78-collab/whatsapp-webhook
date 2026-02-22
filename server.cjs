@@ -844,6 +844,78 @@ app.get('/api/vehyra/brands', async (req, res) => {
     return res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
+
+app.post('/api/vehyra/used', async (req, res) => {
+  try {
+    const { query } = req.body || {};
+    const rows = await loadUsedSheetRows();
+    if (!rows || rows.length < 2) return res.json({ ok: true, cars: [] });
+
+    const header = rows[0].map(h => String(h || '').trim().toUpperCase());
+    const data = rows.slice(1);
+
+    // Auto-detect column indices
+    const iMake = header.findIndex(h => h.includes('MAKE'));
+    const iModel = header.findIndex(h => h.includes('MODEL') && !h.includes('SUB'));
+    const iSub = header.findIndex(h => h.includes('SUB'));
+    const iColour = header.findIndex(h => h.includes('COLOUR') || h.includes('COLOR'));
+    const iYear = header.findIndex(h => h.includes('YEAR') || h.includes('MANUFACTURING'));
+    const iPrice = header.findIndex(h => h.includes('EXPECTED') || h.includes('PRICE'));
+    const iFuel = header.findIndex(h => h.includes('FUEL'));
+    const iKm = header.findIndex(h => h.includes('KMS') || h.includes('KM'));
+    const iOwned = header.findIndex(h => h === 'OWNED BY' || h === 'CAR OWNED BY');
+    const iReg = header.findIndex(h => h.includes('REGISTRATION'));
+    const iIns = header.findIndex(h => h.includes('INSURANCE') && h.includes('VALID'));
+    const iFinance = header.findIndex(h => h.includes('FINANCING'));
+    const iRoi = header.findIndex(h => h.includes('R.O.I') || h.includes('ROI'));
+    const iOwnerCount = header.findIndex(h => h === 'OWNED BY' || (h.includes('OWNED') && !h.includes('CAR')));
+
+    const qNorm = normForMatch(query || '');
+    const tokens = qNorm.split(/\s+/).filter(Boolean);
+
+    const results = [];
+    for (const row of data) {
+      const make = iMake >= 0 ? String(row[iMake] || '').trim() : '';
+      const model = iModel >= 0 ? String(row[iModel] || '').trim() : '';
+      const sub = iSub >= 0 ? String(row[iSub] || '').trim() : '';
+      const combined = normForMatch(make + ' ' + model + ' ' + sub);
+
+      let score = 0;
+      if (!query) { score = 1; } // no query = show all
+      else {
+        for (const tok of tokens) {
+          if (combined.includes(tok)) score += 10;
+        }
+      }
+      if (query && score < 8) continue;
+
+      const price = iPrice >= 0 ? Number(String(row[iPrice] || '').replace(/[^0-9]/g, '')) || 0 : 0;
+      const km = iKm >= 0 ? Number(String(row[iKm] || '').replace(/[^0-9]/g, '')) || 0 : 0;
+      const year = iYear >= 0 ? String(row[iYear] || '').trim() : '';
+      const fuel = iFuel >= 0 ? String(row[iFuel] || '').trim() : '';
+      const colour = iColour >= 0 ? String(row[iColour] || '').trim() : '';
+      const reg = iReg >= 0 ? String(row[iReg] || '').trim() : '';
+      const insValid = iIns >= 0 ? String(row[iIns] || '').trim() : '';
+      const finance = iFinance >= 0 ? String(row[iFinance] || '').trim() : '';
+      const roi = iRoi >= 0 ? String(row[iRoi] || '').trim() : '';
+      const ownerNum = iOwnerCount >= 0 ? String(row[iOwnerCount] || '').trim() : '';
+
+      results.push({
+        make, model, subModel: sub, colour, year,
+        price, fuel, km, registration: reg,
+        insuranceValidity: insValid, financing: finance,
+        roi, ownerNumber: ownerNum, score
+      });
+    }
+
+    results.sort((a, b) => b.score - a.score || a.price - b.price);
+
+    return res.json({ ok: true, cars: results.slice(0, 30) });
+  } catch (err) {
+    console.error('VehYra used search error:', err);
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
 // ================================================================
 
 app.use(express.static(path.join(__dirname, "public")));
