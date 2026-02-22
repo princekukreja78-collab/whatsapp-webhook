@@ -2904,10 +2904,11 @@ async function trySmartNewCarIntent(msgText, to) {
     const isYes = reply === 'yes' || reply === 'y' || reply === 'yes, compare';
     const isNo  = reply === 'no'  || reply === 'n' || reply === 'no, thanks';
 
-    // HARD GUARD: accept ONLY recognized replies
+    // If user typed something other than YES/NO, clear prompt and let it flow as new query
     if (!isYes && !isNo) {
-      await waSendText(to, 'Please reply with *YES* or *NO* only.');
-      return true; // 🔒 HARD STOP
+      if (global.panIndiaPrompt) global.panIndiaPrompt.delete(to);
+      setLastService(to, 'NEW');
+      return false; // let the query proceed to pricing/quote engine
     }
 
     // YES → show Pan-India pricing
@@ -7220,7 +7221,10 @@ try {
     const explicitStatePricingIntent =
       /\b(price in|on[- ]?road in|cost in|rate in)\b/i.test(smartText);
 
-    if (!variantExplicit || hasPricingIntent || explicitStatePricingIntent) {
+    // Always run smart intent if PAN_INDIA_PROMPT is active (needs YES/NO handling)
+    const panActive = (getLastService(smartFrom) || '').toUpperCase() === 'PAN_INDIA_PROMPT';
+
+    if (panActive || !variantExplicit || hasPricingIntent || explicitStatePricingIntent) {
       const handled = await trySmartNewCarIntent(smartText, smartFrom);
       if (handled) {
         if (DEBUG) {
