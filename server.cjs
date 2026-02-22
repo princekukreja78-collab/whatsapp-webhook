@@ -4392,7 +4392,9 @@ if ((score <= 0 || score < ABS_MIN_SCORE) && !variantRescue) continue;
           onroad,
           exShow,
           score: score + priceScoreDelta,
-          fuel: fuelCell
+          fuel: fuelCell,
+          stateMatch: stateMatch || 'DELHI',
+          profile: audience || 'INDIVIDUAL'
         });
       }
     }
@@ -4635,7 +4637,9 @@ let priceIdx2 = pickOnRoadPriceIndex(idxMap2, cityToken, audience, stateMatch);
               onroad: onroad2,
               exShow: 0,
               score: rscore,
-              fuel: ""
+              fuel: "",
+              stateMatch: stateMatch || 'DELHI',
+              profile: audience || 'INDIVIDUAL'
             });
           }
         }
@@ -4957,7 +4961,7 @@ if (
   if (!title || seenTitles.has(title)) continue;
 
   seenTitles.add(title);
-  distinct.push({ title, onroad: m.onroad || 0 });
+  distinct.push({ title, onroad: m.onroad || 0, brand: m.brand, matchObj: m });
 
   if (distinct.length >= VARIANT_LIST_LIMIT) break;
 }
