@@ -1839,11 +1839,14 @@ const SHEET_URLS = (() => {
   }
 
   // 2) Auto-discover any SHEET_<BRAND>_CSV_URL (e.g. SHEET_MAHINDRA_CSV_URL)
+  // Skip USED and HOT_DEALS — they are handled by separate loaders
+  const SKIP_BRANDS = new Set(['USED', 'HOT_DEALS']);
   for (const [envKey, value] of Object.entries(process.env)) {
     if (!value) continue;
-    const m = envKey.match(/^SHEET_([A-Z0-9]+)_CSV_URL$/);
+    const m = envKey.match(/^SHEET_([A-Z0-9_]+)_CSV_URL$/);
     if (!m) continue;
     const brandKey = m[1]; // e.g. TOYOTA, HYUNDAI, BMW, MAHINDRA, MG
+    if (SKIP_BRANDS.has(brandKey)) continue;
     if (!urls[brandKey]) {
       urls[brandKey] = value.trim();
     }
@@ -4116,6 +4119,9 @@ if (brandGuess) {
       if (!tab || !tab.data) continue;
 
       const brandKey = String(brand || '').toUpperCase();
+
+      // Skip used/hot-deals tables from new car matching
+      if (brandKey === 'USED' || brandKey === 'HOT' || brandKey === 'HOT_DEALS') continue;
 
       // brand lock
       if (brandGuess && brandKey !== String(brandGuess).toUpperCase()) continue;
