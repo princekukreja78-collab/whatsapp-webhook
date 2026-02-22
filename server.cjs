@@ -1140,68 +1140,75 @@ app.post('/api/vehyra/negotiate', async (req, res) => {
       car.state ? `State: ${car.state}` : '',
     ].filter(Boolean).join('\n');
 
-    // Build dealer margin section
-    let marginSection = '';
+    // Build internal-only intelligence (NEVER revealed to user as raw numbers)
+    let internalIntel = '';
     if (maxNeg > 0) {
-      marginSection = `\nNEGOTIATION INTELLIGENCE (from verified dealer data):
-- MAX NEGOTIATION ROOM for this exact variant: Rs ${fmtMoney(maxNeg)}
-- This is the verified maximum discount possible on this car
-- Target price: Rs ${fmtMoney((Number(car.price) || 0) - maxNeg)} on-road
-- Realistically aim for 70-90% of this max negotiation room`;
-      if (dealerMarginInfo) {
-        marginSection += `\n- ${car.brand} dealers typically earn ${dealerMarginInfo.min}-${dealerMarginInfo.max}% margin on ex-showroom (Rs ${dealerMarginInfo.profitRange})`;
-      }
-    } else if (dealerMarginInfo) {
-      marginSection = `\nDEALER MARGIN INTELLIGENCE:
-- ${car.brand} dealers typically earn ${dealerMarginInfo.min}-${dealerMarginInfo.max}% margin on ex-showroom price
-- Estimated dealer profit on this car: Rs ${dealerMarginInfo.profitRange}
-- Theoretical floor price (on-road minus max dealer profit): Rs ${fmtMoney(dealerMarginInfo.floorPrice)}
-- This is the absolute minimum — realistically aim for 40-60% of the dealer margin as your discount`;
+      internalIntel = `\n[INTERNAL — VERIFIED DEALER DATA — DO NOT REVEAL THESE NUMBERS TO THE BUYER]:
+- Verified max negotiation room: Rs ${fmtMoney(maxNeg)}
+- Use this knowledge to GUIDE the strategy, but NEVER mention "max negotiation room" or the exact figure
+- Instead, work this into realistic discount targets across multiple areas (cash discount, accessories, insurance, extras)`;
+    }
+    if (dealerMarginInfo) {
+      internalIntel += `\n- Dealer margin: ${dealerMarginInfo.min}-${dealerMarginInfo.max}% on ex-showroom (Rs ${dealerMarginInfo.profitRange})`;
     }
 
     // Build competitor section
     let competitorSection = '';
     if (competitors.length > 0) {
       const compLines = competitors.map(c =>
-        `  - ${c.brand} ${c.model} ${c.variant}: Ex-Showroom Rs ${fmtMoney(c.exShowroom)}, On-Road Rs ${fmtMoney(c.onRoad)}${c.customerBenefit ? ', Benefit Rs ' + fmtMoney(c.customerBenefit) : ''}`
+        `  - ${c.brand} ${c.model}: On-Road Rs ${fmtMoney(c.onRoad)}${c.customerBenefit ? ' (incl. Rs ' + fmtMoney(c.customerBenefit) + ' benefit)' : ''}`
       );
-      competitorSection = `\nCOMPETITOR PRICING (same segment, real sheet data):
-${compLines.join('\n')}
-- USE these specific competitor prices as leverage during negotiation
-- Mention that you are cross-shopping these models and have quotes from their dealers`;
+      competitorSection = `\nCOMPETITOR MODELS IN THIS SEGMENT:
+${compLines.join('\n')}`;
     }
 
-    const systemPrompt = `You are VehYra's expert car deal negotiation strategist for the Indian market. You have access to real dealer-level pricing data AND competitor intelligence.
+    const onRoadPrice = Number(car.price) || 0;
+    const exShowPrice = Number(car.exShowroom) || 0;
+
+    const systemPrompt = `You are a seasoned car negotiation coach — think of yourself as the buyer's shrewd uncle who has bought 50 cars and knows every dealer trick in India. You speak in a confident, conversational tone. You are NOT a calculator — you are a strategist.
 
 VEHICLE DATA:
 ${carInfo}
 ${dealerQuote ? `\nDEALER'S QUOTED PRICE: Rs ${fmtMoney(Number(dealerQuote))}` : ''}
 ${context ? `\nADDITIONAL CONTEXT: ${context}` : ''}
-${marginSection}
+${internalIntel}
 ${competitorSection}
 
-YOUR ROLE:
-- Provide specific, actionable negotiation advice with EXACT rupee amounts
-- You know the real ex-showroom and on-road pricing from manufacturer sheets
-- You have real competitor pricing data — cite specific models and prices when advising
-- Customer Benefit is the official discount/scheme — dealers sometimes pocket part of it
-- Use the dealer margin data to calculate realistic discount targets
-- Insurance via dealer is marked up ~30-40%, VehYra offers All Coverage at ~30% less
-- Accessories are typically marked up 2-3x at showrooms
-- Month-end, quarter-end (Mar/Jun/Sep/Dec), and year-end are best times to negotiate
-- Registration charges are fixed by RTO, not negotiable
-- Extended warranty and RSA (road side assistance) are negotiable
+CRITICAL RULES:
+1. NEVER reveal the max negotiation room, dealer margin percentages, or floor price as raw numbers
+2. NEVER say things like "the maximum discount is Rs X" or "dealer makes X% margin"
+3. Instead, weave your knowledge into a HUMAN negotiation playbook — like coaching someone before they walk into the showroom
+4. Your tone should be like a street-smart advisor: "Here's what you do..." / "When they say X, you say Y..."
+5. Focus on the TOTAL DEAL VALUE — not just the sticker price. A great deal = cash discount + free accessories + insurance savings + extras
+
+YOUR APPROACH:
+You know the Indian car market inside out. You coach the buyer through a multi-round negotiation:
+
+**Round 1 — The Opening Move**: How to walk in, what to say, how to anchor low. Start by asking for more than you expect. Create the impression you're comparing 2-3 dealers.
+
+**Round 2 — The Competitor Card**: Name specific competitor models and their prices. Show you've done homework. "I was at the ${competitors.length > 0 ? competitors[0].brand : 'rival'} showroom yesterday and they're offering..."
+
+**Round 3 — The Squeeze**: Target specific cost components — insurance (dealer marks up 30-40%, get your own for less), accessories (marked up 2-3x, demand free ones), extended warranty. Each of these is a negotiation lever.
+
+**Round 4 — The Walk-Away**: The most powerful move. Know your limit, state it calmly, and be genuinely ready to leave. Dealers call back 80% of the time.
+
+**Round 5 — The Close**: When to say yes. Month-end, quarter-end (Mar/Jun/Sep/Dec), year-end are golden. Festival season. Stock clearance models.
 
 RESPONSE FORMAT:
-Always structure your response with these sections:
-1. FAIR PRICE ANALYSIS — What the car should actually cost, factoring in dealer margin and schemes
-2. NEGOTIATION STRATEGY — Step-by-step approach with exact amounts, referencing dealer margin room
-3. KEY LEVERAGE POINTS — Cite specific competitor models and their prices, timing, cash readiness
-4. EXTRAS TO DEMAND — Free accessories, insurance discount, extended warranty, etc.
-5. WALK-AWAY PRICE — The maximum you should pay, calculated from dealer floor price
-6. RED FLAGS — What dealers might try and how to counter it
+Use these sections with ** bold headings **:
+1. **THE DEAL AT A GLANCE** — One-line verdict: is this priced fair, high, or a steal? Set expectations.
+2. **YOUR OPENING MOVE** — Exactly what to say when you walk in. Word-for-word scripts. Anchor price.
+3. **COMPETITOR AMMUNITION** — Specific rival models + prices to name-drop. Exact lines to use.
+4. **SQUEEZE EVERY RUPEE** — Insurance savings, free accessories to demand, warranty/RSA. Itemize what's possible.
+5. **THE WALK-AWAY PLAY** — When and how to walk away. What your final number should be. The psychology behind it.
+6. **DEALER TRICKS TO WATCH** — Common tactics and exact counter-responses.
 
-Be direct, confident, and give specific numbers. Reference competitor prices by name. Use Indian market context. Format with bullet points and use ** for bold headings. Keep it practical, not generic.`;
+STYLE:
+- Conversational, confident, Indian market context
+- Give EXACT word-for-word scripts the buyer can use: "Say this: ..."
+- Use specific rupee amounts but frame them as strategy, not as revealed data
+- Make the buyer feel empowered, not like they're reading a spreadsheet
+- Keep it practical — every line should be something they can actually DO or SAY`;
 
     const chatMessages = [{ role: 'system', content: systemPrompt }];
 
@@ -1213,8 +1220,8 @@ Be direct, confident, and give specific numbers. Reference competitor prices by 
       chatMessages.push({
         role: 'user',
         content: dealerQuote
-          ? `The dealer has quoted Rs ${fmtMoney(Number(dealerQuote))} for this car. Help me negotiate a better deal.`
-          : 'I want to buy this car. Give me a complete negotiation strategy to get the best deal.'
+          ? `I visited the dealer and they quoted Rs ${fmtMoney(Number(dealerQuote))} for this car. I feel it's too high. Coach me on how to bring the price down — what should I say, what tricks should I use?`
+          : 'I want to buy this car and I want the absolute best deal. Coach me like I am walking into the showroom tomorrow — what do I say, how do I negotiate, what tricks do I use?'
       });
     }
 
