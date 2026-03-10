@@ -6,19 +6,14 @@ const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
 const OpenAI = require("openai");
+const { getAuth } = require("./google_auth.cjs");
 
-const CREDENTIALS_PATH = path.join(__dirname, ".credentials", "service-account.json");
 const INSURANCE_SHEET_ID = process.env.INSURANCE_SHEET_ID || "";
 const DRIVE_FOLDER_ID = process.env.INSURANCE_DRIVE_FOLDER_ID || "";
 const TEMP_DIR = path.join(__dirname, "tmp_policies");
 
 // Track processed files to avoid duplicates
 const PROCESSED_LOG = path.join(__dirname, ".crm_data", "processed_policies.json");
-
-function getAuth(scopes) {
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf8"));
-  return new google.auth.GoogleAuth({ credentials, scopes });
-}
 
 function getOpenAI() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -116,7 +111,7 @@ Rules:
 async function appendToSheet(fields, driveFileId) {
   if (!INSURANCE_SHEET_ID) throw new Error("No INSURANCE_SHEET_ID");
 
-  const auth = await getAuth(["https://www.googleapis.com/auth/spreadsheets"]);
+  const auth = await getAuth();
   const sheets = google.sheets({ version: "v4", auth });
 
   // Check if policy already exists in sheet (by policyNo)
@@ -163,7 +158,7 @@ async function appendToSheet(fields, driveFileId) {
 async function processDriveFile(fileId, fileName) {
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-  const auth = await getAuth(["https://www.googleapis.com/auth/drive.readonly"]);
+  const auth = await getAuth();
   const drive = google.drive({ version: "v3", auth });
 
   // Download
@@ -206,7 +201,7 @@ async function processDriveFile(fileId, fileName) {
 async function scanAndProcessNewPolicies() {
   if (!DRIVE_FOLDER_ID) return { ok: false, error: "No INSURANCE_DRIVE_FOLDER_ID" };
 
-  const auth = await getAuth(["https://www.googleapis.com/auth/drive.readonly"]);
+  const auth = await getAuth();
   const drive = google.drive({ version: "v3", auth });
 
   const res = await drive.files.list({

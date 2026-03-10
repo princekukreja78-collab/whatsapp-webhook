@@ -1,18 +1,15 @@
 // insurance_reminder.cjs — Insurance Renewal Reminder System
 // Reads Google Sheet, sends WhatsApp reminders to customer + admin for expiring policies
 
-const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
 const { waSendRaw } = require("./helpers.cjs");
+const { getSheetsClient } = require("./google_auth.cjs");
 
 // ── Config ──────────────────────────────────────────────────
-const CREDENTIALS_PATH = path.join(__dirname, ".credentials", "service-account.json");
 const ADMIN_WA = process.env.ADMIN_WA || "919090404909";
-
-// The spreadsheet ID — set in .env or hardcode after creating the sheet
 const INSURANCE_SHEET_ID = process.env.INSURANCE_SHEET_ID || "";
-const INSURANCE_SHEET_RANGE = "InsuranceRenewals!A2:K"; // skip header row
+const INSURANCE_SHEET_RANGE = "InsuranceRenewals!A2:L"; // skip header row
 
 // Reminder windows (days before expiry)
 const REMINDER_WINDOWS = [30, 15, 7, 3, 1, 0];
@@ -32,20 +29,6 @@ const COL = {
   PREMIUM: 10,   // K — Premium Amount (optional)
   CHASSIS_NO: 11 // L — Chassis/VIN Number (for new cars without reg no)
 };
-
-// ── Google Sheets Auth ──────────────────────────────────────
-function getAuth() {
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf8"));
-  return new google.auth.GoogleAuth({
-    credentials,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"]
-  });
-}
-
-async function getSheetsClient() {
-  const auth = await getAuth();
-  return google.sheets({ version: "v4", auth });
-}
 
 // ── Date Helpers ────────────────────────────────────────────
 function parseExpiryDate(dateStr) {

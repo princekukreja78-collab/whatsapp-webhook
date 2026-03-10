@@ -18,9 +18,9 @@
 const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
+const { getCredentials } = require("./google_auth.cjs");
 
 const POLICIES_DIR = path.join(__dirname, "policies");
-const SA_PATH = path.join(__dirname, ".credentials", "service-account.json");
 const OAUTH_PATH = path.join(__dirname, ".credentials", "gmail-oauth.json");
 const TOKEN_PATH = path.join(__dirname, ".credentials", "gmail-token.json");
 const GMAIL_USER = process.env.INSURANCE_GMAIL || "princekukreja@mrcar.co.in";
@@ -41,21 +41,19 @@ const GMAIL_SEARCH_QUERIES = [
 // ── Auth: Try Service Account (Workspace) first, fallback to OAuth2 ──
 async function getGmailAuth() {
   // Option 1: Service account with domain-wide delegation (Google Workspace)
-  if (fs.existsSync(SA_PATH)) {
-    try {
-      const creds = JSON.parse(fs.readFileSync(SA_PATH, "utf8"));
-      const auth = new google.auth.JWT({
-        email: creds.client_email,
-        key: creds.private_key,
-        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
-        subject: GMAIL_USER // Impersonate this user
-      });
-      await auth.authorize();
-      console.log(`📧 Gmail auth via service account (impersonating ${GMAIL_USER})`);
-      return auth;
-    } catch (e) {
-      console.warn("Service account Gmail auth failed (domain-wide delegation may not be set up):", e?.message || e);
-    }
+  try {
+    const creds = getCredentials();
+    const auth = new google.auth.JWT({
+      email: creds.client_email,
+      key: creds.private_key,
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+      subject: GMAIL_USER // Impersonate this user
+    });
+    await auth.authorize();
+    console.log(`📧 Gmail auth via service account (impersonating ${GMAIL_USER})`);
+    return auth;
+  } catch (e) {
+    console.warn("Service account Gmail auth failed (domain-wide delegation may not be set up):", e?.message || e);
   }
 
   // Option 2: OAuth2 (personal Gmail or if delegation not set up)
@@ -216,9 +214,9 @@ async function autoMatchPoliciesToSheet() {
   if (!files.length) return { ok: true, matched: 0, message: "No PDFs in policies/" };
 
   // Read sheet data
-  const creds = JSON.parse(fs.readFileSync(SA_PATH, "utf8"));
-  const auth = new google.auth.GoogleAuth({ credentials: creds, scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"] });
-  const sheets = google.sheets({ version: "v4", auth: await auth });
+  const { getAuth } = require("./google_auth.cjs");
+  const auth = await getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
   const result = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: "InsuranceRenewals!A2:K" });
   const rows = result.data.values || [];
 

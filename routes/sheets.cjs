@@ -3,24 +3,9 @@ const express = require("express");
 const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
+const { getAuth } = require("../google_auth.cjs");
 
 const router = express.Router();
-
-// Load JSON key
-const CREDENTIALS_PATH = path.join(__dirname, "..", ".credentials", "service-account.json");
-const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf8"));
-
-const SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive"
-];
-
-function getAuth() {
-  return new google.auth.GoogleAuth({
-    credentials,
-    scopes: SCOPES
-  });
-}
 
 // POST → Import sheet → return rows
 router.post("/import", async (req, res) => {

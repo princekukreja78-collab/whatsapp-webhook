@@ -5,12 +5,12 @@
 const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
+const { getAuth } = require("./google_auth.cjs");
 
-const CREDENTIALS_PATH = path.join(__dirname, ".credentials", "service-account.json");
 const POLICIES_DIR = path.join(__dirname, "policies");
 const TEMP_DIR = path.join(__dirname, "tmp_policies");
 const INSURANCE_SHEET_ID = process.env.INSURANCE_SHEET_ID || "";
-const INSURANCE_SHEET_RANGE = "InsuranceRenewals!A2:K";
+const INSURANCE_SHEET_RANGE = "InsuranceRenewals!A2:L";
 const DRIVE_FOLDER_ID = process.env.INSURANCE_DRIVE_FOLDER_ID || "";
 
 // Column indices (same as insurance_reminder.cjs)
@@ -18,17 +18,6 @@ const COL = {
   NAME: 0, PHONE: 1, CAR_MODEL: 2, REG_NO: 3, POLICY_NO: 4,
   INSURER: 5, EXPIRY: 6, STATUS: 7, LAST_REMINDER: 8, REMINDER_NOTE: 9, PREMIUM: 10, CHASSIS_NO: 11
 };
-
-function getAuth() {
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf8"));
-  return new google.auth.GoogleAuth({
-    credentials,
-    scopes: [
-      "https://www.googleapis.com/auth/spreadsheets.readonly",
-      "https://www.googleapis.com/auth/drive.readonly"
-    ]
-  });
-}
 
 // ── Google Drive: search for policy PDF ─────────────────────
 let _driveFileCache = null;
@@ -200,10 +189,7 @@ async function uploadPolicyToDrive(filePath, filename) {
   if (!DRIVE_FOLDER_ID) throw new Error("INSURANCE_DRIVE_FOLDER_ID not set");
 
   const auth = await getAuth();
-  const drive = google.drive({ version: "v3", auth: await new google.auth.GoogleAuth({
-    credentials: JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf8")),
-    scopes: ["https://www.googleapis.com/auth/drive.file"]
-  }) });
+  const drive = google.drive({ version: "v3", auth });
 
   const res = await drive.files.create({
     requestBody: {
