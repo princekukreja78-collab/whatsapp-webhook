@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 
 const SA_FILE = path.join(__dirname, ".credentials", "service-account.json");
+const RENDER_SA_FILE = "/etc/secrets/service-account.json";
 
 let _credentials = null;
 
@@ -22,13 +23,20 @@ function getCredentials() {
     }
   }
 
-  // Option 2: Local file
+  // Option 2: Render Secret File
+  if (fs.existsSync(RENDER_SA_FILE)) {
+    _credentials = JSON.parse(fs.readFileSync(RENDER_SA_FILE, "utf8"));
+    console.log("✅ Loaded Google credentials from Render secret file");
+    return _credentials;
+  }
+
+  // Option 3: Local file
   if (fs.existsSync(SA_FILE)) {
     _credentials = JSON.parse(fs.readFileSync(SA_FILE, "utf8"));
     return _credentials;
   }
 
-  throw new Error("No Google service account credentials found. Set GOOGLE_SA_JSON env var or place .credentials/service-account.json");
+  throw new Error("No Google service account credentials found. Set GOOGLE_SA_JSON env var, add Render Secret File, or place .credentials/service-account.json");
 }
 
 function getAuth(scopes) {
