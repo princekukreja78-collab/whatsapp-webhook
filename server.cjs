@@ -9698,6 +9698,22 @@ console.log("🟢 Server fully started — READY to receive greeting UI and webh
   } catch (e) {
     console.warn('Insurance cron setup failed:', e?.message || e);
   }
+
+  // Auto-scan Drive for new policy PDFs — every 2 hours (first scan 2min after boot)
+  try {
+    const { scanAndProcessNewPolicies } = require('./policy_extractor.cjs');
+    if (process.env.INSURANCE_DRIVE_FOLDER_ID) {
+      setTimeout(() => {
+        scanAndProcessNewPolicies().catch(e => console.warn('Drive scan error:', e?.message || e));
+      }, 2 * 60 * 1000);
+      setInterval(() => {
+        scanAndProcessNewPolicies().catch(e => console.warn('Drive scan error:', e?.message || e));
+      }, 2 * 60 * 60 * 1000);
+      console.log('📂 Drive policy auto-scan scheduled (every 2 hours)');
+    }
+  } catch (e) {
+    console.warn('Drive scan cron setup failed:', e?.message || e);
+  }
 });
 
 //    Uses existing LEADS_FILE and safeJsonRead helper.
