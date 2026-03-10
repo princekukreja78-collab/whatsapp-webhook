@@ -1294,6 +1294,30 @@ try {
   );
 }
 
+// === Insurance Renewal Reminder Routes ===
+try {
+  const { mountInsuranceRoutes } = require('./insurance_reminder.cjs');
+  mountInsuranceRoutes(app);
+} catch (e) {
+  console.warn('Insurance reminder routes disabled:', e && e.message ? e.message : e);
+}
+
+// === Policy PDF Extractor (AI auto-fill sheet from Drive PDFs) ===
+try {
+  const { mountExtractorRoutes } = require('./policy_extractor.cjs');
+  mountExtractorRoutes(app);
+} catch (e) {
+  console.warn('Policy extractor routes disabled:', e && e.message ? e.message : e);
+}
+
+// === Gmail Policy Fetch Routes ===
+try {
+  const { mountGmailRoutes } = require('./gmail_policy_fetcher.cjs');
+  mountGmailRoutes(app);
+} catch (e) {
+  console.warn('Gmail policy routes disabled:', e && e.message ? e.message : e);
+}
+
 // === Dashboard Routes (SPA) ===
 app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard', 'index.html'));
@@ -6398,6 +6422,76 @@ const blockNewEngine  = disableNewEngine  && lastSvcNorm === 'USED';
 // not at the global interceptor level.
 
 // ============================================================
+// INSURANCE POLICY LOOKUP INTENT
+// ============================================================
+try {
+  const { isInsurancePolicyRequest, findPoliciesByPhone, findPolicyFile, formatPolicyMessage } = require('./policy_lookup.cjs');
+  if (!selectedId && msgText && isInsurancePolicyRequest(msgText)) {
+    console.log('🛡️ INSURANCE POLICY REQUEST from:', from, '→', msgText);
+    const policies = await findPoliciesByPhone(from);
+    const textMsg = formatPolicyMessage(policies);
+    await waSendText(from, textMsg);
+
+    // Try to send PDF document for each policy
+    for (const p of policies) {
+      const pdfPath = await findPolicyFile(p);
+      if (pdfPath) {
+        try {
+          const mediaResp = await uploadMediaToWhatsApp(pdfPath);
+          const mediaId = mediaResp?.id || mediaResp;
+          if (mediaId) {
+            await waSendRaw({
+              messaging_product: 'whatsapp',
+              to: from,
+              type: 'document',
+              document: {
+                id: mediaId,
+                caption: `Insurance Policy — ${p.car} (${p.regNo || p.policyNo})`,
+                filename: `${p.policyNo || p.regNo || 'policy'}.pdf`
+              }
+            });
+            console.log('📄 Policy PDF sent to', from, '→', pdfPath);
+          }
+        } catch (pdfErr) {
+          console.warn('Policy PDF send failed:', pdfErr?.message || pdfErr);
+        }
+      }
+    }
+
+    setLastService(from, 'INSURANCE_LOOKUP');
+    return;
+  }
+} catch (insErr) {
+  console.warn('Insurance lookup handler error:', insErr?.message || insErr);
+}
+
+// ============================================================
+// INSURANCE CLAIM SUPPORT INTENT
+// ============================================================
+try {
+  const { isClaimRequest, detectClaimType, buildClaimSupportMessage, buildAdminClaimAlert } = require('./claim_support.cjs');
+  const { findPoliciesByPhone: findPolForClaim } = require('./policy_lookup.cjs');
+  if (!selectedId && msgText && isClaimRequest(msgText)) {
+    console.log('🆘 CLAIM SUPPORT REQUEST from:', from, '→', msgText);
+    const policies = await findPolForClaim(from);
+    const claimType = detectClaimType(msgText);
+    const supportMsg = buildClaimSupportMessage(policies, claimType, msgText);
+    await waSendText(from, supportMsg);
+
+    // Alert admin about claim request
+    if (ADMIN_WA && from !== ADMIN_WA) {
+      const adminAlert = buildAdminClaimAlert(policies[0] || { phone: from }, claimType, msgText);
+      await waSendText(ADMIN_WA, adminAlert);
+    }
+
+    setLastService(from, 'CLAIM_SUPPORT');
+    return;
+  }
+} catch (claimErr) {
+  console.warn('Claim support handler error:', claimErr?.message || claimErr);
+}
+
+// ============================================================
 // EXCHANGE / TRADE-IN INTENT (TEXT TRIGGER)
 // ============================================================
 const inExchangeFlow = ['EXCHANGE_ASK_OLD', 'EXCHANGE_ASK_PRICE', 'EXCHANGE_ASK_KM', 'EXCHANGE_ASK_OWNER', 'EXCHANGE_ASK_NEW'].includes(lastSvcNorm);
@@ -9590,6 +9684,20 @@ console.log("🟢 Server fully started — READY to receive greeting UI and webh
     ADMIN_WA: !!ADMIN_WA,
     DEBUG
   });
+
+  // Daily insurance renewal check — runs every 24h (first check 60s after boot)
+  try {
+    const { dailyCronCheck } = require('./insurance_reminder.cjs');
+    if (process.env.INSURANCE_SHEET_ID) {
+      setTimeout(() => dailyCronCheck(), 60 * 1000);
+      setInterval(() => dailyCronCheck(), 24 * 60 * 60 * 1000);
+      console.log('🛡️ Insurance renewal cron scheduled (daily)');
+    } else {
+      console.log('ℹ️ Insurance cron skipped — set INSURANCE_SHEET_ID in .env to enable');
+    }
+  } catch (e) {
+    console.warn('Insurance cron setup failed:', e?.message || e);
+  }
 });
 
 //    Uses existing LEADS_FILE and safeJsonRead helper.
