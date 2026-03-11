@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const OpenAI = require("openai");
 const { getAuth } = require("./google_auth.cjs");
+const { waSendRaw } = require("./helpers.cjs");
 
 const INSURANCE_SHEET_ID = process.env.INSURANCE_SHEET_ID || "";
 const DRIVE_FOLDER_ID = process.env.INSURANCE_DRIVE_FOLDER_ID || "";
@@ -143,6 +144,40 @@ async function appendToSheet(fields, driveFileId) {
     fields.chassisNo || ""
   ];
 
+  // Try to find customer's phone from existing sheet rows (match by name or regNo)
+  let customerPhone = "";
+  try {
+    const allRows = await sheets.spreadsheets.values.get({
+      spreadsheetId: INSURANCE_SHEET_ID,
+      range: "InsuranceRenewals!A2:L"
+    });
+    const existingRows = allRows.data.values || [];
+    const cleanName = (fields.customerName || "").toLowerCase().replace(/[^a-z]/g, "");
+    const cleanReg = (fields.regNo || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    const cleanChassis = (fields.chassisNo || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+
+    for (const r of existingRows) {
+      const rowPhone = String(r[1] || "").replace(/[^0-9]/g, "");
+      if (!rowPhone || rowPhone.length < 10) continue;
+
+      const rowName = (r[0] || "").toLowerCase().replace(/[^a-z]/g, "");
+      const rowReg = (r[3] || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+      const rowChassis = (r[11] || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+
+      if ((cleanName && rowName && cleanName === rowName) ||
+          (cleanReg && rowReg && cleanReg === rowReg) ||
+          (cleanChassis && rowChassis && cleanChassis === rowChassis)) {
+        customerPhone = rowPhone;
+        break;
+      }
+    }
+  } catch (e) {
+    console.warn("Phone lookup for welcome msg failed:", e?.message || e);
+  }
+
+  // If we found a phone, pre-fill it in the row
+  if (customerPhone) row[1] = customerPhone;
+
   await sheets.spreadsheets.values.append({
     spreadsheetId: INSURANCE_SHEET_ID,
     range: "InsuranceRenewals!A2:L",
@@ -151,7 +186,60 @@ async function appendToSheet(fields, driveFileId) {
   });
 
   console.log(`✅ Added to sheet: ${fields.customerName} — ${fields.carModel} — ${fields.policyNo}`);
-  return { ok: true, added: true, fields };
+
+  // Send welcome message if phone is available
+  if (customerPhone) {
+    try {
+      const name = fields.customerName || "Customer";
+      const car = fields.carModel || "your car";
+      const regNo = fields.regNo || "";
+      const welcomeMsg = `🎉 *New Insurance Policy Added!*\n\nDear ${name},\n\nYour insurance policy has been processed and added to our records.\n\n🚗 Car: ${car}${regNo ? ` (${regNo})` : ""}\n📋 Policy No: ${fields.policyNo || "N/A"}\n🏢 Insurer: ${fields.insurer || "N/A"}\n📅 Valid Until: ${fields.expiryDate || "N/A"}${fields.premium ? `\n💰 Premium: ₹${fields.premium}` : ""}${fields.idv ? `\n🛡️ IDV: ₹${fields.idv}` : ""}\n\n✅ Your vehicle is covered.\nNeed any help? Just reply here!\n\nDrive safe! 🚘\n— Team Mr. Car`;
+
+      await waSendRaw({
+        messaging_product: "whatsapp",
+        to: customerPhone,
+        type: "text",
+        text: { body: welcomeMsg }
+      });
+      console.log(`🎉 Policy welcome message sent → ${customerPhone}`);
+    } catch (e) {
+      console.warn("Welcome message send failed:", e?.message || e);
+    }
+
+    // Notify admin
+    try {
+      const adminPhone = process.env.ADMIN_PHONE || process.env.BUSINESS_PHONE;
+      if (adminPhone) {
+        const adminMsg = `📄 *New Policy Auto-Extracted*\n\n👤 ${fields.customerName || "Unknown"}\n🚗 ${fields.carModel || "N/A"}${fields.regNo ? ` (${fields.regNo})` : ""}\n📋 ${fields.policyNo || "N/A"}\n🏢 ${fields.insurer || "N/A"}\n📅 Expiry: ${fields.expiryDate || "N/A"}\n📱 Phone: ${customerPhone}\n\n✅ Welcome message sent to customer.`;
+        await waSendRaw({
+          messaging_product: "whatsapp",
+          to: adminPhone,
+          type: "text",
+          text: { body: adminMsg }
+        });
+      }
+    } catch (e) {
+      console.warn("Admin policy alert failed:", e?.message || e);
+    }
+  } else {
+    // No phone — notify admin to add it manually
+    try {
+      const adminPhone = process.env.ADMIN_PHONE || process.env.BUSINESS_PHONE;
+      if (adminPhone) {
+        const adminMsg = `📄 *New Policy Auto-Extracted (No Phone)*\n\n👤 ${fields.customerName || "Unknown"}\n🚗 ${fields.carModel || "N/A"}${fields.regNo ? ` (${fields.regNo})` : ""}\n📋 ${fields.policyNo || "N/A"}\n🏢 ${fields.insurer || "N/A"}\n📅 Expiry: ${fields.expiryDate || "N/A"}\n\n⚠️ No phone number found. Please add it to the sheet manually so the customer can receive reminders.`;
+        await waSendRaw({
+          messaging_product: "whatsapp",
+          to: adminPhone,
+          type: "text",
+          text: { body: adminMsg }
+        });
+      }
+    } catch (e) {
+      console.warn("Admin no-phone alert failed:", e?.message || e);
+    }
+  }
+
+  return { ok: true, added: true, fields, phoneSent: !!customerPhone };
 }
 
 // ── Process a single PDF from Drive ─────────────────────────
