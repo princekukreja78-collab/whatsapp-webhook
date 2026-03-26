@@ -462,6 +462,7 @@ const DEALER_SHEET_CSV_URL = (process.env.DEALER_SHEET_CSV_URL || '').trim();
 enquiry.init({
   waSendText: wa.waSendText,
   waSendRaw: wa.waSendRaw,
+  waSendImageLink: wa.waSendImageLink,
   waSendListMenu: wa.waSendListMenu,
   sendAdminAlert: wa.sendAdminAlert,
   setLastService,
@@ -554,6 +555,8 @@ webhook.init({
   ],
   // OpenAI (for embeddings in webhook)
   openai,
+  // Cross-container
+  STAGING_API_URL, fetch,
   // Helpers
   safeJsonRead, safeJsonWrite,
   // Node builtins
