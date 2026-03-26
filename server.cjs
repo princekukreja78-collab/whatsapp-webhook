@@ -145,6 +145,13 @@ tradeIn.init({ DEBUG });
 const priceAlerts = require('./lib/priceAlerts.cjs');
 priceAlerts.init({ carSearch, waSendText: wa.waSendText, DEBUG });
 
+// -- Media Store (store dealer photos for later use)
+const mediaStore = require('./lib/mediaStore.cjs');
+mediaStore.init({ META_TOKEN, fetch });
+
+// Serve stored media files
+app.use('/media_store', express.static(path.join(__dirname, 'media_store')));
+
 // ==================== HELPERS (kept in server.cjs — small, wiring-dependent) ====================
 
 // -- File helpers
@@ -465,6 +472,7 @@ enquiry.init({
   waSendImageLink: wa.waSendImageLink,
   waSendListMenu: wa.waSendListMenu,
   sendAdminAlert: wa.sendAdminAlert,
+  mediaStore,
   setLastService,
   getLastService,
   fetch,
@@ -499,10 +507,11 @@ webhook.init({
   carSearch,
   // Group ingest (silent observer)
   groupIngest,
-  // Follow-up, trade-in, price alerts
+  // Follow-up, trade-in, price alerts, media store
   followUp,
   tradeIn,
   priceAlerts,
+  mediaStore,
   // Session
   setLastService, getLastService, isLoanContext,
   // Quotes
