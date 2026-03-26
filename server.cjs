@@ -105,6 +105,14 @@ carSearch.init({
   loadUsedSheetRows: pricing.loadUsedSheetRows
 });
 
+// -- Group Ingest (silent observer for dealer WhatsApp groups)
+const groupIngest = require('./lib/groupIngest.cjs');
+groupIngest.init({
+  openai,
+  MUTED_NUMBERS: (process.env.MUTED_NUMBERS || '').trim(),
+  DEBUG
+});
+
 // ==================== HELPERS (kept in server.cjs — small, wiring-dependent) ====================
 
 // -- File helpers
@@ -455,6 +463,8 @@ webhook.init({
   handleSalesmanReply: enquiry.handleSalesmanReply,
   // Car search (aggregated)
   carSearch,
+  // Group ingest (silent observer)
+  groupIngest,
   // Session
   setLastService, getLastService, isLoanContext,
   // Quotes
