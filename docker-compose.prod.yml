@@ -1,0 +1,10 @@
+services:
+  mr_car:
+    build: .
+    ports:
+      - "3002:10000"
+    env_file:
+      - .env.prod
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
