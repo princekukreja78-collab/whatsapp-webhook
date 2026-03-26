@@ -114,6 +114,18 @@ groupIngest.init({
   DEBUG
 });
 
+// -- Follow-up engine (auto-nudge dead leads)
+const followUp = require('./lib/followUp.cjs');
+followUp.init({ waSendText: wa.waSendText, DEBUG });
+
+// -- Trade-in calculator
+const tradeIn = require('./lib/tradeIn.cjs');
+tradeIn.init({ DEBUG });
+
+// -- Price drop alerts
+const priceAlerts = require('./lib/priceAlerts.cjs');
+priceAlerts.init({ carSearch, waSendText: wa.waSendText, DEBUG });
+
 // ==================== HELPERS (kept in server.cjs — small, wiring-dependent) ====================
 
 // -- File helpers
@@ -466,6 +478,10 @@ webhook.init({
   carSearch,
   // Group ingest (silent observer)
   groupIngest,
+  // Follow-up, trade-in, price alerts
+  followUp,
+  tradeIn,
+  priceAlerts,
   // Session
   setLastService, getLastService, isLoanContext,
   // Quotes
