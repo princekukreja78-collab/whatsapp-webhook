@@ -152,6 +152,17 @@ mediaStore.init({ META_TOKEN, fetch });
 // Serve stored media files
 app.use('/media_store', express.static(path.join(__dirname, 'media_store')));
 
+// -- Insurance flow
+const insurance = require('./lib/insurance.cjs');
+insurance.init({
+  waSendText: wa.waSendText,
+  waSendRaw: wa.waSendRaw,
+  setLastService,
+  getLastService,
+  ADMIN_WA,
+  DEBUG
+});
+
 // -- Photo Ingest (GPT vision on dealer photos → ask for details → save to sheet)
 const photoIngest = require('./lib/photoIngest.cjs');
 photoIngest.init({
@@ -528,6 +539,7 @@ webhook.init({
   priceAlerts,
   mediaStore,
   photoIngest,
+  insurance,
   // Session
   setLastService, getLastService, isLoanContext,
   // Quotes
