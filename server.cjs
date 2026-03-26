@@ -110,6 +110,7 @@ const groupIngest = require('./lib/groupIngest.cjs');
 groupIngest.init({
   openai,
   MUTED_NUMBERS: (process.env.MUTED_NUMBERS || '').trim(),
+  DEALER_NUMBERS: (process.env.DEALER_NUMBERS || '').trim(),
   DEBUG
 });
 
