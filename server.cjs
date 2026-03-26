@@ -303,8 +303,9 @@ const crmIngestHandler = require('./routes/crm_ingest.cjs');
 async function autoIngest(enriched = {}) {
   const portEnv = process.env.PORT || 10000;
   const baseEnv = (process.env.CRM_URL || '').trim();
-  const baseUrl = (baseEnv || `http://127.0.0.1:${portEnv}`).replace(/\/+$/, '');
-  const url = `${baseUrl}/crm/ingest`;
+  let baseUrl = (baseEnv || `http://127.0.0.1:${portEnv}`).replace(/\/+$/, '');
+  // Prevent double path: if CRM_URL already ends with /crm/ingest, don't append again
+  const url = baseUrl.endsWith('/crm/ingest') ? baseUrl : `${baseUrl}/crm/ingest`;
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -496,6 +497,13 @@ webhook.init({
   buildGlobalRegistryFromSheets: brands.buildGlobalRegistryFromSheets,
   // Constants
   USED_CAR_ROI_VISIBLE, NEW_CAR_ROI,
+  LOAN_KEYWORDS: [
+    'loan', 'emi', 'finance', 'financing', 'interest',
+    'loan chahiye', 'loan lena', 'loan lena hai',
+    'emi bata', 'emi batao', 'emi kitni', 'emi kitna',
+    'finance chahiye', 'car loan',
+    'installment', 'instalment'
+  ],
   // Node builtins
   fs, path
 });
