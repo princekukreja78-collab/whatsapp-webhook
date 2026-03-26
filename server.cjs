@@ -48,7 +48,7 @@ const USED_CAR_ROI_VISIBLE    = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99)
 const USED_CAR_ROI_INTERNAL   = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
 const DEBUG = (process.env.DEBUG_VARIANT === 'true') || false;
 
-const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 600);
+const GREETING_WINDOW_MINUTES = Number(process.env.GREETING_WINDOW_MINUTES || 5);
 const GREETING_WINDOW_MS = GREETING_WINDOW_MINUTES * 60 * 1000;
 
 // ==================== FETCH ====================
