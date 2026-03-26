@@ -43,6 +43,25 @@ const PORT = process.env.PORT || 10000;
 const MAX_QUOTE_PER_DAY       = Number(process.env.MAX_QUOTE_PER_DAY || 10);
 const QUOTE_LIMIT_FILE        = path.resolve(__dirname, 'quote_limit.json');
 const LEADS_FILE              = path.resolve(__dirname, 'crm_leads.json');
+// Slab-based ROI rates
+function getNewCarROI(amount) {
+  if (!amount || amount <= 0) return 8.10;
+  const lakh = amount / 100000;
+  if (lakh < 5) return 9.25;
+  if (lakh < 10) return 8.75;
+  return 8.10; // 10L+
+}
+
+function getUsedCarROI(amount) {
+  // Returns { visible, internal }
+  if (!amount || amount <= 0) return { visible: 9.99, internal: 10.0 };
+  const lakh = amount / 100000;
+  if (lakh < 5) return { visible: 13.5, internal: 13.5 };
+  if (lakh < 10) return { visible: 12.0, internal: 12.0 };
+  return { visible: 9.9, internal: 10.0 }; // 10L+
+}
+
+// Flat defaults (for backward compat where slab isn't used yet)
 const NEW_CAR_ROI             = Number(process.env.NEW_CAR_ROI || 8.10);
 const USED_CAR_ROI_VISIBLE    = Number(process.env.USED_CAR_ROI_VISIBLE || 9.99);
 const USED_CAR_ROI_INTERNAL   = Number(process.env.USED_CAR_ROI_INTERNAL || 10.0);
@@ -374,6 +393,7 @@ quotes.init({
   canSendQuote,
   DEBUG,
   NEW_CAR_ROI,
+  getNewCarROI,
   SIGNATURE_MODEL,
   callSignatureBrain: advisory.callSignatureBrain,
   isAdvisory: advisory.isAdvisory,
@@ -524,6 +544,7 @@ webhook.init({
   buildGlobalRegistryFromSheets: brands.buildGlobalRegistryFromSheets,
   // Constants
   USED_CAR_ROI_VISIBLE, NEW_CAR_ROI,
+  getNewCarROI, getUsedCarROI,
   LOAN_KEYWORDS: [
     'loan', 'emi', 'finance', 'financing', 'interest',
     'loan chahiye', 'loan lena', 'loan lena hai',
