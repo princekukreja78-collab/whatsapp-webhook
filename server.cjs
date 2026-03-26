@@ -531,6 +531,10 @@ webhook.init({
     'finance chahiye', 'car loan',
     'installment', 'instalment'
   ],
+  // OpenAI (for embeddings in webhook)
+  openai,
+  // Helpers
+  safeJsonRead, safeJsonWrite,
   // Node builtins
   fs, path
 });
