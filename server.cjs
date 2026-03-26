@@ -152,6 +152,21 @@ mediaStore.init({ META_TOKEN, fetch });
 // Serve stored media files
 app.use('/media_store', express.static(path.join(__dirname, 'media_store')));
 
+// -- Photo Ingest (GPT vision on dealer photos → ask for details → save to sheet)
+const photoIngest = require('./lib/photoIngest.cjs');
+photoIngest.init({
+  openai,
+  META_TOKEN,
+  fetch,
+  mediaStore,
+  waSendText: wa.waSendText,
+  INVENTORY_SHEET_WEBHOOK_URL: (process.env.INVENTORY_SHEET_WEBHOOK_URL || '').trim(),
+  addToInventory: (car) => {
+    // Also add to groupIngest inventory
+    try { groupIngest.handleAutoIngest(car.dealerPhone, `${car.year} ${car.brand} ${car.model} ${car.fuel} ${car.km}km ${car.owners} ${car.city}`, car.dealerName); } catch(e) {}
+  }
+});
+
 // ==================== HELPERS (kept in server.cjs — small, wiring-dependent) ====================
 
 // -- File helpers
@@ -507,11 +522,12 @@ webhook.init({
   carSearch,
   // Group ingest (silent observer)
   groupIngest,
-  // Follow-up, trade-in, price alerts, media store
+  // Follow-up, trade-in, price alerts, media store, photo ingest
   followUp,
   tradeIn,
   priceAlerts,
   mediaStore,
+  photoIngest,
   // Session
   setLastService, getLastService, isLoanContext,
   // Quotes
