@@ -592,8 +592,10 @@ webhook.init({
   ],
   // OpenAI (for embeddings in webhook)
   openai,
-  // Cross-container
+  // Cross-container + staging mode
   STAGING_API_URL, fetch,
+  STAGING_MODE: (process.env.STAGING_MODE || '').trim(),
+  TESTER_NUMBERS: (process.env.TESTER_NUMBERS || '').trim(),
   // Helpers
   safeJsonRead, safeJsonWrite,
   // Node builtins
