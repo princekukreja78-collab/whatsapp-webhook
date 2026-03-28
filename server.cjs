@@ -577,6 +577,10 @@ webhook.init({
   parseCsv: pricing.parseCsv,
   fetchCsv: pricing.fetchCsv,
   toHeaderIndexMap: pricing.toHeaderIndexMap,
+  extractBreakupFromCSV: pricing.extractBreakupFromCSV,
+  calculatePriceBreakup: pricing.calculatePriceBreakup,
+  formatPriceBreakup: pricing.formatPriceBreakup,
+  extractPanIndiaPricesFromRow: pricing.extractPanIndiaPricesFromRow,
   // Brands
   detectBrandFromText: brands.detectBrandFromText,
   buildGlobalRegistryFromSheets: brands.buildGlobalRegistryFromSheets,
