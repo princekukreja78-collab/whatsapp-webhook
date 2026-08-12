@@ -5,6 +5,9 @@ services:
       - "3001:10000"
     env_file:
       - .env.staging
+    volumes:
+      - ./data:/app/data
+      - ./media_store:/app/media_store
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"

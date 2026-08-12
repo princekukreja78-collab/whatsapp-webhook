@@ -151,6 +151,25 @@ mediaStore.init({ META_TOKEN, fetch });
 
 // Serve stored media files
 app.use('/media_store', express.static(path.join(__dirname, 'media_store')));
+// Inventory photos may live on a persistent disk (Render) — mount that path too
+if (process.env.INVENTORY_MEDIA_DIR) {
+  app.use('/media_store/inventory', express.static(process.env.INVENTORY_MEDIA_DIR));
+}
+
+// -- Inventory (car deals: photos, specs, features, deal + loan schemes)
+const inventory = require('./lib/inventory.cjs');
+inventory.init({
+  waSendRaw: wa.waSendRaw,
+  waSendText: wa.waSendText,
+  waSendImageLink: wa.waSendImageLink,
+  sendAdminAlert: wa.sendAdminAlert,
+  fmtMoney: pricing.fmtMoney,
+  simulateBulletPlan: pricing.simulateBulletPlan,
+  openai,
+  PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL,
+  DEBUG
+});
+app.use('/', inventory.router);
 
 // -- Insurance flow
 const insurance = require('./lib/insurance.cjs');
@@ -170,6 +189,7 @@ photoIngest.init({
   META_TOKEN,
   fetch,
   mediaStore,
+  inventory,
   waSendText: wa.waSendText,
   INVENTORY_SHEET_WEBHOOK_URL: (process.env.INVENTORY_SHEET_WEBHOOK_URL || '').trim(),
   addToInventory: (car) => {
@@ -539,6 +559,7 @@ webhook.init({
   priceAlerts,
   mediaStore,
   photoIngest,
+  inventory,
   insurance,
   // Session
   setLastService, getLastService, isLoanContext,
