@@ -471,6 +471,7 @@ async function sendSheetWelcomeTemplate(phone, name = "Customer") {
 // ==================== INIT QUOTE ENGINES ====================
 const quotes = require('./lib/quotes.cjs');
 quotes.init({
+  priceSync,
   waSendText: wa.waSendText,
   waSendRaw: wa.waSendRaw,
   sendNewCarButtons: wa.sendNewCarButtons,
