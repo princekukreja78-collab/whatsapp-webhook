@@ -195,6 +195,10 @@ variantDetail.init({
 });
 app.use('/', variantDetail.router);
 
+// -- Website leads (name + phone → CRM, Google Sheet, owner WhatsApp alert)
+const webLeads = require('./lib/webLeads.cjs');
+app.use('/', webLeads.router);
+
 // -- Deal blast (approved-template outreach to matched leads)
 const dealBlast = require('./lib/dealBlast.cjs');
 app.use('/', dealBlast.router);
@@ -563,6 +567,13 @@ enquiry.init({
 app.use('/', enquiry.getRouter());
 
 // ==================== WEBHOOK ROUTES ====================
+webLeads.init({
+  waSendText: wa.waSendText,
+  loadCrmLeadsSafe,
+  saveCrmLeadsSafe,
+  pushLeadToGoogleSheet
+});
+
 priceSync.init({
   openai,
   waSendText: wa.waSendText,
