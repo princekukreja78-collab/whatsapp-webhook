@@ -107,9 +107,13 @@ wa.init({ META_TOKEN, PHONE_NUMBER_ID, ADMIN_WA, DEBUG, fetch });
 const advisory = require('./lib/advisory.cjs');
 advisory.init({ openai, SIGNATURE_MODEL, getRAG, findRelevantChunks, DEBUG });
 
+// -- Price sync (forwarded price lists → override layer used by every quote path)
+const priceSync = require('./lib/priceSync.cjs');
+
 // -- Used cars
 const usedCars = require('./lib/usedCars.cjs');
 usedCars.init({
+  priceSync,
   waSendText: wa.waSendText,
   SHEET_USED_CSV_URL,
   USED_CAR_ROI_VISIBLE,
@@ -171,9 +175,6 @@ inventory.init({
   DEBUG
 });
 app.use('/', inventory.router);
-
-// -- Price sync (forwarded price lists → sheet diff → override layer)
-const priceSync = require('./lib/priceSync.cjs');
 
 // -- Website variant search (brand sheets → variants with on-road price)
 const variantSearch = require('./lib/variantSearch.cjs');
