@@ -166,6 +166,7 @@ inventory.init({
   fmtMoney: pricing.fmtMoney,
   simulateBulletPlan: pricing.simulateBulletPlan,
   openai,
+  fetch,
   PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL,
   DEBUG
 });
