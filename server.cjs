@@ -185,6 +185,16 @@ variantSearch.init({
 });
 app.use('/', variantSearch.router);
 
+// -- Variant detail (specs, features, colours, benefits, every financier's EMI plan)
+const variantDetail = require('./lib/variantDetail.cjs');
+variantDetail.init({
+  openai,
+  loadPricingFromSheets: pricing.loadPricingFromSheets,
+  inventory,
+  priceSync
+});
+app.use('/', variantDetail.router);
+
 // -- Deal blast (approved-template outreach to matched leads)
 const dealBlast = require('./lib/dealBlast.cjs');
 app.use('/', dealBlast.router);
