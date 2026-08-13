@@ -175,6 +175,16 @@ app.use('/', inventory.router);
 // -- Price sync (forwarded price lists → sheet diff → override layer)
 const priceSync = require('./lib/priceSync.cjs');
 
+// -- Website variant search (brand sheets → variants with on-road price)
+const variantSearch = require('./lib/variantSearch.cjs');
+variantSearch.init({
+  loadPricingFromSheets: pricing.loadPricingFromSheets,
+  calcEmiSimple: pricing.calcEmiSimple,
+  inventory,
+  priceSync
+});
+app.use('/', variantSearch.router);
+
 // -- Deal blast (approved-template outreach to matched leads)
 const dealBlast = require('./lib/dealBlast.cjs');
 app.use('/', dealBlast.router);
