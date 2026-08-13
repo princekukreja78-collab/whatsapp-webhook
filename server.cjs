@@ -172,6 +172,9 @@ inventory.init({
 });
 app.use('/', inventory.router);
 
+// -- Price sync (forwarded price lists → sheet diff → override layer)
+const priceSync = require('./lib/priceSync.cjs');
+
 // -- Deal blast (approved-template outreach to matched leads)
 const dealBlast = require('./lib/dealBlast.cjs');
 app.use('/', dealBlast.router);
@@ -196,6 +199,7 @@ photoIngest.init({
   mediaStore,
   inventory,
   dealBlast,
+  priceSync,
   waSendText: wa.waSendText,
   INVENTORY_SHEET_WEBHOOK_URL: (process.env.INVENTORY_SHEET_WEBHOOK_URL || '').trim(),
   addToInventory: (car) => {
@@ -539,6 +543,15 @@ enquiry.init({
 app.use('/', enquiry.getRouter());
 
 // ==================== WEBHOOK ROUTES ====================
+priceSync.init({
+  openai,
+  waSendText: wa.waSendText,
+  waSendRaw: wa.waSendRaw,
+  fetchCsv: pricing.fetchCsv,
+  parseCsv: pricing.parseCsv,
+  DEBUG
+});
+
 dealBlast.init({
   inventory,
   waSendTemplate: wa.waSendTemplate,
@@ -576,6 +589,7 @@ webhook.init({
   photoIngest,
   inventory,
   dealBlast,
+  priceSync,
   insurance,
   // Session
   setLastService, getLastService, isLoanContext,
