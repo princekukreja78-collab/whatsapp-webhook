@@ -172,6 +172,10 @@ inventory.init({
 });
 app.use('/', inventory.router);
 
+// -- Deal blast (approved-template outreach to matched leads)
+const dealBlast = require('./lib/dealBlast.cjs');
+app.use('/', dealBlast.router);
+
 // -- Insurance flow
 const insurance = require('./lib/insurance.cjs');
 insurance.init({
@@ -191,6 +195,7 @@ photoIngest.init({
   fetch,
   mediaStore,
   inventory,
+  dealBlast,
   waSendText: wa.waSendText,
   INVENTORY_SHEET_WEBHOOK_URL: (process.env.INVENTORY_SHEET_WEBHOOK_URL || '').trim(),
   addToInventory: (car) => {
@@ -534,6 +539,15 @@ enquiry.init({
 app.use('/', enquiry.getRouter());
 
 // ==================== WEBHOOK ROUTES ====================
+dealBlast.init({
+  inventory,
+  waSendTemplate: wa.waSendTemplate,
+  waSendText: wa.waSendText,
+  loadCrmLeadsSafe,
+  fmtMoney: pricing.fmtMoney,
+  DEBUG
+});
+
 const webhook = require('./lib/webhook.cjs');
 webhook.init({
   META_TOKEN, PHONE_NUMBER_ID, ADMIN_WA, VERIFY_TOKEN, DEBUG,
@@ -561,6 +575,7 @@ webhook.init({
   mediaStore,
   photoIngest,
   inventory,
+  dealBlast,
   insurance,
   // Session
   setLastService, getLastService, isLoanContext,
