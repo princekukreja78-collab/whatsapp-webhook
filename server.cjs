@@ -42,7 +42,17 @@ const LOCAL_USED_CSV_PATH = path.resolve(__dirname, 'PRE OWNED CAR PRICING - USE
 const PORT = process.env.PORT || 10000;
 const MAX_QUOTE_PER_DAY       = Number(process.env.MAX_QUOTE_PER_DAY || 10);
 const QUOTE_LIMIT_FILE        = path.resolve(__dirname, 'quote_limit.json');
-const LEADS_FILE              = path.resolve(__dirname, 'crm_leads.json');
+// Leads must outlive a deploy — keep them on the persistent disk when one is mounted
+const PERSIST_DIR             = process.env.INVENTORY_DATA_DIR || __dirname;
+const LEADS_FILE              = path.join(PERSIST_DIR, 'crm_leads.json');
+try {
+  const legacyLeads = path.resolve(__dirname, 'crm_leads.json');
+  if (PERSIST_DIR !== __dirname && !fs.existsSync(LEADS_FILE) && fs.existsSync(legacyLeads)) {
+    fs.mkdirSync(PERSIST_DIR, { recursive: true });
+    fs.copyFileSync(legacyLeads, LEADS_FILE);
+    console.log('Leads: migrated existing crm_leads.json onto the persistent disk');
+  }
+} catch (e) { console.warn('Leads: migration skipped', e.message); }
 // Slab-based ROI rates
 function getNewCarROI(amount) {
   if (!amount || amount <= 0) return 8.10;
@@ -200,6 +210,17 @@ variantDetail.init({
   priceSync
 });
 app.use('/', variantDetail.router);
+
+// -- Forwarded leads (a requirement typed on WhatsApp → CRM + sheet + follow-ups)
+const leadIntake = require('./lib/leadIntake.cjs');
+leadIntake.init({
+  openai,
+  waSendText: wa.waSendText,
+  loadCrmLeadsSafe,
+  saveCrmLeadsSafe,
+  pushLeadToGoogleSheet,
+  followUp
+});
 
 // -- Website leads (name + phone → CRM, Google Sheet, owner WhatsApp alert)
 const webLeads = require('./lib/webLeads.cjs');
@@ -629,6 +650,7 @@ webhook.init({
   inventory,
   dealBlast,
   priceSync,
+  leadIntake,
   insurance,
   // Session
   setLastService, getLastService, isLoanContext,
