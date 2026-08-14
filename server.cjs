@@ -110,10 +110,15 @@ advisory.init({ openai, SIGNATURE_MODEL, getRAG, findRelevantChunks, DEBUG });
 // -- Price sync (forwarded price lists → override layer used by every quote path)
 const priceSync = require('./lib/priceSync.cjs');
 
+// -- Inventory (car deals, loan schemes, Flex Pay maths) — required before the
+// quote engines that receive it at init.
+const inventory = require('./lib/inventory.cjs');
+
 // -- Used cars
 const usedCars = require('./lib/usedCars.cjs');
 usedCars.init({
   priceSync,
+  inventory,
   waSendText: wa.waSendText,
   SHEET_USED_CSV_URL,
   USED_CAR_ROI_VISIBLE,
@@ -160,8 +165,8 @@ if (process.env.INVENTORY_MEDIA_DIR) {
   app.use('/media_store/inventory', express.static(process.env.INVENTORY_MEDIA_DIR));
 }
 
-// -- Inventory (car deals: photos, specs, features, deal + loan schemes)
-const inventory = require('./lib/inventory.cjs');
+// -- Inventory: configured here, but required early (see above) because the quote
+// engines take it at init time.
 inventory.init({
   waSendRaw: wa.waSendRaw,
   waSendText: wa.waSendText,
@@ -473,6 +478,7 @@ async function sendSheetWelcomeTemplate(phone, name = "Customer") {
 const quotes = require('./lib/quotes.cjs');
 quotes.init({
   priceSync,
+  inventory,
   waSendText: wa.waSendText,
   waSendRaw: wa.waSendRaw,
   sendNewCarButtons: wa.sendNewCarButtons,
