@@ -189,6 +189,8 @@ dealVideo.init({
 
 inventory.init({
   dealVideo,
+  // defined at the follow-up engine above — a shared deal starts the nudge sequence
+  followUp,
   waSendRaw: wa.waSendRaw,
   waSendText: wa.waSendText,
   waSendImageLink: wa.waSendImageLink,
