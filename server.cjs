@@ -177,10 +177,22 @@ if (process.env.INVENTORY_MEDIA_DIR) {
 
 // -- Inventory: configured here, but required early (see above) because the quote
 // engines take it at init time.
+// -- Deal reel (9:16 video from a listing's photos + its VehYra card).
+// Required ABOVE inventory.init, which receives it — same require-order trap
+// that bit usedCars and priceSync.
+const dealVideo = require('./lib/dealVideo.cjs');
+dealVideo.init({
+  MEDIA_ROOT: process.env.INVENTORY_MEDIA_DIR || path.join(__dirname, 'media_store', 'inventory'),
+  SITE_URL: () => (process.env.SITE_URL || 'https://www.vehyra.in').replace(/\/+$/, ''),
+  DEBUG
+});
+
 inventory.init({
+  dealVideo,
   waSendRaw: wa.waSendRaw,
   waSendText: wa.waSendText,
   waSendImageLink: wa.waSendImageLink,
+  waSendVideoLink: wa.waSendVideoLink,
   sendAdminAlert: wa.sendAdminAlert,
   fmtMoney: pricing.fmtMoney,
   simulateBulletPlan: pricing.simulateBulletPlan,

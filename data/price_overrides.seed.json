@@ -1,0 +1,416 @@
+{
+  "version": "2026-08-17-a",
+  "note": "Mercedes July dealer-list discounts (YOM tiers) + ex-showroom corrections verified against Mahindra dealer PDFs",
+  "overrides": [
+    {
+      "key": "mercedescclassc200",
+      "brand": "Mercedes",
+      "model": "C CLASS",
+      "variant": "C 200",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 300000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedescclassc220d",
+      "brand": "Mercedes",
+      "model": "C CLASS",
+      "variant": "C 220D",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 100000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedess350dwithnappaleathers350d",
+      "brand": "Mercedes",
+      "model": "S 350 d ( With Nappa Leather)",
+      "variant": "S 350 d",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 1250000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedess4504maticwithnappaleathers4504matic",
+      "brand": "Mercedes",
+      "model": "S 450 4 Matic ( With nappa leather)",
+      "variant": "S 450 4 Matic",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 1250000
+        },
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 1000000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgla200gla200",
+      "brand": "Mercedes",
+      "model": "GLA 200",
+      "variant": "GLA 200",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 350000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgla220d4maticamglinegla220d4maticamgline",
+      "brand": "Mercedes",
+      "model": "GLA 220D 4 Matic AMG Line",
+      "variant": "GLA 220D 4 Matic AMG Line",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 100000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgla220d4maticgla220d4matic",
+      "brand": "Mercedes",
+      "model": "GLA 220D 4 Matic",
+      "variant": "GLA 220D 4 Matic",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 100000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesglc3004maticglc3004matic",
+      "brand": "Mercedes",
+      "model": "GLC 300 4 Matic",
+      "variant": "GLC 300 4 Matic",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 350000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesglc220d4maticglc220d4matic",
+      "brand": "Mercedes",
+      "model": "GLC 220d 4 Matic",
+      "variant": "GLC 220d 4 Matic",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 350000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgle300d4maticamglinegle300d4maticamgline",
+      "brand": "Mercedes",
+      "model": "GLE 300d 4 Matic AMG line",
+      "variant": "GLE 300d 4 Matic AMG line",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 400000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgle4504maticamglinegle4504maticamgline",
+      "brand": "Mercedes",
+      "model": "GLE 450 4 Matic AMG Line",
+      "variant": "GLE 450 4 Matic AMG Line",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 600000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgle450d4maticamglinegle450d4maticamgline",
+      "brand": "Mercedes",
+      "model": "GLE 450d 4 Matic AMG Line",
+      "variant": "GLE 450d 4 Matic AMG Line",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 600000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgls450d4maticnonamglinegls450d4maticnonamgline",
+      "brand": "Mercedes",
+      "model": "GLS 450d 4 Matic Non AMG Line",
+      "variant": "GLS 450d 4 Matic Non AMG Line",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 700000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgls4504maticamglinegls4504maticamgline",
+      "brand": "Mercedes",
+      "model": "GLS 450 4 Matic AMG Line",
+      "variant": "GLS 450 4 Matic AMG Line",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 700000
+        },
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 350000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesgls450d4maticamglinegls450d4maticamgline",
+      "brand": "Mercedes",
+      "model": "GLS 450d 4 Matic AMG Line",
+      "variant": "GLS 450d 4 Matic AMG Line",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 700000
+        },
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 350000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesamggle534maticcoupamggle534maticcoup",
+      "brand": "Mercedes",
+      "model": "AMG GLE 53 4MATIC Coup\u00e9",
+      "variant": "AMG GLE 53 4MATIC Coup\u00e9",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 300000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedeseqssuv4504maticeqssuv4504matic",
+      "brand": "Mercedes",
+      "model": "EQS SUV 450 4 Matic",
+      "variant": "EQS SUV 450 4 Matic",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 800000
+        },
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 400000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedeseqssuv5804maticeqssuv5804matic",
+      "brand": "Mercedes",
+      "model": "EQS SUV 580 4 Matic",
+      "variant": "EQS SUV 580 4 Matic",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 800000
+        },
+        {
+          "label": "On 2026-manufactured stock",
+          "amount": 400000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesmaybachs5804maticmaybachs5804matic",
+      "brand": "Mercedes",
+      "model": "Maybach S 580 4MATIC",
+      "variant": "Maybach S 580 4MATIC",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 1000000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mercedesmercedesmaybacheqssuv680mercedesmaybacheqssuv680",
+      "brand": "Mercedes",
+      "model": "Mercedes- Maybach EQS SUV 680",
+      "variant": "Mercedes- Maybach EQS SUV 680",
+      "exShowroom": null,
+      "onRoad": null,
+      "discount": null,
+      "discountTiers": [
+        {
+          "label": "On 2025-manufactured stock",
+          "amount": 500000
+        }
+      ],
+      "discountVariable": false,
+      "source": "Mercedes dealer price list (July) \u2014 loaded 2026-08-17",
+      "updatedAt": "2026-08-17T09:46:28.812Z"
+    },
+    {
+      "key": "mahindrascorpioclassics11e",
+      "brand": "Mahindra",
+      "model": "Scorpio Classic",
+      "variant": "S11 E",
+      "exShowroom": 1739900,
+      "onRoad": null,
+      "source": "dealer price list Scorpio Classic -Price List -Jul'26-Updated.pdf",
+      "updatedAt": "2026-08-17T10:05:57.998Z"
+    },
+    {
+      "key": "mahindraxuv3xomx2",
+      "brand": "Mahindra",
+      "model": "XUV 3XO",
+      "variant": "MX2",
+      "exShowroom": 936000,
+      "onRoad": null,
+      "source": "dealer price list XUV3XO - Diesel - Price List -Jul'26-Updated.pdf",
+      "updatedAt": "2026-08-17T10:05:57.998Z"
+    },
+    {
+      "key": "mahindratharaxt",
+      "brand": "Mahindra",
+      "model": "Thar",
+      "variant": "AXT",
+      "exShowroom": 1032000,
+      "onRoad": null,
+      "source": "dealer price list THAR 3D- Diesel - Price List -Jul'26-Updated.pdf",
+      "updatedAt": "2026-08-17T10:05:57.998Z"
+    }
+  ]
+}
