@@ -656,6 +656,8 @@ const tools = require('./lib/tools.cjs');
 
 const webhook = require('./lib/webhook.cjs');
 webhook.init({
+  // required at the top of this file — lets the bot answer a budget the way the site does
+  variantSearch,
   META_TOKEN, PHONE_NUMBER_ID, ADMIN_WA, VERIFY_TOKEN, DEBUG,
   // WA helpers
   waSendText: wa.waSendText,
