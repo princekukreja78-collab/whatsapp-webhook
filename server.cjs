@@ -478,7 +478,14 @@ const crmIngestHandler = require('./routes/crm_ingest.cjs');
 
 async function autoIngest(enriched = {}) {
   const portEnv = process.env.PORT || 10000;
-  const baseEnv = (process.env.CRM_URL || '').trim();
+  let baseEnv = (process.env.CRM_URL || '').trim();
+  // CRM_URL is pinned to 127.0.0.1:10000 in every env file, but the host assigns
+  // the port — when they differ the loopback call is refused and every ingest
+  // logs "failed fetch failed". /crm/ingest is mounted on this same app, so a
+  // loopback URL should always follow the port actually being listened on.
+  if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(baseEnv)) {
+    baseEnv = baseEnv.replace(/^(https?:\/\/(?:127\.0\.0\.1|localhost))(:\d+)?/i, `$1:${portEnv}`);
+  }
   let baseUrl = (baseEnv || `http://127.0.0.1:${portEnv}`).replace(/\/+$/, '');
   // Prevent double path: if CRM_URL already ends with /crm/ingest, don't append again
   const url = baseUrl.endsWith('/crm/ingest') ? baseUrl : `${baseUrl}/crm/ingest`;
@@ -643,6 +650,10 @@ dealBlast.init({
   DEBUG
 });
 
+// Required above webhook.init, which receives getMediaUrl from it — the same
+// require-order trap that has caught usedCars and priceSync before.
+const tools = require('./lib/tools.cjs');
+
 const webhook = require('./lib/webhook.cjs');
 webhook.init({
   META_TOKEN, PHONE_NUMBER_ID, ADMIN_WA, VERIFY_TOKEN, DEBUG,
@@ -687,7 +698,7 @@ webhook.init({
   LEADS_FILE, SHEET_USED_CSV_URL,
   // Vision / advisory
   analyzeCarImageFaultWithOpenAI: advisory.analyzeCarImageFaultWithOpenAI,
-  getMediaUrl: null, // will be set from tools module if needed
+  getMediaUrl: tools.getMediaUrl,
   // Quote engines
   trySmartNewCarIntent: quotes.trySmartNewCarIntent,
   tryQuickNewCarQuote: quotes.tryQuickNewCarQuote,
@@ -742,7 +753,6 @@ webhook.init({
 app.use('/', webhook.router);
 
 // ==================== TOOLS / BROADCAST ROUTES ====================
-const tools = require('./lib/tools.cjs');
 tools.init({
   META_TOKEN, PHONE_NUMBER_ID, ADMIN_WA, DEBUG, fetch, fs, path,
   waSendRaw: wa.waSendRaw,
