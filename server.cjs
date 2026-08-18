@@ -217,6 +217,7 @@ const variantSearch = require('./lib/variantSearch.cjs');
 variantSearch.init({
   loadPricingFromSheets: pricing.loadPricingFromSheets,
   calcEmiSimple: pricing.calcEmiSimple,
+  pricing,
   inventory,
   priceSync
 });
