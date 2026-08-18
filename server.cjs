@@ -102,6 +102,13 @@ const sessionService = global.sessionService;
 const { getRAG } = require("./rag_loader.cjs");
 const { findRelevantChunks } = require("./vector_search.cjs");
 
+// -- Quote context (Compare / Price Breakup rows) on the persistent disk.
+// Installed before the quote engines so they inherit the restored Map rather
+// than a fresh empty one.
+require('./lib/quoteContext.cjs').install(
+  process.env.INVENTORY_DATA_DIR || path.join(__dirname, 'data')
+);
+
 // -- Pricing
 const pricing = require('./lib/pricing.cjs');
 pricing.init({ env: process.env, fetch, fs, path, DEBUG });
