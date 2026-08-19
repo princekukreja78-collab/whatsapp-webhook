@@ -2,7 +2,10 @@ services:
   mr_car:
     build: .
     ports:
-      - "3001:10000"
+      # 3001 belongs to the GrehYug site's dev server (re-property-bot/website).
+      # When both are up, Docker silently loses the race and staging is
+      # unreachable from the host even though the container is healthy.
+      - "3011:10000"
     env_file:
       - .env.staging
     volumes:
