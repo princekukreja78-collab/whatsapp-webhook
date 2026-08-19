@@ -94,6 +94,7 @@
   /* Toast */
   #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 11px 22px; border-radius: 10px; display: none; z-index: 99; font-weight: 600; }
 </style>
+<style>body.staffRole #schemesTab{display:none}</style>
 </head>
 <body>
 
@@ -105,13 +106,14 @@
   <!-- Served by the backend itself, so it always talks to its own host. The
        picker only exists in the desktop copy, where the page is a local file. -->
   <input type="hidden" id="envSel" value="" />
-  <input type="password" id="tokenInput" placeholder="Admin token" style="width:170px" />
+  <span id="roleBadge" style="font-size:12px;opacity:.75;margin-right:8px"></span>
+  <input type="password" id="tokenInput" placeholder="Your access token" style="width:170px" />
 </div>
 
 <div class="tabs">
   <button class="tab active" data-page="cars">🚘 Cars</button>
   <button class="tab" data-page="edit">➕ Add Car</button>
-  <button class="tab" data-page="schemes">🏦 Loan Schemes</button>
+  <button class="tab" data-page="schemes" id="schemesTab">🏦 Loan Schemes</button>
 </div>
 
 <!-- CARS LIST -->

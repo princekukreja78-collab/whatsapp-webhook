@@ -82,6 +82,22 @@ function renderSchemePreview() {
 }
 
 const $ = id => document.getElementById(id);
+
+// Two logins share this page. Staff add cars; the owner publishes, deletes and
+// prices. The server enforces it either way — hiding the buttons just stops
+// staff walking into a 403.
+let ROLE = 'admin';
+const isStaff = () => ROLE === 'staff';
+async function loadRole() {
+  try {
+    const r = await fetch(API() + '/api/inventory/whoami', { headers: HDRS() });
+    const d = await r.json();
+    ROLE = d && d.role === 'staff' ? 'staff' : 'admin';
+  } catch (e) { ROLE = 'admin'; }
+  document.body.classList.toggle('staffRole', isStaff());
+  const badge = $('roleBadge');
+  if (badge) badge.textContent = isStaff() ? 'Staff — add & edit drafts' : '';
+}
 const API = () => $('envSel').value;
 const HDRS = () => ({ 'x-admin-token': $('tokenInput').value.trim() });
 const JHDRS = () => ({ ...HDRS(), 'Content-Type': 'application/json' });
@@ -169,13 +185,14 @@ async function loadCars() {
         ${c.deal?.headline ? `<div class="meta">🔥 ${esc(c.deal.headline)}</div>` : ''}
       </div>
       <div class="actions">
-        <button onclick="editCar('${c.id}')">✏️ Edit</button>
-        <button class="${c.status === 'live' ? 'ghost' : 'success'}" onclick="setStatus('${c.id}','${c.status === 'live' ? 'draft' : 'live'}')">${c.status === 'live' ? '⏸ Unpublish' : '🚀 Publish'}</button>
+        ${isStaff() && c.status === 'live' ? '' : `<button onclick="editCar('${c.id}')">✏️ Edit</button>`}
         <button class="ghost" onclick="openPreview('${c.id}')">👁</button>
+        ${isStaff() ? '' : `
+        <button class="${c.status === 'live' ? 'ghost' : 'success'}" onclick="setStatus('${c.id}','${c.status === 'live' ? 'draft' : 'live'}')">${c.status === 'live' ? '⏸ Unpublish' : '🚀 Publish'}</button>
         <button class="ghost" onclick="sendCard('${c.id}')">📲</button>
         <button class="ghost" onclick="blastDeal('${c.id}')" title="Send to matched leads">📣</button>
         <button class="ghost" onclick="setStatus('${c.id}','sold')">SOLD</button>
-        <button class="danger" onclick="delCar('${c.id}')">🗑</button>
+        <button class="danger" onclick="delCar('${c.id}')">🗑</button>`}
       </div>
     </div>`;
   }).join('');
@@ -269,10 +286,10 @@ function enterEditMode(car) {
   $('editTitle').textContent = `Editing ${car.id} — ${[car.year, car.make, car.model].filter(Boolean).join(' ')}`;
   $('photoLocked').style.display = 'none';
   $('photoTools').style.display = 'block';
-  $('publishBtn').style.display = '';
+  $('publishBtn').style.display = isStaff() ? 'none' : '';
   $('publishBtn').textContent = car.status === 'live' ? '⏸ Unpublish' : '🚀 Publish Live';
   $('previewBtn').style.display = '';
-  $('sendBtn').style.display = '';
+  $('sendBtn').style.display = isStaff() ? 'none' : '';
   $('enrichBtn').style.display = '';
   $('webPhotoBtn').style.display = '';
   renderPhotos(car);
@@ -540,6 +557,11 @@ $('s_balloonPreset').addEventListener('change', syncBalloonCategories);
 $('s_balloonCategory').addEventListener('change', renderSchemePreview);
 
 // ---------------- boot ----------------
-async function refreshAll() { renderPlanChips(); await loadSchemes(); await loadCars(); }
+async function refreshAll() {
+  await loadRole();
+  renderPlanChips();
+  if (!isStaff()) await loadSchemes();
+  await loadCars();
+}
 initSettings();
 refreshAll();
