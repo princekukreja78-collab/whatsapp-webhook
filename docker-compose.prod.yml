@@ -5,6 +5,12 @@ services:
       - "3002:10000"
     env_file:
       - .env.prod
+    # Without these the listings and photos live only inside the container and a
+    # rebuild wipes them. Its own directories, not staging's — two containers
+    # writing one inventory.json would overwrite each other.
+    volumes:
+      - ./data-prod:/app/data
+      - ./media_store-prod:/app/media_store
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"

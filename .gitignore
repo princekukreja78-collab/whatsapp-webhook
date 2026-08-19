@@ -39,3 +39,7 @@ server.cjs.before_*
 server.cjs.borked*
 *.bak
 tools/
+
+# container-local inventory data (mounted by docker-compose)
+/data-prod/
+/media_store-prod/

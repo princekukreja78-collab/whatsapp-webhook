@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>MR. CAR — Inventory Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --line: #2b3444;
+    --text: #e6edf3; --muted: #8b96a5; --accent: #f5b301; --accent2: #ffd34d;
+    --green: #25d366; --red: #ef5350; --blue: #4d9fff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  /* Top bar */
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 12px 22px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
+  .topbar img { height: 38px; border-radius: 8px; }
+  .topbar h1 { font-size: 18px; font-weight: 700; letter-spacing: .3px; }
+  .topbar h1 span { color: var(--accent); }
+  .topbar .spacer { flex: 1; }
+  .topbar select, .topbar input { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); display: inline-block; }
+  .dot.ok { background: var(--green); }
+  /* Tabs */
+  .tabs { display: flex; gap: 6px; padding: 12px 22px 0; }
+  .tab { padding: 9px 18px; border-radius: 10px 10px 0 0; background: transparent; color: var(--muted); border: 1px solid transparent; cursor: pointer; font-size: 14px; font-weight: 600; }
+  .tab.active { background: var(--panel); color: var(--accent); border: 1px solid var(--line); border-bottom-color: var(--panel); }
+  .page { display: none; padding: 20px 22px 60px; max-width: 1200px; margin: 0 auto; }
+  .page.active { display: block; }
+  /* Cards grid */
+  .filters { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filters select, .filters input { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 16px; }
+  .carCard { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+  .carCard .thumb { height: 160px; background: var(--panel2) center/cover no-repeat; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 34px; }
+  .carCard .body { padding: 12px 14px; flex: 1; }
+  .carCard h3 { font-size: 15px; margin-bottom: 2px; }
+  .carCard .price { color: var(--accent2); font-weight: 700; font-size: 15px; }
+  .carCard .meta { color: var(--muted); font-size: 12px; margin: 3px 0 6px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 20px; text-transform: uppercase; letter-spacing: .5px; }
+  .badge.draft { background: #3a3f4b; color: #cbd5e1; }
+  .badge.live { background: #10331c; color: var(--green); }
+  .badge.sold { background: #331010; color: var(--red); }
+  .badge.new { background: #102433; color: var(--blue); }
+  .badge.used { background: #2d2410; color: var(--accent2); }
+  .carCard .actions { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  button { cursor: pointer; border: none; border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 600; background: var(--panel2); color: var(--text); }
+  button:hover { filter: brightness(1.2); }
+  button.primary { background: var(--accent); color: #111; }
+  button.success { background: var(--green); color: #063; color: #052e12; }
+  button.danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+  /* Form */
+  .formCard { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+  .formCard h2 { font-size: 15px; color: var(--accent); margin-bottom: 14px; text-transform: uppercase; letter-spacing: 1px; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  input[type=text], input[type=number], input[type=password], textarea, select { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font-size: 14px; font-family: inherit; }
+  textarea { min-height: 110px; resize: vertical; }
+  .hint { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+  .segment { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .segment button { border-radius: 0; background: transparent; color: var(--muted); padding: 9px 22px; }
+  .segment button.on { background: var(--accent); color: #111; }
+  /* Photos */
+  .photoRow { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .ph { position: relative; width: 110px; height: 82px; border-radius: 10px; overflow: hidden; border: 2px solid var(--line); }
+  .ph.cover { border-color: var(--accent); }
+  .ph img { width: 100%; height: 100%; object-fit: cover; }
+  .ph .x, .ph .star { position: absolute; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .ph .x { right: 3px; } .ph .star { left: 3px; } .ph .eye { bottom: 3px; top: auto; left: 3px; }
+  .ph.hiddenPhoto img { opacity: .3; filter: grayscale(1); }
+  .ph.hiddenPhoto { border-color: #b45309; }
+  .ph .eye { position: absolute; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; color: var(--muted); cursor: pointer; }
+  .drop.on { border-color: var(--accent); color: var(--accent); }
+  /* Schemes */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); border-radius: 20px; padding: 5px 13px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
+  .chip.on { border-color: var(--accent); color: var(--accent); background: rgba(245,179,1,.08); }
+  /* WA preview modal */
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 50; align-items: flex-start; justify-content: center; overflow: auto; padding: 40px 16px; }
+  .modal.open { display: flex; }
+  .waPhone { background: #0b141a; border-radius: 22px; width: 400px; max-width: 96vw; padding: 16px; border: 1px solid var(--line); }
+  .waHead { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #1f2c34; margin-bottom: 12px; color: #e9edef; font-weight: 600; }
+  .waHead .avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #111; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+  .bubble { background: #1f2c34; color: #e9edef; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; white-space: pre-wrap; font-size: 13.2px; }
+  .bubble img { width: 100%; border-radius: 8px; margin-bottom: 8px; }
+  .btnRow { display: flex; flex-direction: column; gap: 5px; margin: -4px 0 12px; }
+  .btnRow div { background: #1f2c34; color: #53bdeb; text-align: center; border-radius: 8px; padding: 8px; font-size: 13.5px; }
+  /* Toast */
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 11px 22px; border-radius: 10px; display: none; z-index: 99; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <img src="/uploads/mrcar_poster.png" style="display:none" alt="Mr. Car" onerror="this.style.display='none'">
+  <h1>MR. CAR <span>Inventory Studio</span></h1>
+  <div class="spacer"></div>
+  <span id="connDot" class="dot" title="Backend connection"></span>
+  <!-- Served by the backend itself, so it always talks to its own host. The
+       picker only exists in the desktop copy, where the page is a local file. -->
+  <input type="hidden" id="envSel" value="" />
+  <input type="password" id="tokenInput" placeholder="Admin token" style="width:170px" />
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-page="cars">🚘 Cars</button>
+  <button class="tab" data-page="edit">➕ Add Car</button>
+  <button class="tab" data-page="schemes">🏦 Loan Schemes</button>
+</div>
+
+<!-- CARS LIST -->
+<div class="page active" id="page-cars">
+  <div class="filters">
+    <select id="fStatus"><option value="">All statuses</option><option value="draft">Draft</option><option value="live">Live</option><option value="sold">Sold</option></select>
+    <select id="fType"><option value="">New + Used</option><option value="new">New</option><option value="used">Used</option></select>
+    <input type="text" id="fQ" placeholder="Search make / model / ID…" style="flex:1;min-width:180px" />
+    <button class="ghost" onclick="loadCars()">↻ Refresh</button>
+  </div>
+  <div class="grid" id="carGrid"></div>
+</div>
+
+<!-- ADD / EDIT -->
+<div class="page" id="page-edit">
+  <div class="formCard">
+    <h2 id="editTitle">Add a Car Deal</h2>
+    <div class="row" style="grid-template-columns:auto 1fr">
+      <div>
+        <label>Listing type</label>
+        <div class="segment">
+          <button id="segUsed" class="on" onclick="setType('used')">Pre-Owned</button>
+          <button id="segNew" onclick="setType('new')">New Car</button>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div><label>Make *</label><input type="text" id="c_make" placeholder="Hyundai" /></div>
+      <div><label>Model *</label><input type="text" id="c_model" placeholder="Creta" /></div>
+      <div><label>Variant</label><input type="text" id="c_variant" placeholder="SX(O) 1.5 Turbo" /></div>
+      <div><label>Year</label><input type="number" id="c_year" placeholder="2022" /></div>
+      <div><label>Colour</label><input type="text" id="c_colour" placeholder="Phantom Black" /></div>
+    </div>
+    <div class="row" id="usedRow">
+      <div><label>KM driven</label><input type="number" id="c_km" placeholder="42000" /></div>
+      <div><label>Fuel</label><select id="c_fuel"><option value="">—</option><option>Petrol</option><option>Diesel</option><option>CNG</option><option>Electric</option><option>Hybrid</option></select></div>
+      <div><label>Transmission</label><select id="c_transmission"><option value="">—</option><option>Manual</option><option>Automatic</option><option>AMT</option><option>CVT</option><option>DCT</option></select></div>
+      <div><label>Owners</label><input type="text" id="c_owners" placeholder="1st" /></div>
+      <div><label>Registration</label><input type="text" id="c_registration" placeholder="DL" /></div>
+    </div>
+  </div>
+
+  <div class="formCard">
+    <h2>Pricing & Deal</h2>
+    <div class="row" style="border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px">
+      <div><label>Source dealer (leave blank if it's your own stock)</label><input type="text" id="c_sourceDealerName" placeholder="Partner dealer name" /></div>
+      <div><label>Dealer phone</label><input type="text" id="c_sourceDealerPhone" placeholder="98xxxxxxxx" /></div>
+      <div><label>Dealer city</label><input type="text" id="c_sourceDealerCity" placeholder="Delhi" /></div>
+      <div><label>Trade price ₹ (what the dealer wants)</label><input type="number" id="c_tradePrice" placeholder="1350000" />
+        <div class="hint">Internal only — never shown on the website or to customers.</div></div>
+    </div>
+    <div class="row">
+      <div><label>Asking price ₹</label><input type="number" id="p_asking" placeholder="1540000" /></div>
+      <div><label>Offer / deal price ₹</label><input type="number" id="p_offer" placeholder="1425000" /></div>
+      <div><label>On-road price ₹ (new cars)</label><input type="number" id="p_onRoad" /></div>
+    </div>
+    <div class="row">
+      <div><label>Deal headline</label><input type="text" id="d_headline" placeholder="Monsoon Special — free 1-yr insurance" /></div>
+      <div><label>Discount</label><input type="text" id="d_discount" placeholder="₹40,000 cash discount" /></div>
+      <div><label>Exchange bonus</label><input type="text" id="d_exchangeBonus" placeholder="₹50,000" /></div>
+      <div><label>Freebies</label><input type="text" id="d_freebies" placeholder="Free accessories worth ₹25,000" /></div>
+      <div><label>Valid till</label><input type="text" id="d_validTill" placeholder="20 Aug 2026" /></div>
+    </div>
+    <div><label>Loan schemes for this car</label><div class="chips" id="schemeChips"></div></div>
+  </div>
+
+  <div class="formCard">
+    <h2>Features & Specifications</h2>
+    <div class="row" style="grid-template-columns:1fr 1fr">
+      <div>
+        <label>Features — one per line</label>
+        <textarea id="c_features" placeholder="Panoramic sunroof&#10;Ventilated front seats&#10;ADAS Level 2&#10;360° camera"></textarea>
+      </div>
+      <div>
+        <label>Specs — "Label: Value", use [Group] for section headers</label>
+        <textarea id="c_specs" placeholder="[Engine]&#10;Engine: 1.5L Turbo Petrol&#10;Power: 158 bhp&#10;[Dimensions]&#10;Length: 4330 mm&#10;Boot: 433 L"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="formCard">
+    <h2>Photos</h2>
+    <div id="photoLocked" class="hint">Save the car first, then add photos.</div>
+    <div id="photoTools" style="display:none">
+      <div class="drop" id="dropZone">📸 Drop photos here or click to choose (first photo = cover, tap ⭐ to change)</div>
+      <input type="file" id="photoInput" accept="image/*" multiple style="display:none" />
+      <div class="photoRow" id="photoRow"></div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="primary" onclick="saveCar()">💾 Save</button>
+    <button class="success" id="publishBtn" style="display:none" onclick="togglePublish()">🚀 Publish Live</button>
+    <button class="ghost" id="enrichBtn" style="display:none" onclick="enrichCar()">🤖 AI-fill Specs & Features</button>
+    <button class="ghost" id="webPhotoBtn" style="display:none" onclick="fetchWebPhotos()">🖼 Fetch web photos</button>
+    <button class="ghost" id="previewBtn" style="display:none" onclick="openPreview(editingId)">👁 WhatsApp Preview</button>
+    <button class="ghost" id="sendBtn" style="display:none" onclick="sendCard(editingId)">📲 Send on WhatsApp</button>
+    <button class="ghost" onclick="resetForm()">✖ Clear / New</button>
+  </div>
+</div>
+
+<!-- LOAN SCHEMES -->
+<div class="page" id="page-schemes">
+  <div class="formCard">
+    <h2 id="schemeFormTitle">Add Loan Scheme</h2>
+    <div class="row">
+      <div><label>Bank / financier *</label><input type="text" id="s_bank" placeholder="HDFC Bank" /></div>
+      <div><label>Interest % p.a. *</label><input type="number" step="0.05" id="s_roi" placeholder="9.25" /></div>
+      <div><label>Max tenure (months)</label><input type="number" id="s_maxTenure" placeholder="72" /></div>
+      <div><label>Min down payment %</label><input type="number" id="s_minDownPct" placeholder="10" /></div>
+      <div><label>Processing fee ₹</label><input type="number" id="s_processingFee" placeholder="0" /></div>
+    </div>
+    <div class="row" style="grid-template-columns:1fr">
+      <div>
+        <label>Plans this financier offers</label>
+        <div class="chips" id="planChips"></div>
+        <div class="hint">Balloon / Flex Pay parks part of the loan (the car's estimated resale value) until the end of the term — it shows as a third EMI option on the website and WhatsApp cards.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div id="wrapBullet"><label>Bullet share %</label><input type="number" id="s_bulletPct" placeholder="25" />
+        <div class="hint">Paid as equal yearly lump sums.</div></div>
+      <div id="wrapBalloon"><label>Balloon %</label><input type="number" id="s_balloonPct" placeholder="35" />
+        <div class="hint">Estimated resale value, due at the end.</div></div>
+      <div id="wrapExt"><label>Extension tenure (months)</label><input type="number" id="s_extensionTenure" placeholder="36" />
+        <div class="hint">If the balloon is not paid, it re-amortises over this period.</div></div>
+      <div id="wrapPreset"><label>Balloon matrix</label>
+        <select id="s_balloonPreset"><option value="">Flat % (use the field above)</option><option value="new">Bajaj — new car</option><option value="used">Bajaj — used car</option></select>
+        <div class="hint">The financier's own category × tenure table.</div></div>
+      <div id="wrapCategory"><label>Category / car age</label><select id="s_balloonCategory"></select>
+        <div class="hint">Sets the balloon share at each tenure.</div></div>
+    </div>
+    <div class="row">
+      <div><label>Loan Suraksha — % of loan</label><input type="number" step="0.1" id="s_surakshaPct" placeholder="0" />
+        <div class="hint">Credit-life premium financed with the loan.</div></div>
+      <div><label>…or flat premium ₹</label><input type="number" id="s_surakshaAmount" placeholder="0" />
+        <div class="hint">EMI runs on loan + premium; the balloon stays on the loan alone.</div></div>
+    </div>
+    <div class="row"><div><label>Notes</label><input type="text" id="s_notes" placeholder="Salaried only, CIBIL 720+" /></div></div>
+    <div class="formCard" style="background:var(--panel2);margin:0 0 14px" id="schemePreview"></div>
+    <button class="primary" onclick="saveScheme()">💾 Save Scheme</button>
+    <button class="ghost" onclick="resetSchemeForm()" id="schemeCancel" style="display:none">✖ Cancel</button>
+  </div>
+  <div class="formCard">
+    <h2>Schemes</h2>
+    <table><thead><tr><th>ID</th><th>Bank</th><th>Plans</th><th>ROI</th><th>Max tenure</th><th>Min down</th><th>Fee</th><th></th></tr></thead>
+    <tbody id="schemeRows"></tbody></table>
+  </div>
+</div>
+
+<!-- WA PREVIEW MODAL -->
+<div class="modal" id="waModal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="waPhone">
+    <div class="waHead"><div class="avatar">MC</div><div>MR. CAR SERVICES<br><span style="font-size:11px;color:#8696a0;font-weight:400">VehYra • online</span></div>
+      <div style="flex:1"></div><button class="ghost" onclick="document.getElementById('waModal').classList.remove('open')">✕</button></div>
+    <div id="waBody"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="studio.js"></script>
+</body>
+</html>
