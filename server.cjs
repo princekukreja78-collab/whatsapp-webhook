@@ -263,6 +263,20 @@ insurance.init({
   DEBUG
 });
 
+// Admin-only view of what the intake is doing right now — which batches are
+// still collecting, who owes details, and the last thirty things that happened.
+app.get('/api/inventory/intake', (req, res) => {
+  const expected = String(process.env.INVENTORY_ADMIN_TOKEN || '').trim();
+  if (!expected || String(req.headers['x-admin-token'] || '').trim() !== expected) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  try {
+    return res.json({ ok: true, ...photoIngest.intakeState() });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e && e.message ? e.message : e) });
+  }
+});
+
 // -- Photo Ingest (GPT vision on dealer photos → ask for details → save to sheet)
 const photoIngest = require('./lib/photoIngest.cjs');
 photoIngest.init({
