@@ -95,6 +95,25 @@
   #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 11px 22px; border-radius: 10px; display: none; z-index: 99; font-weight: 600; }
 </style>
 <style>body.staffRole #schemesTab{display:none}</style>
+<style>
+/* Built for a desktop screen; staff use it on a phone. Below 720px: one card
+   per row, actions that wrap into full-width taps, and a header that stacks
+   instead of pushing the token box off the side. */
+@media (max-width: 720px) {
+  .wrap, .grid, main, body { max-width: 100%; }
+  .grid, #carGrid { grid-template-columns: 1fr !important; display: grid !important; gap: 12px; }
+  .carCard { width: 100%; }
+  .carCard .thumb { height: 190px; }
+  .actions { gap: 8px; padding: 10px; }
+  .actions button { flex: 1 1 46%; min-height: 42px; font-size: 14px; }
+  .actions button:first-child { flex-basis: 100%; }
+  .topbar, .tabs, .filters { flex-wrap: wrap; gap: 8px; }
+  .tab { flex: 1 1 30%; }
+  input, select, textarea, button { font-size: 16px; }  /* stops iOS zooming on focus */
+  #tokenInput { width: 100% !important; }
+  .ph { width: 30vw; height: 22vw; }
+}
+</style>
 </head>
 <body>
 
@@ -274,6 +293,6 @@
 </div>
 
 <div id="toast"></div>
-<script src="studio.js"></script>
+<script src="studio.js?v=2026-08-20b"></script>
 </body>
 </html>
