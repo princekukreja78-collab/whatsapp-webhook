@@ -673,6 +673,9 @@ webhook.init({
   // required at the top of this file — lets the bot answer a budget the way the site does
   variantSearch,
   META_TOKEN, PHONE_NUMBER_ID, ADMIN_WA, VERIFY_TOKEN, DEBUG,
+  // so a reply leaves through whichever number the message came in on
+  setOutboundNumberId: wa.setOutboundNumberId,
+  currentPhoneNumberId: wa.currentPhoneNumberId,
   // WA helpers
   waSendText: wa.waSendText,
   waSendRaw: wa.waSendRaw,
@@ -771,6 +774,7 @@ app.use('/', webhook.router);
 // ==================== TOOLS / BROADCAST ROUTES ====================
 tools.init({
   META_TOKEN, PHONE_NUMBER_ID, ADMIN_WA, DEBUG, fetch, fs, path,
+  currentPhoneNumberId: wa.currentPhoneNumberId,
   waSendRaw: wa.waSendRaw,
   waSendText: wa.waSendText,
   waSendTemplate: wa.waSendTemplate,
