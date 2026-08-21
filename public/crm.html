@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="robots" content="noindex, nofollow" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MR. CAR — Leads</title>
+<style>
+  :root { --bg:#04060c; --panel:rgba(255,255,255,.045); --line:rgba(255,255,255,.09);
+    --accent:#38bdf8; --text:#f0f4f8; --muted:#8fa3bd; --dim:#55688a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+    padding:16px 20px; border-bottom:1px solid var(--line); }
+  h1 { font-size:17px; margin:0; font-weight:700; letter-spacing:-.2px; }
+  h1 span { color:var(--accent); }
+  input, select, button { font:inherit; font-size:15px; }
+  input, select { padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.04);
+    border:1px solid var(--line); color:var(--text); }
+  button { padding:10px 16px; border-radius:10px; border:0; background:var(--accent);
+    color:#04060c; font-weight:600; cursor:pointer; }
+  #tok { width:230px; }
+  main { padding:18px 20px 60px; }
+  .row { background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:14px 16px; margin-bottom:10px; display:grid; gap:6px; }
+  .top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+  .name { font-weight:700; font-size:15px; }
+  .phone { color:var(--accent); text-decoration:none; font-size:14px; }
+  .meta { color:var(--muted); font-size:13px; line-height:1.55; }
+  .tag { font-size:11px; padding:3px 8px; border-radius:7px; background:rgba(56,189,248,.12);
+    border:1px solid rgba(148,197,255,.28); color:var(--accent); white-space:nowrap; }
+  .when { color:var(--dim); font-size:12px; }
+  .note { color:var(--muted); padding:22px 2px; font-size:14px; line-height:1.6; }
+  @media (max-width:640px){ #tok{ width:100%; } header{ padding:14px; } main{ padding:14px 14px 50px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>MR. CAR <span>Leads</span></h1>
+  <input id="tok" type="password" placeholder="Access token" />
+  <input id="q" placeholder="Search name, number, car" style="flex:1;min-width:160px" />
+  <button id="go">Refresh</button>
+</header>
+<main><div id="list" class="note">Paste your access token to see the leads.</div></main>
+<script src="crm.js?v=1"></script>
+</body>
+</html>

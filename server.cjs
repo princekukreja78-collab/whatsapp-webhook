@@ -563,6 +563,19 @@ quotes.init({
 });
 
 // ==================== EXPRESS MIDDLEWARE ====================
+// Leads are customers' names and phone numbers. This surface had no
+// authentication at all — anyone with the URL could read the CRM.
+function _crmAuthed(req) {
+  const admin = String(process.env.INVENTORY_ADMIN_TOKEN || '').trim();
+  const staff = String(process.env.INVENTORY_STAFF_TOKEN || '').trim();
+  const sent = String(req.headers['x-admin-token'] || req.query.token || '').trim();
+  return !!sent && (sent === admin || (staff && sent === staff));
+}
+app.use(['/api/leads', '/crm', '/dashboard'], (req, res, next) => {
+  if (_crmAuthed(req)) return next();
+  return res.status(401).json({ ok: false, error: 'Unauthorized' });
+});
+
 app.use("/crm", require("./routes/crm.cjs"));
 app.use(express.json());
 
