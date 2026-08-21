@@ -3,7 +3,10 @@ const path = require("path");
 const express = require("express");
 const router = express.Router();
 
-const LEADS_FILE = path.join(__dirname, "..", "crm_leads.json");
+// One place decides where leads live, or the writer and the reader end up
+// looking at different files — which is exactly what happened.
+const LEADS_DIR = process.env.LEADS_DATA_DIR || process.env.INVENTORY_DATA_DIR || path.join(__dirname, "..");
+const LEADS_FILE = path.join(LEADS_DIR, "crm_leads.json");
 
 // -------- Optional CRM core (crm_helpers.cjs) --------
 let getAllLeadsFn = null;

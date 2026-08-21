@@ -2,7 +2,10 @@ const fs = require('fs');
 const path = require('path');
 
 // crm_leads.json in project root (used by /crm/leads + dashboard)
-const leadsFile = path.join(__dirname, '..', 'crm_leads.json');
+// One place decides where leads live, or the writer and the reader end up
+// looking at different files — which is exactly what happened.
+const LEADS_DIR = process.env.LEADS_DATA_DIR || process.env.INVENTORY_DATA_DIR || path.join(__dirname, "..");
+const leadsFile = path.join(LEADS_DIR, "crm_leads.json");
 
 function loadLeads() {
   try {
