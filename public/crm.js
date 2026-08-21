@@ -3,6 +3,28 @@
 const $ = (id) => document.getElementById(id);
 let LEADS = [];
 
+// Two shapes reach this list: the bot's WhatsApp leads carry the sheet's
+// capitalised column names, website enquiries carry lowercase ones. Read both
+// rather than showing a column of blanks.
+const pick = (l, ...keys) => {
+  for (const k of keys) {
+    const v = l[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+  }
+  return '';
+};
+const F = {
+  name: (l) => pick(l, 'name', 'Name'),
+  phone: (l) => pick(l, 'phone', 'Phone', 'ID'),
+  car: (l) => pick(l, 'car', 'car_enquired', 'Car', 'Purpose'),
+  when: (l) => pick(l, 'timestamp', 'Timestamp', 'createdAt', 'date'),
+  source: (l) => pick(l, 'source', 'LeadType', 'Status'),
+  note: (l) => pick(l, 'interest', 'lastMessage', 'enquiry'),
+  budget: (l) => pick(l, 'budget', 'Budget'),
+  emi: (l) => pick(l, 'emi', 'EMI'),
+  city: (l) => pick(l, 'city', 'City')
+};
+
 const when = (t) => {
   const d = new Date(t);
   if (isNaN(d)) return '';
@@ -16,7 +38,7 @@ const money = (n) => (Number(n) ? '₹' + Number(n).toLocaleString('en-IN') : ''
 function render() {
   const q = $('q').value.trim().toLowerCase();
   const rows = LEADS.filter((l) =>
-    !q || `${l.name || ''} ${l.phone || ''} ${l.car || l.car_enquired || ''} ${l.interest || ''}`.toLowerCase().includes(q)
+    !q || `${F.name(l)} ${F.phone(l)} ${F.car(l)} ${F.note(l)}`.toLowerCase().includes(q)
   );
   if (!rows.length) {
     $('list').className = 'note';
@@ -25,22 +47,22 @@ function render() {
   }
   $('list').className = '';
   $('list').innerHTML = rows.map((l) => {
-    const car = l.car || l.car_enquired || '';
-    const bits = [car, money(l.budget), l.emi ? money(l.emi) + '/mo' : '', l.city].filter(Boolean).join(' · ');
-    const phone = String(l.phone || '').replace(/[^0-9]/g, '');
+    const car = F.car(l);
+    const bits = [car, money(F.budget(l)), F.emi(l) ? money(F.emi(l)) + '/mo' : '', F.city(l)].filter(Boolean).join(' · ');
+    const phone = String(F.phone(l)).replace(/[^0-9]/g, '');
     return `<div class="row">
       <div class="top">
         <div>
-          <div class="name">${esc(l.name || 'Website enquiry')}</div>
+          <div class="name">${esc(F.name(l) || 'Unknown')}</div>
           ${phone ? `<a class="phone" href="https://wa.me/${phone.length === 10 ? '91' + phone : phone}">+${phone.length === 10 ? '91' + phone : phone}</a>` : ''}
         </div>
         <div style="text-align:right">
-          ${l.source ? `<span class="tag">${esc(l.source)}</span>` : ''}
-          <div class="when">${when(l.timestamp || l.createdAt || l.date)}</div>
+          ${F.source(l) ? `<span class="tag">${esc(F.source(l))}</span>` : ''}
+          <div class="when">${when(F.when(l))}</div>
         </div>
       </div>
       ${bits ? `<div class="meta">${esc(bits)}</div>` : ''}
-      ${l.interest ? `<div class="meta">${esc(l.interest)}</div>` : ''}
+      ${F.note(l) ? `<div class="meta">${esc(F.note(l))}</div>` : ''}
     </div>`;
   }).join('');
 }
@@ -61,7 +83,7 @@ async function load() {
     if (r.status === 401) { $('list').textContent = 'That token was refused.'; return; }
     const d = await r.json();
     LEADS = (d.leads || d.data || []).slice().sort((a, b) =>
-      String(b.timestamp || b.createdAt || '').localeCompare(String(a.timestamp || a.createdAt || '')));
+      String(F.when(b)).localeCompare(String(F.when(a))));
     render();
   } catch (e) {
     $('list').textContent = 'Could not reach the server.';
