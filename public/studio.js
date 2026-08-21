@@ -496,6 +496,7 @@ function toggleScheme(id) {
 function schemeBody() {
   return {
     bank: $('s_bank').value.trim(), roi: Number($('s_roi').value),
+    defaultFor: $('s_defaultFor').value,
     maxTenure: Number($('s_maxTenure').value) || 60, minDownPct: Number($('s_minDownPct').value) || 10,
     processingFee: Number($('s_processingFee').value) || 0, notes: $('s_notes').value.trim(),
     plans: [...selectedPlans],
@@ -522,6 +523,7 @@ function editScheme(id) {
   editingSchemeId = id;
   $('schemeFormTitle').textContent = `Editing ${id} — ${s.bank}`;
   $('s_bank').value = s.bank; $('s_roi').value = s.roi; $('s_maxTenure').value = s.maxTenure;
+  $('s_defaultFor').value = s.defaultFor || '';
   $('s_minDownPct').value = s.minDownPct; $('s_processingFee').value = s.processingFee; $('s_notes').value = s.notes || '';
   $('s_bulletPct').value = s.bulletPct ?? 25;
   $('s_balloonPct').value = s.balloonPct ?? 35;
@@ -538,6 +540,7 @@ function editScheme(id) {
 function resetSchemeForm() {
   editingSchemeId = null;
   $('schemeFormTitle').textContent = 'Add Loan Scheme';
+  $('s_defaultFor').value = '';
   ['s_bank', 's_roi', 's_maxTenure', 's_minDownPct', 's_processingFee', 's_notes',
    's_bulletPct', 's_balloonPct', 's_extensionTenure', 's_surakshaPct', 's_surakshaAmount'].forEach(id => $(id).value = '');
   $('s_balloonPreset').value = ''; syncBalloonCategories();

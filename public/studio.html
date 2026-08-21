@@ -241,6 +241,14 @@
     <div class="row">
       <div><label>Bank / financier *</label><input type="text" id="s_bank" placeholder="HDFC Bank" /></div>
       <div><label>Interest % p.a. *</label><input type="number" step="0.05" id="s_roi" placeholder="9.25" /></div>
+      <div><label>Use as default for</label>
+        <select id="s_defaultFor">
+          <option value="">Not a default</option>
+          <option value="new">New cars</option>
+          <option value="used">Pre-owned cars</option>
+          <option value="both">Both</option>
+        </select>
+      </div>
       <div><label>Max tenure (months)</label><input type="number" id="s_maxTenure" placeholder="72" /></div>
       <div><label>Min down payment %</label><input type="number" id="s_minDownPct" placeholder="10" /></div>
       <div><label>Processing fee ₹</label><input type="number" id="s_processingFee" placeholder="0" /></div>
@@ -293,6 +301,6 @@
 </div>
 
 <div id="toast"></div>
-<script src="studio.js?v=2026-08-21b"></script>
+<script src="studio.js?v=2026-08-22a"></script>
 </body>
 </html>
