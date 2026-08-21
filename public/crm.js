@@ -16,10 +16,10 @@ const pick = (l, ...keys) => {
 const F = {
   name: (l) => pick(l, 'name', 'Name'),
   phone: (l) => pick(l, 'phone', 'Phone', 'ID'),
-  car: (l) => pick(l, 'car', 'car_enquired', 'Car', 'Purpose'),
+  car: (l) => pick(l, 'car', 'car_enquired', 'Car'),
   when: (l) => pick(l, 'timestamp', 'Timestamp', 'createdAt', 'date'),
   source: (l) => pick(l, 'source', 'LeadType', 'Status'),
-  note: (l) => pick(l, 'interest', 'lastMessage', 'enquiry'),
+  note: (l) => pick(l, 'interest', 'car_enquired', 'lastMessage', 'enquiry', 'Purpose'),
   budget: (l) => pick(l, 'budget', 'Budget'),
   emi: (l) => pick(l, 'emi', 'EMI'),
   city: (l) => pick(l, 'city', 'City')

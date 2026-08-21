@@ -240,6 +240,7 @@ leadIntake.init({
   waSendText: wa.waSendText,
   loadCrmLeadsSafe,
   saveCrmLeadsSafe,
+  noteLeadInterest,
   pushLeadToGoogleSheet,
   followUp
 });
@@ -383,6 +384,31 @@ function incrementQuoteUsage(from) {
 // alert survived, the record did not.
 const LEADS_DIR = process.env.LEADS_DATA_DIR || process.env.INVENTORY_DATA_DIR || __dirname;
 const CRM_LEADS_PATH = path.join(LEADS_DIR, 'crm_leads.json');
+
+// What the customer asked for is the whole value of a lead. A name and a number
+// with "auto-ingested" against it tells the desk nothing; the variant they were
+// quoted tells them how to open the call.
+function noteLeadInterest(phone, interest) {
+  try {
+    const digits = String(phone || '').replace(/[^0-9]/g, '');
+    const text = String(interest || '').trim().slice(0, 200);
+    if (!digits || !text) return;
+    const leads = loadCrmLeadsSafe();
+    const match = (l) => String(l.phone || l.Phone || l.ID || '').replace(/[^0-9]/g, '').endsWith(digits.slice(-10));
+    let lead = [...leads].reverse().find(match);
+    if (!lead) {
+      lead = { id: `WA${Date.now()}`, phone: digits, name: '', status: 'whatsapp-lead',
+        source: 'whatsapp', timestamp: new Date().toISOString() };
+      leads.push(lead);
+    }
+    lead.car_enquired = text;
+    lead.interest = text;
+    lead.lastSeen = new Date().toISOString();
+    saveCrmLeadsSafe(leads);
+  } catch (e) {
+    if (DEBUG) console.warn('noteLeadInterest failed:', e && e.message ? e.message : e);
+  }
+}
 
 function loadCrmLeadsSafe() {
   try {
