@@ -185,9 +185,7 @@ async function loadCars() {
         ${c.deal?.headline ? `<div class="meta">🔥 ${esc(c.deal.headline)}</div>` : ''}
       </div>
       <div class="actions">
-        ${isStaff() && c.status === 'live'
-          ? `<button class="ghost" title="Live listings are edited by the owner" onclick="toast('This login can edit a car while it is a draft. Ask the owner to edit a live listing.', true)">🔒 Edit</button>`
-          : `<button onclick="editCar('${c.id}')">✏️ Edit</button>`}
+        <button onclick="editCar('${c.id}')">✏️ Edit</button>
         <button class="ghost" onclick="openPreview('${c.id}')">👁</button>
         ${isStaff() ? '' : `
         <button class="${c.status === 'live' ? 'ghost' : 'success'}" onclick="setStatus('${c.id}','${c.status === 'live' ? 'draft' : 'live'}')">${c.status === 'live' ? '⏸ Unpublish' : '🚀 Publish'}</button>
