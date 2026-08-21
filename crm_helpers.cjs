@@ -6,7 +6,12 @@ const fs = require('fs');
 const path = require('path');
 const fetch = (global.fetch) ? global.fetch : require('node-fetch');
 
-const DATA_DIR = path.resolve(__dirname, '.crm_data');
+// Same reasoning as the lead file: on the disk, not in the container.
+const DATA_DIR = process.env.LEADS_DATA_DIR
+  ? path.join(process.env.LEADS_DATA_DIR, 'crm')
+  : process.env.INVENTORY_DATA_DIR
+    ? path.join(process.env.INVENTORY_DATA_DIR, 'crm')
+    : path.resolve(__dirname, '.crm_data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 // Per-bot files (names)

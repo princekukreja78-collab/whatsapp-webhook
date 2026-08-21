@@ -378,7 +378,11 @@ function incrementQuoteUsage(from) {
 }
 
 // -- CRM leads file helpers
-const CRM_LEADS_PATH = path.join(__dirname, 'crm_leads.json');
+// Leads belong on the persistent disk. This used to be a file inside the app
+// directory, so every deploy threw the CRM away — the sheet and the WhatsApp
+// alert survived, the record did not.
+const LEADS_DIR = process.env.LEADS_DATA_DIR || process.env.INVENTORY_DATA_DIR || __dirname;
+const CRM_LEADS_PATH = path.join(LEADS_DIR, 'crm_leads.json');
 
 function loadCrmLeadsSafe() {
   try {
