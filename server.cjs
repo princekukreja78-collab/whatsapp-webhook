@@ -831,6 +831,20 @@ tools.init({
 app.use('/', tools.router);
 
 // ==================== START ====================
+// Warm the pricing sheets at boot. Otherwise the first customer to search
+// after a deploy pays for fetching every brand's sheet.
+setTimeout(() => {
+  try {
+    const pricing = require('./lib/pricing.cjs');
+    if (typeof pricing.loadPricingFromSheets === 'function') {
+      const t0 = Date.now();
+      pricing.loadPricingFromSheets()
+        .then((tb) => console.log(`Pricing: warmed ${Object.keys(tb || {}).length} sheet(s) in ${Date.now() - t0}ms`))
+        .catch((e) => console.warn('Pricing: warm-up failed', e && e.message ? e.message : e));
+    }
+  } catch (e) {}
+}, 1500).unref?.();
+
 app.listen(PORT, () => {
   console.log("Server fully started — READY to receive webhook events");
   console.log(`MR.CAR webhook CRM server running on port ${PORT}`);
