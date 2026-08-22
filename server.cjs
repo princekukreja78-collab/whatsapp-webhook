@@ -161,7 +161,7 @@ groupIngest.init({
 
 // -- Follow-up engine (auto-nudge dead leads)
 const followUp = require('./lib/followUp.cjs');
-followUp.init({ waSendText: wa.waSendText, DEBUG });
+followUp.init({ waSendText: wa.waSendText, waSendTemplate: wa.waSendTemplate, DEBUG });
 
 // -- Trade-in calculator
 const tradeIn = require('./lib/tradeIn.cjs');
@@ -686,7 +686,8 @@ webLeads.init({
   waSendText: wa.waSendText,
   loadCrmLeadsSafe,
   saveCrmLeadsSafe,
-  pushLeadToGoogleSheet
+  pushLeadToGoogleSheet,
+  followUp
 });
 
 priceSync.init({
