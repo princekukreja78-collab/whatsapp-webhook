@@ -289,6 +289,7 @@ photoIngest.init({
   dealBlast,
   priceSync,
   waSendText: wa.waSendText,
+  waSendRaw: wa.waSendRaw,
   INVENTORY_SHEET_WEBHOOK_URL: (process.env.INVENTORY_SHEET_WEBHOOK_URL || '').trim(),
   addToInventory: (car) => {
     // Also add to groupIngest inventory
@@ -536,7 +537,12 @@ async function autoIngest(enriched = {}) {
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // The CRM went behind a token, and this call is the bot talking to
+      // itself — it has to carry one too, or every inbound message logs a 401.
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': String(process.env.INVENTORY_ADMIN_TOKEN || '').trim()
+      },
       body: JSON.stringify(enriched)
     });
     if (!res.ok) {
